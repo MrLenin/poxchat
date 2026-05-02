@@ -1479,6 +1479,8 @@ server_disconnect (session * sess, int sendquit, int err)
 
 			if (!sess->channel[0] || sess->type == SESS_CHANNEL)
 				clear_channel (sess);
+			else
+				clear_typing_state (sess);  /* DIALOGs skip clear_channel */
 		}
 		list = list->next;
 	}

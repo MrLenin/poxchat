@@ -54,6 +54,26 @@
 
 
 void
+clear_typing_state (session *sess)
+{
+	if (sess->typing_sweep_timer)
+	{
+		fe_timeout_remove (sess->typing_sweep_timer);
+		sess->typing_sweep_timer = 0;
+	}
+	if (sess->typing_send_timer)
+	{
+		fe_timeout_remove (sess->typing_send_timer);
+		sess->typing_send_timer = 0;
+	}
+	g_slist_free_full (sess->typing_nicks, g_free);
+	sess->typing_nicks = NULL;
+	sess->typing_last_sent = 0;
+	sess->typing_last_keystroke = 0;
+	fe_typing_update (sess);
+}
+
+void
 clear_channel (session *sess)
 {
 	if (sess->channel[0])
@@ -78,21 +98,7 @@ clear_channel (session *sess)
 
 	chathistory_cancel_catchup (sess);
 
-	/* Clean up typing indicator state */
-	if (sess->typing_sweep_timer)
-	{
-		fe_timeout_remove (sess->typing_sweep_timer);
-		sess->typing_sweep_timer = 0;
-	}
-	if (sess->typing_send_timer)
-	{
-		fe_timeout_remove (sess->typing_send_timer);
-		sess->typing_send_timer = 0;
-	}
-	g_slist_free_full (sess->typing_nicks, g_free);
-	sess->typing_nicks = NULL;
-	sess->typing_last_sent = 0;
-	sess->typing_last_keystroke = 0;
+	clear_typing_state (sess);
 
 	fe_clear_channel (sess);
 	userlist_clear (sess);

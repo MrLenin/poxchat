@@ -701,6 +701,10 @@ session_free (session *killsess)
 	chathistory_cancel_chunk_processing (killsess);
 	chathistory_queue_free (killsess);
 
+	/* Cancel typing timers and free the typing list — both timers point
+	 * back to killsess and would UAF if they fired after free. */
+	clear_typing_state (killsess);
+
 	fe_session_callback (killsess);
 
 	if (current_sess == killsess)
