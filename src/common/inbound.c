@@ -676,6 +676,16 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 
 	/* already joined? probably a bnc */
 	sess = find_channel (serv, chan);
+
+	/* Duplicate-msgid early-out: a bouncer auto-restoring channels can
+	 * emit a JOIN burst at registration AND echo the client's later JOIN
+	 * with the same msgid as the burst entry.  Without this guard the
+	 * second JOIN ran the full ujoin flow — userlist_clear in particular
+	 * wiped the userlist that the first JOIN's NAMES burst had filled. */
+	if (sess && tags_data->msgid &&
+	    chathistory_is_duplicate_msgid (sess, tags_data->msgid, tags_data->timestamp))
+		return;
+
 	if (!sess)
 	{
 		/* see if a window is waiting to join this channel */
@@ -716,13 +726,10 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 	/* sends a MODE */
 	serv->p_join_info (sess->server, chan);
 
-	/* Track join msgid so our own JOIN isn't duplicated in chathistory.
-	 * Done before the banner so we can also suppress duplicate "Now talking on"
-	 * when a bouncer resends the same JOIN on reconnect. */
+	/* Track join msgid for chathistory dedup.  The duplicate case was
+	 * handled at the top of this function. */
 	if (tags_data->msgid)
 	{
-		if (chathistory_is_duplicate_msgid (sess, tags_data->msgid, tags_data->timestamp))
-			goto skip_banner;
 		chathistory_track_msgid_ts (sess, tags_data->msgid, tags_data->timestamp, FALSE);
 		g_free (sess->join_msgid);
 		sess->join_msgid = g_strdup (tags_data->msgid);
@@ -739,8 +746,6 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 								  tags_data->timestamp);
 	sess->history_insert_sorted_mode = FALSE;
 	sess->display_only = FALSE;  /* safety: clear if not consumed */
-
-skip_banner:
 
 	/* Bouncer reconnect detection: if the JOIN timestamp predates our last
 	 * disconnect, this is a replayed JOIN from the bouncer, not a fresh one.
