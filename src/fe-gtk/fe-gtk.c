@@ -2335,44 +2335,42 @@ void
 fe_reaction_received (session *sess, const char *target_msgid,
                       const char *reaction_text, const char *nick, int is_self)
 {
-	GtkXText *xtext;
+	xtext_buffer *buf;
 	textentry *target;
 
-	if (!sess || !sess->gui || !sess->gui->xtext)
+	if (!sess || !sess->res || !sess->res->buffer)
 		return;
 
-	xtext = GTK_XTEXT (sess->gui->xtext);
-	target = gtk_xtext_find_by_msgid (xtext->buffer, target_msgid);
+	buf = sess->res->buffer;
+	target = gtk_xtext_find_by_msgid (buf, target_msgid);
 	if (!target)
 		return;
 
-	gtk_xtext_entry_add_reaction (xtext->buffer, target,
-	                              reaction_text, nick, is_self);
+	gtk_xtext_entry_add_reaction (buf, target, reaction_text, nick, is_self);
 }
 
 void
 fe_reaction_removed (session *sess, const char *target_msgid,
                      const char *reaction_text, const char *nick)
 {
-	GtkXText *xtext;
+	xtext_buffer *buf;
 	textentry *target;
 
-	if (!sess || !sess->gui || !sess->gui->xtext)
+	if (!sess || !sess->res || !sess->res->buffer)
 		return;
 
-	xtext = GTK_XTEXT (sess->gui->xtext);
-	target = gtk_xtext_find_by_msgid (xtext->buffer, target_msgid);
+	buf = sess->res->buffer;
+	target = gtk_xtext_find_by_msgid (buf, target_msgid);
 	if (!target)
 		return;
 
-	gtk_xtext_entry_remove_reaction (xtext->buffer, target,
-	                                 reaction_text, nick);
+	gtk_xtext_entry_remove_reaction (buf, target, reaction_text, nick);
 }
 
 void
 fe_reply_context_set (session *sess, const char *reply_msgid)
 {
-	GtkXText *xtext;
+	xtext_buffer *buf;
 	textentry *new_ent;
 	textentry *orig;
 	const char *orig_nick = NULL;
@@ -2381,10 +2379,10 @@ fe_reply_context_set (session *sess, const char *reply_msgid)
 	char preview[81] = "";
 	guint64 orig_id = 0;
 
-	if (!sess || !sess->gui || !sess->gui->xtext || !reply_msgid)
+	if (!sess || !sess->res || !sess->res->buffer || !reply_msgid)
 		return;
 
-	xtext = GTK_XTEXT (sess->gui->xtext);
+	buf = sess->res->buffer;
 
 	/* Find the entry to attach reply context to.
 	 * For echo-confirmed messages, the entry has its msgid set already (from fe_confirm_entry).
@@ -2392,14 +2390,14 @@ fe_reply_context_set (session *sess, const char *reply_msgid)
 	 * Try by current_msgid first (set by inbound_chanmsg), then fall back to last. */
 	new_ent = NULL;
 	if (sess->current_msgid)
-		new_ent = gtk_xtext_find_by_msgid (xtext->buffer, sess->current_msgid);
+		new_ent = gtk_xtext_find_by_msgid (buf, sess->current_msgid);
 	if (!new_ent)
-		new_ent = gtk_xtext_buffer_get_last (xtext->buffer);
+		new_ent = gtk_xtext_buffer_get_last (buf);
 	if (!new_ent)
 		return;
 
 	/* Try to resolve the referenced message */
-	orig = gtk_xtext_find_by_msgid (xtext->buffer, reply_msgid);
+	orig = gtk_xtext_find_by_msgid (buf, reply_msgid);
 	if (orig)
 	{
 		const unsigned char *str = gtk_xtext_entry_get_str (orig);
@@ -2453,7 +2451,7 @@ fe_reply_context_set (session *sess, const char *reply_msgid)
 		}
 	}
 
-	gtk_xtext_entry_set_reply (xtext->buffer, new_ent,
+	gtk_xtext_entry_set_reply (buf, new_ent,
 	                           reply_msgid, orig_nick, preview, orig_id);
 
 	/* Persist reply context to scrollback (if this entry has a msgid) */
@@ -2565,27 +2563,27 @@ fe_scrollback_reply_attach (session *sess, const char *entry_msgid,
                             const char *target_msgid, const char *target_nick,
                             const char *target_preview)
 {
-	GtkXText *xtext;
+	xtext_buffer *buf;
 	textentry *ent;
 	textentry *orig;
 	guint64 orig_id = 0;
 
-	if (!sess || !sess->gui || !sess->gui->xtext || !entry_msgid || !target_msgid)
+	if (!sess || !sess->res || !sess->res->buffer || !entry_msgid || !target_msgid)
 		return;
 
-	xtext = GTK_XTEXT (sess->gui->xtext);
+	buf = sess->res->buffer;
 
 	/* Find the entry this reply info belongs to */
-	ent = gtk_xtext_find_by_msgid (xtext->buffer, entry_msgid);
+	ent = gtk_xtext_find_by_msgid (buf, entry_msgid);
 	if (!ent)
 		return;
 
 	/* Try to resolve the target entry for click-to-scroll */
-	orig = gtk_xtext_find_by_msgid (xtext->buffer, target_msgid);
+	orig = gtk_xtext_find_by_msgid (buf, target_msgid);
 	if (orig)
 		orig_id = gtk_xtext_get_entry_id (orig);
 
-	gtk_xtext_entry_set_reply (xtext->buffer, ent,
+	gtk_xtext_entry_set_reply (buf, ent,
 	                           target_msgid, target_nick, target_preview, orig_id);
 }
 
@@ -2610,16 +2608,12 @@ fe_end_multiline_group (session *sess)
 void
 fe_scrollback_extras_done (session *sess)
 {
-	GtkXText *xtext;
-
-	if (!sess || !sess->gui || !sess->gui->xtext)
+	if (!sess || !sess->res || !sess->res->buffer)
 		return;
-
-	xtext = GTK_XTEXT (sess->gui->xtext);
 
 	/* Recalculate total line count after reactions/replies added extra lines.
 	 * This corrects num_lines and scroll position after bulk attachment. */
-	gtk_xtext_calc_lines (xtext->buffer, FALSE);
+	gtk_xtext_calc_lines (sess->res->buffer, FALSE);
 }
 
 void
