@@ -6434,14 +6434,20 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf, int fire_signal,
 					ent->display_lines = 1 + ent->extra_lines_above
 						+ ent->extra_lines_below + (ent->collapsible ? 1 : 0);
 				}
-				/* Multi-liners: free stale sublines to reclaim memory.
-				 * display_lines stays as estimate; recomputed on render. */
+				/* Multi-liners: reflow now via lines_taken so display_lines
+				 * and tree weight match the current width before we set
+				 * adj->upper at the end of this pass.  The previous defer-
+				 * to-render approach left num_lines summed from stale
+				 * estimates, which made adj->upper too small (sometimes
+				 * <= page_size — scrollbar hid the thumb entirely) until
+				 * the user scrolled each entry into view and the render
+				 * path's lazy reflow ran.  Note: resize takes
+				 * recompute_sublines=FALSE and skips this branch entirely,
+				 * so the resize-fast-path is unaffected. */
 				else
 				{
 					display_cache_remove (buf->display_cache, ent->entry_id);
-					g_slist_free (ent->sublines);
-					ent->sublines = NULL;
-					ent->sublines_width = 0;
+					gtk_xtext_lines_taken (buf, ent);
 				}
 			}
 
