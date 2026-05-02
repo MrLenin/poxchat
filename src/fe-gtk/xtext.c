@@ -3338,28 +3338,36 @@ gtk_xtext_button_release (GtkGestureClick *gesture, int n_press, double x, doubl
 }
 
 /* Determine which zone of an entry a y-coordinate hits.
- * Returns: 0 = reply context line, 1 = normal text, 2 = reaction badges.
- * Also sets *ent_out to the entry found, and *subline_out to the subline within that zone. */
+ * Returns: 0 = reply context line, 1 = normal text, 2 = reaction badges,
+ * 3 = day separator, 4 = collapse/expand indicator.
+ * Also sets *ent_out to the entry found. */
 static xtext_click_zone
 gtk_xtext_get_click_zone (GtkXText *xtext, int y, textentry **ent_out)
 {
 	textentry *ent;
-	int line, subline, text_sublines;
+	int subline, text_sublines, visible_text;
 
-	if (y < 0)
-		y -= xtext->fontsize;
+	if (ent_out)
+		*ent_out = NULL;
 
-	line = (y + xtext->pixel_offset) / xtext->fontsize;
-	ent = gtk_xtext_nth (xtext, line + (int)gtk_adjustment_get_value (xtext->adj), &subline);
-
+	/* Resolve (ent, subline) via the same pagetop walk find_char_ex
+	 * uses — gtk_xtext_nth via adj->value can disagree with what's
+	 * actually rendered when extra_lines_above/below or a collapse
+	 * indicator are in play, and we'd misroute clicks because of it. */
+	ent = gtk_xtext_find_char_ex (xtext, 0, y, NULL, NULL, &subline);
 	if (ent_out)
 		*ent_out = ent;
 
 	if (!ent)
 		return XTEXT_ZONE_TEXT;
 
-	/* subline is now an offset into display lines:
-	 * [day_sep | reply | text_sublines | collapse_indicator? | extra_below] */
+	/* Subline layout for a rendered entry, in order:
+	 *   [extra_lines_above]              day_sep + reply context
+	 *   [visible_text]                    text wraps (clamped to preview when collapsed)
+	 *   [collapse_indicator: 0 or 1]      shown when collapsible
+	 *   [extra_lines_below: 0 or 1]       reaction badge row
+	 *
+	 * sum == ent->display_lines per ent_update_display_lines. */
 	if (subline < ent->extra_lines_above)
 	{
 		gboolean has_day_sep = (ent->flags & TEXTENTRY_FLAG_DAY_BOUNDARY)
@@ -3370,24 +3378,26 @@ gtk_xtext_get_click_zone (GtkXText *xtext, int y, textentry **ent_out)
 	}
 
 	text_sublines = g_slist_length (ent->sublines);
+	visible_text = ent->collapsed
+		? MIN (COLLAPSE_PREVIEW_LINES, text_sublines)
+		: text_sublines;
 
-	/* Check for collapse indicator line */
-	if (ent->collapsed)
+	if (ent->collapsible)
 	{
-		int visible_text = MIN(COLLAPSE_PREVIEW_LINES, text_sublines);
 		int indicator_subline = ent->extra_lines_above + visible_text;
 		if (subline == indicator_subline)
 			return XTEXT_ZONE_COLLAPSE;
 	}
-	else if (ent->collapsible)
-	{
-		int indicator_subline = ent->extra_lines_above + text_sublines;
-		if (subline == indicator_subline)
-			return XTEXT_ZONE_COLLAPSE;
-	}
 
-	if (subline >= ent->extra_lines_above + text_sublines)
-		return XTEXT_ZONE_REACT;
+	/* Reaction badge sits after the visible text and (if present) the
+	 * collapse indicator.  Use the rendered layout's bounds, not the
+	 * full text wrap count — for collapsed entries those differ. */
+	{
+		int badge_start = ent->extra_lines_above + visible_text
+			+ (ent->collapsible ? 1 : 0);
+		if (subline >= badge_start)
+			return XTEXT_ZONE_REACT;
+	}
 
 	return XTEXT_ZONE_TEXT;
 }
