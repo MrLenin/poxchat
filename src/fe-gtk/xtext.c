@@ -6880,14 +6880,24 @@ gtk_xtext_render_page (GtkXText * xtext)
 				 *   delta — otherwise adjustment_changed on the next scroll
 				 *   resolves bot_line against a stale upper and clamps the
 				 *   anchor to lm-1, jumping the view.
-				 * - value shifts only by total_above_delta — entries above
-				 *   start_ent push the anchor row's absolute line down. */
+				 * - value handling depends on the anchor mode:
+				 *   - anchor_to_bottom: snap to new bottom so growing the
+				 *     reflowed entry doesn't leave us short of text_last.
+				 *   - free-scroll: shift by total_above_delta so the
+				 *     anchor row stays at the bottom edge.  start_ent's
+				 *     own delta doesn't shift its anchor row's line
+				 *     position (that's determined by entries before it). */
 				if (total_delta != 0)
 				{
 					gdouble cur_value = gtk_adjustment_get_value (xtext->adj);
-					gdouble new_value = cur_value + total_above_delta;
 					gdouble page = gtk_adjustment_get_page_size (xtext->adj);
 					gdouble new_upper = xtext->buffer->num_lines;
+					gdouble new_value;
+
+					if (xtext->buffer->scroll_anchor.anchor_to_bottom)
+						new_value = new_upper - page;
+					else
+						new_value = cur_value + total_above_delta;
 
 					if (new_value > new_upper - page)
 						new_value = new_upper - page;
