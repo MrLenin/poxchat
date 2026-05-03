@@ -768,6 +768,13 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 		{
 			EMIT_SIGNAL_TIMESTAMP (XP_TE_RECONNECT, sess, NULL, NULL, NULL, NULL, 0,
 			                       time (NULL));
+
+			/* Same signal that fires this branch tells us the server
+			 * keeps channel state across our disconnects — record it so
+			 * check_autojoin_channels suppresses the rejoin-on-reconnect
+			 * path even without an explicit FLAG_PERSISTENT toggle.
+			 * Reset on every server_disconnect (see server.c). */
+			serv->bouncer_inferred = TRUE;
 		}
 	}
 
@@ -1408,6 +1415,19 @@ check_autojoin_channels (server *serv)
 	{
 		return FALSE;
 	}
+
+	/* Suppress the rejoin-on-reconnect path entirely when the server is
+	 * known to keep our channel state across the disconnect — either set
+	 * explicitly via the network's "persistent server" toggle, or
+	 * inferred at runtime when the server already replayed a self-JOIN
+	 * with an @time predating our last disconnect.  In both cases the
+	 * server will (re-)issue JOIN events for every channel we belong to;
+	 * sending our own duplicates them, undoes the user's intervening
+	 * PARTs from other clients, and races with the server-replayed
+	 * JOIN's NAMES burst.  The favlist path below is intentionally not
+	 * gated — a configured favourite is the user's explicit ask. */
+	if (serv->persistent_server || serv->bouncer_inferred)
+		list = NULL;
 
 	/* If there's a session (i.e. this is a reconnect), autojoin to everything that was open previously. */
 	while (list)

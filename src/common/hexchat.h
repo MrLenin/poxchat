@@ -734,6 +734,8 @@ typedef struct server
 	unsigned int sent_capend:1;	/* have sent CAP END yet */
 	unsigned int waiting_on_cap:1;	/* waiting on another line of CAP LS */
 	unsigned int waiting_on_sasl:1; /* waiting on sasl */
+	unsigned int persistent_server:1;	/* network config flag — bouncer/persistent server, suppresses our auto-rejoin on reconnect */
+	unsigned int bouncer_inferred:1;	/* heuristic — saw a server-replayed self-JOIN whose @time predates our last_disconnect_time */
 #ifdef USE_OPENSSL
 	unsigned int use_ssl:1;				  /* is server SSL capable? */
 	unsigned int accept_invalid_cert:1;/* ignore result of server's cert. verify */

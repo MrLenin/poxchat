@@ -2264,12 +2264,14 @@ gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolledwindow5), treeview_c
 #ifndef USE_OPENSSL
 	gtk_widget_set_sensitive (check, FALSE);
 #endif
-	servlist_create_check (1, net->flags & FLAG_USE_GLOBAL, table3, 5, 0, _("Use global user information"));
+	check = servlist_create_check (7, net->flags & FLAG_PERSISTENT, table3, 5, 0, _("Persistent server (bouncer keeps channel state)"));
+	gtk_widget_set_tooltip_text (check, _("Don't auto-rejoin channels on reconnect — the server (bouncer) restores them itself."));
+	servlist_create_check (1, net->flags & FLAG_USE_GLOBAL, table3, 6, 0, _("Use global user information"));
 
-	edit_entry_nick = servlist_create_entry (table3, _("_Nick name:"), 6, net->nick, &edit_label_nick, 0);
-	edit_entry_nick2 = servlist_create_entry (table3, _("Second choice:"), 7, net->nick2, &edit_label_nick2, 0);
-	edit_entry_real = servlist_create_entry (table3, _("Rea_l name:"), 8, net->real, &edit_label_real, 0);
-	edit_entry_user = servlist_create_entry (table3, _("_User name:"), 9, net->user, &edit_label_user, 0);
+	edit_entry_nick = servlist_create_entry (table3, _("_Nick name:"), 7, net->nick, &edit_label_nick, 0);
+	edit_entry_nick2 = servlist_create_entry (table3, _("Second choice:"), 8, net->nick2, &edit_label_nick2, 0);
+	edit_entry_real = servlist_create_entry (table3, _("Rea_l name:"), 9, net->real, &edit_label_real, 0);
+	edit_entry_user = servlist_create_entry (table3, _("_User name:"), 10, net->user, &edit_label_user, 0);
 
 	label_logintype = gtk_label_new (_("Login method:"));
 	gtk_widget_set_halign (label_logintype, GTK_ALIGN_START);
@@ -2278,15 +2280,15 @@ gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolledwindow5), treeview_c
 	gtk_widget_set_margin_end (label_logintype, SERVLIST_X_PADDING);
 	gtk_widget_set_margin_top (label_logintype, SERVLIST_Y_PADDING);
 	gtk_widget_set_margin_bottom (label_logintype, SERVLIST_Y_PADDING);
-	gtk_grid_attach (GTK_GRID (table3), label_logintype, 0, 10, 1, 1);
+	gtk_grid_attach (GTK_GRID (table3), label_logintype, 0, 11, 1, 1);
 	combobox_logintypes = servlist_create_logintypecombo (notebook);
 	gtk_widget_set_margin_start (combobox_logintypes, 4);
 	gtk_widget_set_margin_end (combobox_logintypes, 4);
 	gtk_widget_set_margin_top (combobox_logintypes, 2);
 	gtk_widget_set_margin_bottom (combobox_logintypes, 2);
-	gtk_grid_attach (GTK_GRID (table3), combobox_logintypes, 1, 10, 1, 1);
+	gtk_grid_attach (GTK_GRID (table3), combobox_logintypes, 1, 11, 1, 1);
 
-	edit_entry_pass = servlist_create_entry (table3, _("Password:"), 11, net->pass, 0, _("Password used for login. If in doubt, leave blank."));
+	edit_entry_pass = servlist_create_entry (table3, _("Password:"), 12, net->pass, 0, _("Password used for login. If in doubt, leave blank."));
 	gtk_entry_set_visibility (GTK_ENTRY (edit_entry_pass), FALSE);
 	if (selected_net && selected_net->logintype == LOGIN_SASLEXTERNAL)
 		gtk_widget_set_sensitive (edit_entry_pass, FALSE);
@@ -2306,13 +2308,13 @@ gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolledwindow5), treeview_c
 	gtk_widget_set_margin_end (label34, SERVLIST_X_PADDING);
 	gtk_widget_set_margin_top (label34, SERVLIST_Y_PADDING);
 	gtk_widget_set_margin_bottom (label34, SERVLIST_Y_PADDING);
-	gtk_grid_attach (GTK_GRID (table3), label34, 0, 12, 1, 1);
+	gtk_grid_attach (GTK_GRID (table3), label34, 0, 13, 1, 1);
 	comboboxentry_charset = servlist_create_charsetcombo ();
 	gtk_widget_set_margin_start (comboboxentry_charset, 4);
 	gtk_widget_set_margin_end (comboboxentry_charset, 4);
 	gtk_widget_set_margin_top (comboboxentry_charset, 2);
 	gtk_widget_set_margin_bottom (comboboxentry_charset, 2);
-	gtk_grid_attach (GTK_GRID (table3), comboboxentry_charset, 1, 12, 1, 1);
+	gtk_grid_attach (GTK_GRID (table3), comboboxentry_charset, 1, 13, 1, 1);
 
 
 	/* Rule and Close button */

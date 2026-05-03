@@ -72,7 +72,8 @@ extern GSList *network_list;
 #define FLAG_USE_PROXY			16
 #define FLAG_ALLOW_INVALID		32
 #define FLAG_FAVORITE			64
-#define FLAG_COUNT				7
+#define FLAG_PERSISTENT			128		/* server keeps our channel state across reconnects (bouncer/persistent) */
+#define FLAG_COUNT				8
 
 /* Login methods. Use server password by default - if we had a NickServ password, it'd be set to 2 already by servlist_load() */
 #define LOGIN_DEFAULT_REAL		LOGIN_PASS		/* this is to set the default login method for unknown servers */

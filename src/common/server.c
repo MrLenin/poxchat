@@ -1490,6 +1490,7 @@ server_disconnect (session * sess, int sendquit, int err)
 	serv->no_login = FALSE;
 	serv->servername[0] = 0;
 	serv->lag_sent = 0;
+	serv->bouncer_inferred = FALSE;	/* re-evaluate next reconnect */
 
 	notify_cleanup ();
 }
