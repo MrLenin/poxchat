@@ -1581,11 +1581,13 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 
 		gtk_xtext_save_scroll_anchor (xtext->buffer, &xtext->resize_anchor);
 
-		/* Lazy recompute: re-sum cached display_lines WITHOUT Pango
-		 * reflow.  render_page reflows the ~30 visible entries on
-		 * demand; everything else keeps its cached estimate.  With
-		 * tail eviction bounding mat_count to ~500, this walk is
-		 * sub-millisecond even in the worst case. */
+		/* Width-change resize: do an eager reflow (recompute_sublines=
+		 * TRUE).  The previous lazy approach left num_lines summed
+		 * from stale display_lines and the scrollbar thumb sized off
+		 * (or hidden) until each entry was scrolled into view.  With
+		 * the eager path in calc_lines_virtual_ex, multi-liners
+		 * Pango-reshape inside the loop and adj->upper lands correct
+		 * when adjustment_set fires at the end. */
 		if (xtext->resize_tag)
 		{
 			g_source_remove (xtext->resize_tag);
@@ -1598,7 +1600,7 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 #endif
 			if (xtext->vc_signal_tag)
 				g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
-			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE, FALSE);
+			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE, TRUE);
 			if (xtext->vc_signal_tag)
 				g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
 			if (was_down)
@@ -10182,26 +10184,34 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 			gtk_adjustment_set_value (xtext->adj, 0);
 	}
 
+	/* Always reconcile width/indent state when the buffer is mounted.
+	 * The render flag from mg_changesess is meant to suppress immediate
+	 * pixel rendering when the userlist visibility flip will trigger a
+	 * layout expose anyway — but recalc_widths is purely state, not a
+	 * draw, and skipping it leaves buf->window_width stale and
+	 * num_lines summed from placeholder display_lines.  The visible
+	 * symptom: scrollbar thumb vanishes (num_lines <= page_size) until
+	 * each entry comes into view via the render-path lazy reflow. */
+	if (buf->window_width != w || buf->last_indent != buf->indent)
+	{
+		gboolean width_changed = (buf->window_width != w);
+		buf->last_indent = buf->indent;
+		buf->window_width = w;
+		buf->window_height = h;
+		gtk_xtext_recalc_widths (buf, width_changed);
+		if (buf->scroll_anchor.anchor_to_bottom)
+			gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj) -
+											  gtk_adjustment_get_page_size (xtext->adj));
+	} else if (buf->window_height != h)
+	{
+		buf->window_height = h;
+		if (buf->scroll_anchor.anchor_to_bottom)
+			gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj));
+		gtk_xtext_adjustment_set (buf, FALSE);
+	}
+
 	if (render)
 	{
-		/* did the window change size or indent since this buffer was last shown? */
-		if (buf->window_width != w || buf->last_indent != buf->indent)
-		{
-			gboolean width_changed = (buf->window_width != w);
-			buf->last_indent = buf->indent;
-			buf->window_width = w;
-			buf->window_height = h;
-			gtk_xtext_recalc_widths (buf, width_changed);
-			if (buf->scroll_anchor.anchor_to_bottom)
-				gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj) -
-												  gtk_adjustment_get_page_size (xtext->adj));
-		} else if (buf->window_height != h)
-		{
-			buf->window_height = h;
-			if (buf->scroll_anchor.anchor_to_bottom)
-				gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj));
-			gtk_xtext_adjustment_set (buf, FALSE);
-		}
 
 		/* GTK3: Queue a redraw instead of rendering directly */
 		gtk_widget_queue_draw (GTK_WIDGET (xtext));
