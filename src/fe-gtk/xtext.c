@@ -10149,14 +10149,43 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 		gtk_xtext_recalc_widths (buf, TRUE);
 	}
 
-	/* now change to the new buffer */
 	{
 		gboolean was_down = buf->scroll_anchor.anchor_to_bottom;
+
+		/* Bind the new buffer to the widget BEFORE reconciling widths.
+		 * gtk_xtext_adjustment_set (called from calc_lines below) is a
+		 * no-op unless buf->xtext->buffer == buf. */
 		xtext->buffer = buf;
 		dontscroll (buf);	/* force scrolling off */
 
-		/* Set upper before value to avoid clamping issues */
-		gtk_adjustment_set_upper (xtext->adj, buf->num_lines);
+		/* Reconcile width/indent BEFORE restoring scroll position.
+		 * recalc_widths runs an eager reflow over multi-liners (via
+		 * calc_lines_virtual_ex) and configures adj->upper at the end,
+		 * so the snap-to-bottom / anchor-restore math below operates
+		 * on the post-reflow num_lines instead of the placeholder
+		 * sum we'd get from buf->num_lines straight after a tab
+		 * switch.  Render-flag-gated queue_draw stays at the bottom —
+		 * recalc_widths is state work, not a draw. */
+		if (buf->window_width != w || buf->last_indent != buf->indent)
+		{
+			gboolean width_changed = (buf->window_width != w);
+			buf->last_indent = buf->indent;
+			buf->window_width = w;
+			buf->window_height = h;
+			gtk_xtext_recalc_widths (buf, width_changed);
+		}
+		else if (buf->window_height != h)
+		{
+			buf->window_height = h;
+			gtk_xtext_adjustment_set (buf, FALSE);
+		}
+		else
+		{
+			/* No width/indent/height change — make sure adj->upper at
+			 * least reflects buf->num_lines so the scrollbar isn't
+			 * showing the previous buffer's bounds. */
+			gtk_adjustment_set_upper (xtext->adj, buf->num_lines > 0 ? buf->num_lines : 1);
+		}
 
 		/* Restore scroll position - force to bottom if buffer was tracking bottom.
 		 * Must use saved was_down since dontscroll cleared anchor_to_bottom above. */
@@ -10184,35 +10213,8 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 			gtk_adjustment_set_value (xtext->adj, 0);
 	}
 
-	/* Always reconcile width/indent state when the buffer is mounted.
-	 * The render flag from mg_changesess is meant to suppress immediate
-	 * pixel rendering when the userlist visibility flip will trigger a
-	 * layout expose anyway — but recalc_widths is purely state, not a
-	 * draw, and skipping it leaves buf->window_width stale and
-	 * num_lines summed from placeholder display_lines.  The visible
-	 * symptom: scrollbar thumb vanishes (num_lines <= page_size) until
-	 * each entry comes into view via the render-path lazy reflow. */
-	if (buf->window_width != w || buf->last_indent != buf->indent)
-	{
-		gboolean width_changed = (buf->window_width != w);
-		buf->last_indent = buf->indent;
-		buf->window_width = w;
-		buf->window_height = h;
-		gtk_xtext_recalc_widths (buf, width_changed);
-		if (buf->scroll_anchor.anchor_to_bottom)
-			gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj) -
-											  gtk_adjustment_get_page_size (xtext->adj));
-	} else if (buf->window_height != h)
-	{
-		buf->window_height = h;
-		if (buf->scroll_anchor.anchor_to_bottom)
-			gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj));
-		gtk_xtext_adjustment_set (buf, FALSE);
-	}
-
 	if (render)
 	{
-
 		/* GTK3: Queue a redraw instead of rendering directly */
 		gtk_widget_queue_draw (GTK_WIDGET (xtext));
 	}
