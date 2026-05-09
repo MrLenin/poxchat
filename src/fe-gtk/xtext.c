@@ -960,6 +960,19 @@ gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
 		if (value < 0)
 			value = 0;
 
+		/* GTK4 GtkAdjustment quirk: gtk_adjustment_configure silently
+		 * rejects the configuration when page_size > upper (the content
+		 * doesn't fill the viewport).  The adjustment retains its
+		 * previous upper/page values, so the scrollbar shows the old
+		 * range — visible as the "collapse on undersized buffer leaves
+		 * blank space at the end" symptom: collapse drops num_lines
+		 * below page_size, configure fails, adj->upper stays at the
+		 * pre-collapse total, and the scrollbar still allows scrolling
+		 * into nothing.  Clamp page_size to upper so configure always
+		 * applies; semantically a page can't exceed the buffer size. */
+		if (page_size > upper)
+			page_size = upper;
+
 		gtk_adjustment_configure (adj, value, 0, upper, 1, page_size, page_size);
 	}
 }
