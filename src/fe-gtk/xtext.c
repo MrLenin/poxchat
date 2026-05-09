@@ -1581,13 +1581,11 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 
 		gtk_xtext_save_scroll_anchor (xtext->buffer, &xtext->resize_anchor);
 
-		/* Width-change resize: do an eager reflow (recompute_sublines=
-		 * TRUE).  The previous lazy approach left num_lines summed
-		 * from stale display_lines and the scrollbar thumb sized off
-		 * (or hidden) until each entry was scrolled into view.  With
-		 * the eager path in calc_lines_virtual_ex, multi-liners
-		 * Pango-reshape inside the loop and adj->upper lands correct
-		 * when adjustment_set fires at the end. */
+		/* Lazy recompute: re-sum cached display_lines WITHOUT Pango
+		 * reflow.  render_page reflows the ~30 visible entries on
+		 * demand; everything else keeps its cached estimate.  With
+		 * tail eviction bounding mat_count to ~500, this walk is
+		 * sub-millisecond even in the worst case. */
 		if (xtext->resize_tag)
 		{
 			g_source_remove (xtext->resize_tag);
@@ -1600,7 +1598,7 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 #endif
 			if (xtext->vc_signal_tag)
 				g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
-			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE, TRUE);
+			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE, FALSE);
 			if (xtext->vc_signal_tag)
 				g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
 			if (was_down)
@@ -6821,8 +6819,7 @@ gtk_xtext_render_page (GtkXText * xtext)
 			ent = NULL;
 			subline = 0;
 			{
-				int total_delta = 0;       /* every reflow's delta — drives adj->upper */
-				int total_above_delta = 0; /* deltas from entries strictly above start_ent — drives adj->value shift */
+				int total_above_delta = 0;
 
 				for (walk = start_ent; walk; walk = walk->prev)
 				{
@@ -6842,13 +6839,13 @@ gtk_xtext_render_page (GtkXText * xtext)
 							int delta = walk->display_lines - old_dl;
 							xtext->buffer->num_lines += delta;
 							update_weight234 (xtext->buffer->entry_tree, walk, delta);
-							total_delta += delta;
-							/* start_ent's own reflow grows num_lines (and so
-							 * adj->upper) but does NOT shift its anchor row's
-							 * absolute line position — that depends on entries
-							 * BEFORE start_ent, not start_ent itself.  Only
-							 * entries above start_ent contribute to the
-							 * adj->value shift. */
+							/* Track only deltas from entries strictly ABOVE the
+							 * anchor (start_ent).  Those grow lines_before_start_ent
+							 * by delta and therefore push the anchor's absolute
+							 * line position down; we'll compensate adj->value
+							 * after the walk so the same content stays at the
+							 * bottom of the viewport.  start_ent's own delta
+							 * doesn't shift its anchor row, so it's excluded. */
 							if (walk != start_ent)
 								total_above_delta += delta;
 						}
@@ -6875,29 +6872,19 @@ gtk_xtext_render_page (GtkXText * xtext)
 					}
 				}
 
-				/* Reconcile adj if any reflow happened during the walk.
-				 * - upper must reflect the new num_lines on every nonzero
-				 *   delta — otherwise adjustment_changed on the next scroll
-				 *   resolves bot_line against a stale upper and clamps the
-				 *   anchor to lm-1, jumping the view.
-				 * - value handling depends on the anchor mode:
-				 *   - anchor_to_bottom: snap to new bottom so growing the
-				 *     reflowed entry doesn't leave us short of text_last.
-				 *   - free-scroll: shift by total_above_delta so the
-				 *     anchor row stays at the bottom edge.  start_ent's
-				 *     own delta doesn't shift its anchor row's line
-				 *     position (that's determined by entries before it). */
-				if (total_delta != 0)
+				/* If reflow grew (or shrank) entries above start_ent, the absolute
+				 * line number of start_ent's bot row shifted by total_above_delta.
+				 * Push adj->value/upper to match so the user's perceived viewport
+				 * doesn't jump on the next scroll/render — without this, scrolling
+				 * up into a previously-unrendered region (e.g. cert info) reflows
+				 * long entries placeholder→actual, and the walk's pagetop lands
+				 * closer to start_ent than the user expected. */
+				if (total_above_delta != 0)
 				{
 					gdouble cur_value = gtk_adjustment_get_value (xtext->adj);
+					gdouble new_value = cur_value + total_above_delta;
 					gdouble page = gtk_adjustment_get_page_size (xtext->adj);
 					gdouble new_upper = xtext->buffer->num_lines;
-					gdouble new_value;
-
-					if (xtext->buffer->scroll_anchor.anchor_to_bottom)
-						new_value = new_upper - page;
-					else
-						new_value = cur_value + total_above_delta;
 
 					if (new_value > new_upper - page)
 						new_value = new_upper - page;
@@ -10160,43 +10147,14 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 		gtk_xtext_recalc_widths (buf, TRUE);
 	}
 
+	/* now change to the new buffer */
 	{
 		gboolean was_down = buf->scroll_anchor.anchor_to_bottom;
-
-		/* Bind the new buffer to the widget BEFORE reconciling widths.
-		 * gtk_xtext_adjustment_set (called from calc_lines below) is a
-		 * no-op unless buf->xtext->buffer == buf. */
 		xtext->buffer = buf;
 		dontscroll (buf);	/* force scrolling off */
 
-		/* Reconcile width/indent BEFORE restoring scroll position.
-		 * recalc_widths runs an eager reflow over multi-liners (via
-		 * calc_lines_virtual_ex) and configures adj->upper at the end,
-		 * so the snap-to-bottom / anchor-restore math below operates
-		 * on the post-reflow num_lines instead of the placeholder
-		 * sum we'd get from buf->num_lines straight after a tab
-		 * switch.  Render-flag-gated queue_draw stays at the bottom —
-		 * recalc_widths is state work, not a draw. */
-		if (buf->window_width != w || buf->last_indent != buf->indent)
-		{
-			gboolean width_changed = (buf->window_width != w);
-			buf->last_indent = buf->indent;
-			buf->window_width = w;
-			buf->window_height = h;
-			gtk_xtext_recalc_widths (buf, width_changed);
-		}
-		else if (buf->window_height != h)
-		{
-			buf->window_height = h;
-			gtk_xtext_adjustment_set (buf, FALSE);
-		}
-		else
-		{
-			/* No width/indent/height change — make sure adj->upper at
-			 * least reflects buf->num_lines so the scrollbar isn't
-			 * showing the previous buffer's bounds. */
-			gtk_adjustment_set_upper (xtext->adj, buf->num_lines > 0 ? buf->num_lines : 1);
-		}
+		/* Set upper before value to avoid clamping issues */
+		gtk_adjustment_set_upper (xtext->adj, buf->num_lines);
 
 		/* Restore scroll position - force to bottom if buffer was tracking bottom.
 		 * Must use saved was_down since dontscroll cleared anchor_to_bottom above. */
@@ -10226,6 +10184,25 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 
 	if (render)
 	{
+		/* did the window change size or indent since this buffer was last shown? */
+		if (buf->window_width != w || buf->last_indent != buf->indent)
+		{
+			gboolean width_changed = (buf->window_width != w);
+			buf->last_indent = buf->indent;
+			buf->window_width = w;
+			buf->window_height = h;
+			gtk_xtext_recalc_widths (buf, width_changed);
+			if (buf->scroll_anchor.anchor_to_bottom)
+				gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj) -
+												  gtk_adjustment_get_page_size (xtext->adj));
+		} else if (buf->window_height != h)
+		{
+			buf->window_height = h;
+			if (buf->scroll_anchor.anchor_to_bottom)
+				gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj));
+			gtk_xtext_adjustment_set (buf, FALSE);
+		}
+
 		/* GTK3: Queue a redraw instead of rendering directly */
 		gtk_widget_queue_draw (GTK_WIDGET (xtext));
 	}
