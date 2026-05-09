@@ -1581,11 +1581,17 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 
 		gtk_xtext_save_scroll_anchor (xtext->buffer, &xtext->resize_anchor);
 
-		/* Lazy recompute: re-sum cached display_lines WITHOUT Pango
-		 * reflow.  render_page reflows the ~30 visible entries on
-		 * demand; everything else keeps its cached estimate.  With
-		 * tail eviction bounding mat_count to ~500, this walk is
-		 * sub-millisecond even in the worst case. */
+		/* Eager reflow on width change: pass recompute_sublines=TRUE so
+		 * multi-liners get Pango-reshaped inside the loop and their
+		 * sublines_width matches the new viewport width by the time
+		 * adjustment_set fires.  The previous lazy approach (FALSE)
+		 * left adj->upper summed from stale placeholder display_lines,
+		 * sizing the scrollbar thumb off (or hiding it entirely when
+		 * the stale sum dropped at or below page_size) until the user
+		 * scrolled each multi-liner past the viewport and the render-
+		 * path lazy reflow ran.  Tail eviction bounds mat_count to
+		 * ~500, so the eager walk is fast enough to lose the lazy
+		 * deferral without affecting resize responsiveness. */
 		if (xtext->resize_tag)
 		{
 			g_source_remove (xtext->resize_tag);
@@ -1598,7 +1604,7 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 #endif
 			if (xtext->vc_signal_tag)
 				g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
-			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE, FALSE);
+			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE, TRUE);
 			if (xtext->vc_signal_tag)
 				g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
 			if (was_down)
