@@ -5912,13 +5912,17 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 				this_bg.alpha = 0.35f;
 			}
 
-			/* Rounded rect background */
+			/* Rounded rect background: mask underlying text with opaque BG,
+			 * then layer the tint on top so the button stays readable when it
+			 * overlaps message text at the right edge. */
 			cairo_new_sub_path (xtext->cr);
 			cairo_arc (xtext->cr, bx + btn_size - 4, btn_y + 4, 4, -G_PI/2, 0);
 			cairo_arc (xtext->cr, bx + btn_size - 4, btn_y + btn_size - 4, 4, 0, G_PI/2);
 			cairo_arc (xtext->cr, bx + 4, btn_y + btn_size - 4, 4, G_PI/2, G_PI);
 			cairo_arc (xtext->cr, bx + 4, btn_y + 4, 4, G_PI, 3*G_PI/2);
 			cairo_close_path (xtext->cr);
+			gdk_cairo_set_source_rgba (xtext->cr, &xtext->palette[XTEXT_BG]);
+			cairo_fill_preserve (xtext->cr);
 			gdk_cairo_set_source_rgba (xtext->cr, &this_bg);
 			cairo_fill (xtext->cr);
 
