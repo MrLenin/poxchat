@@ -1018,11 +1018,31 @@ paste_text_ready_cb (GObject *source, GAsyncResult *result, gpointer data)
 /* === Edit operations          === */
 /* =============================== */
 
+/* Mirror the current selection into the PRIMARY clipboard so other apps
+ * can middle-click-paste from us. No-op when there is no selection — we
+ * don't want to clobber PRIMARY when the user just deselects. */
+static void
+push_selection_to_primary (HexInputEdit *edit)
+{
+	int sel_start, sel_end;
+	char *sel_text;
+
+	if (!get_selection_bytes (edit->priv, &sel_start, &sel_end))
+		return;
+
+	sel_text = g_strndup (edit->priv->text->str + sel_start,
+	                      sel_end - sel_start);
+	gdk_clipboard_set_text (gtk_widget_get_primary_clipboard (GTK_WIDGET (edit)),
+	                        sel_text);
+	g_free (sel_text);
+}
+
 static void
 do_select_all (HexInputEdit *edit)
 {
 	edit->priv->sel_anchor_byte = 0;
 	edit->priv->cursor_byte = (int) edit->priv->text->len;
+	push_selection_to_primary (edit);
 	reset_blink (edit);
 }
 
@@ -1059,10 +1079,8 @@ do_cut (HexInputEdit *edit)
 }
 
 static void
-do_paste (HexInputEdit *edit)
+do_paste (HexInputEdit *edit, GdkClipboard *clip)
 {
-	GdkClipboard *clip = gdk_display_get_clipboard (
-	    gdk_display_get_default ());
 	g_object_ref (edit);
 	gdk_clipboard_read_text_async (clip, NULL,
 	                               paste_text_ready_cb, edit);
@@ -1164,7 +1182,7 @@ action_copy (GtkWidget *widget, const char *name, GVariant *param)
 static void
 action_paste (GtkWidget *widget, const char *name, GVariant *param)
 {
-	do_paste (HEX_INPUT_EDIT (widget));
+	do_paste (HEX_INPUT_EDIT (widget), gtk_widget_get_clipboard (widget));
 }
 
 static void
@@ -1478,7 +1496,7 @@ key_pressed_cb (GtkEventControllerKey *controller, guint keyval,
 
 		case GDK_KEY_v:
 		case GDK_KEY_V:
-			do_paste (edit);
+			do_paste (edit, gtk_widget_get_clipboard (GTK_WIDGET (edit)));
 			return TRUE;
 
 		case GDK_KEY_z:
@@ -1504,6 +1522,8 @@ key_pressed_cb (GtkEventControllerKey *controller, guint keyval,
 			    priv->text->str, (int) priv->text->len, priv->cursor_byte);
 			if (!shift)
 				priv->sel_anchor_byte = -1;
+			if (shift)
+				push_selection_to_primary (edit);
 			reset_blink (edit);
 			return TRUE;
 		}
@@ -1518,6 +1538,8 @@ key_pressed_cb (GtkEventControllerKey *controller, guint keyval,
 			    priv->text->str, (int) priv->text->len, priv->cursor_byte);
 			if (!shift)
 				priv->sel_anchor_byte = -1;
+			if (shift)
+				push_selection_to_primary (edit);
 			reset_blink (edit);
 			return TRUE;
 		}
@@ -1612,6 +1634,8 @@ key_pressed_cb (GtkEventControllerKey *controller, guint keyval,
 			if (!shift)
 				priv->sel_anchor_byte = -1;
 		}
+		if (shift)
+			push_selection_to_primary (edit);
 		reset_blink (edit);
 		return TRUE;
 	}
@@ -1636,6 +1660,8 @@ key_pressed_cb (GtkEventControllerKey *controller, guint keyval,
 			if (!shift)
 				priv->sel_anchor_byte = -1;
 		}
+		if (shift)
+			push_selection_to_primary (edit);
 		reset_blink (edit);
 		return TRUE;
 	}
@@ -1647,6 +1673,8 @@ key_pressed_cb (GtkEventControllerKey *controller, guint keyval,
 		priv->cursor_byte = 0;
 		if (!shift)
 			priv->sel_anchor_byte = -1;
+		if (shift)
+			push_selection_to_primary (edit);
 		reset_blink (edit);
 		return TRUE;
 
@@ -1657,6 +1685,8 @@ key_pressed_cb (GtkEventControllerKey *controller, guint keyval,
 		priv->cursor_byte = (int) priv->text->len;
 		if (!shift)
 			priv->sel_anchor_byte = -1;
+		if (shift)
+			push_selection_to_primary (edit);
 		reset_blink (edit);
 		return TRUE;
 
@@ -1721,13 +1751,25 @@ xy_to_byte_offset (HexInputEdit *edit, double x, double y)
 	int index, trailing;
 	pango_layout_xy_to_index (priv->layout, lx, ly, &index, &trailing);
 
-	/* index is in stripped text; convert to raw */
+	/* Pango returns `trailing` as a count of CHARACTERS past `index`, not
+	 * bytes — walk forward with g_utf8_next_char so we land on a real UTF-8
+	 * boundary in the stripped text. */
+	int stripped_off = index;
+	if (trailing > 0 && priv->stripped_str && priv->stripped_len > 0)
+	{
+		const char *p = (const char *) priv->stripped_str + index;
+		const char *end = (const char *) priv->stripped_str + priv->stripped_len;
+		for (int t = 0; t < trailing && p < end; t++)
+			p = g_utf8_next_char (p);
+		stripped_off = (int) (p - (const char *) priv->stripped_str);
+	}
+
 	int raw_off = 0;
 	if (priv->raw_to_stripped_map && priv->stripped_len > 0)
 		raw_off = xtext_stripped_to_raw (priv->raw_to_stripped_map,
-		                                 (int) priv->text->len, index + trailing);
+		                                 (int) priv->text->len, stripped_off);
 	else
-		raw_off = index + trailing;
+		raw_off = stripped_off;
 
 	return CLAMP (raw_off, 0, (int) priv->text->len);
 }
@@ -1844,12 +1886,14 @@ click_pressed_cb (GtkGestureClick *gesture, int n_press, double x, double y,
 
 		priv->sel_anchor_byte = word_start;
 		priv->cursor_byte = word_end;
+		push_selection_to_primary (edit);
 	}
 	else if (n_press == 3)
 	{
 		/* Select all */
 		priv->sel_anchor_byte = 0;
 		priv->cursor_byte = (int) priv->text->len;
+		push_selection_to_primary (edit);
 	}
 
 	reset_blink (edit);
@@ -1877,6 +1921,23 @@ rclick_pressed_cb (GtkGestureClick *gesture, int n_press, double x, double y,
 }
 
 static void
+middle_pressed_cb (GtkGestureClick *gesture, int n_press, double x, double y,
+                   gpointer data)
+{
+	HexInputEdit *edit = HEX_INPUT_EDIT (data);
+	HexInputEditPriv *priv = edit->priv;
+
+	gtk_widget_grab_focus (GTK_WIDGET (edit));
+
+	priv->cursor_byte = xy_to_byte_offset (edit, x, y);
+	priv->sel_anchor_byte = -1;
+	reset_blink (edit);
+	gtk_widget_queue_draw (GTK_WIDGET (edit));
+
+	do_paste (edit, gtk_widget_get_primary_clipboard (GTK_WIDGET (edit)));
+}
+
+static void
 drag_update_cb (GtkGestureDrag *gesture, double offset_x, double offset_y,
                 gpointer data)
 {
@@ -1889,6 +1950,7 @@ drag_update_cb (GtkGestureDrag *gesture, double offset_x, double offset_y,
 	int byte_off = xy_to_byte_offset (edit, start_x + offset_x, start_y + offset_y);
 	priv->cursor_byte = byte_off;
 
+	push_selection_to_primary (edit);
 	ensure_cursor_visible (edit);
 	gtk_widget_queue_draw (GTK_WIDGET (edit));
 }
@@ -2551,6 +2613,13 @@ hex_input_edit_init (HexInputEdit *edit)
 	g_signal_connect (rclick, "pressed",
 	                  G_CALLBACK (rclick_pressed_cb), edit);
 	gtk_widget_add_controller (GTK_WIDGET (edit), GTK_EVENT_CONTROLLER (rclick));
+
+	/* Middle-click pastes from the PRIMARY selection */
+	GtkGesture *mclick = gtk_gesture_click_new ();
+	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (mclick), GDK_BUTTON_MIDDLE);
+	g_signal_connect (mclick, "pressed",
+	                  G_CALLBACK (middle_pressed_cb), edit);
+	gtk_widget_add_controller (GTK_WIDGET (edit), GTK_EVENT_CONTROLLER (mclick));
 
 	/* Drag gesture for selection */
 	GtkGesture *drag = gtk_gesture_drag_new ();
