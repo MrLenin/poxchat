@@ -20,6 +20,20 @@
     <id>poxchat.desktop</id>
   </provides>
   <releases>
+    <release date="2026-05-12" version="3.0.0~alpha1" type="development">
+      <description>
+        <p>First alpha of the PoxChat fork, rebased on GTK4 and with
+           expanded IRCv3 support. Not yet release-ready.</p>
+        <ul>
+          <li>Port from GTK+ 3 to GTK4 with overhauled xtext renderer</li>
+          <li>SQLite-backed scrollback with zstd compression</li>
+          <li>IRCv3 message-tags, batch, echo-message, labeled-response,
+              chghost, setname, invite-notify and more</li>
+          <li>SASL SCRAM-SHA-1/256/512 and OAUTHBEARER</li>
+          <li>Cauldron icon and project rename from HexChat to PoxChat</li>
+        </ul>
+      </description>
+    </release>
     <release date="2024-02-07" version="2.16.2">
       <description>
         <p>This is a minor release with small improvements and fixes:</p>

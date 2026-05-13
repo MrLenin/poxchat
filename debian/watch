@@ -1,4 +1,6 @@
 version=4
-opts=filenamemangle=s/.+\/v?(\d\S+)\.tar\.gz/poxchat-$1\.tar\.gz/ \
+opts=\
+  uversionmangle=s/(\d)[_\.\-\+]?(?i)(RC|pre|dev|beta|alpha)/$1~$2/,\
+  filenamemangle=s/.*?\/v?@ANY_VERSION@@ARCHIVE_EXT@/poxchat-$1@ARCHIVE_EXT@/ \
   https://github.com/evilnet/poxchat/tags \
-  (?:.*?/)?v?(\d[\d.]*)\.tar\.gz
+  (?:.*?/)?v?@ANY_VERSION@@ARCHIVE_EXT@

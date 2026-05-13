@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: PoxChat
-Upstream-Contact: Alex Schumann <rubin@afternet.org>
+Upstream-Contact: Rubin <rubin@afternet.org>
 Source: https://github.com/evilnet/poxchat
 Comment:
  PoxChat is a GTK4 fork of HexChat <https://hexchat.github.io/>,
@@ -88,7 +88,7 @@ Copyright: The PoxChat translators
 License: GPL-2+
 
 Files: debian/*
-Copyright: 2026 Alex Schumann <rubin@afternet.org>
+Copyright: 2026 Rubin <rubin@afternet.org>
 License: GPL-2+
 
 License: GPL-2+

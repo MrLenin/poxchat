@@ -30,4 +30,4 @@ is provided by `poxchat-plugin-fishlim`. FiSH is a legacy protocol with
 known weaknesses; treat it as an obfuscation layer rather than a
 modern end-to-end encrypted messenger.
 
- -- Alex Schumann <rubin@afternet.org>, Tue, 12 May 2026
+ -- Rubin <rubin@afternet.org>, Tue, 12 May 2026

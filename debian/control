@@ -1,7 +1,7 @@
 Source: poxchat
 Section: net
 Priority: optional
-Maintainer: Alex Schumann <rubin@afternet.org>
+Maintainer: Rubin <rubin@afternet.org>
 Build-Depends:
  debhelper-compat (= 13),
  meson (>= 0.56.0),
