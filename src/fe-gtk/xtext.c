@@ -1692,6 +1692,45 @@ gtk_xtext_selection_clear (xtext_buffer *buf)
 	return ret;
 }
 
+/* The stored entry text is "nick<space>message" with one literal space at
+ * raw byte position ent->left_len.  By default Pango advances by one
+ * space-width there, which leaves no room around the separator bar.  This
+ * helper attaches a shape attribute to that single byte so its advance is
+ * 2 * space_width, giving the bar one space-width of breathing room on
+ * each side.  Must be applied identically wherever a shared layout is
+ * built for the first subline of a nick entry (render and hit-test) so
+ * pixel positions stay consistent. */
+static void
+xtext_add_sep_widen_attr (GtkXText *xtext, textentry *ent, PangoAttrList *attrs,
+                          int raw_offset, int raw_len, int sub_start, int sub_len)
+{
+	int sep_stripped, sep_local;
+	PangoRectangle sep_ink = { 0, 0, 0, 0 };
+	PangoRectangle sep_logical;
+	PangoAttribute *sep_attr;
+
+	if (!xtext->auto_indent || ent->left_len <= 0 || !ent->raw_to_stripped_map)
+		return;
+	if (raw_offset > ent->left_len || ent->left_len >= raw_offset + raw_len)
+		return;
+
+	sep_stripped = xtext_raw_to_stripped (ent->raw_to_stripped_map,
+	                                      ent->str_len, ent->left_len);
+	sep_local = sep_stripped - sub_start;
+	if (sep_local < 0 || sep_local >= sub_len)
+		return;
+
+	sep_logical.x = 0;
+	sep_logical.y = -xtext->font->ascent * PANGO_SCALE;
+	sep_logical.width = xtext->space_width * 2 * PANGO_SCALE;
+	sep_logical.height = xtext->fontsize * PANGO_SCALE;
+
+	sep_attr = pango_attr_shape_new (&sep_ink, &sep_logical);
+	sep_attr->start_index = sep_local;
+	sep_attr->end_index = sep_local + 1;
+	pango_attr_list_insert (attrs, sep_attr);
+}
+
 static int
 find_x (GtkXText *xtext, textentry *ent, int x, int subline, int indent, gboolean use_trailing)
 {
@@ -1738,6 +1777,8 @@ find_x (GtkXText *xtext, textentry *ent, int x, int subline, int indent, gboolea
 			                              xtext->palette,
 			                              xtext->fontsize,
 			                              xtext->font->ascent);
+			xtext_add_sep_widen_attr (xtext, ent, attrs,
+			                          raw_offset, raw_len, sub_start, sub_len);
 		}
 		pango_layout_set_text (xtext->layout,
 		                        (char *)(ent->stripped_str + sub_start), sub_len);
@@ -2031,7 +2072,7 @@ gtk_xtext_draw_sep (GtkXText * xtext, int y)
 	/* draw the separator line */
 	if (xtext->separator && xtext->buffer->indent)
 	{
-		x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
+		x = xtext->buffer->indent - xtext->space_width;
 		if (x < 1)
 		{
 			if (created_cr)
@@ -2180,7 +2221,7 @@ gtk_xtext_paint (GtkWidget *widget, GdkRectangle *area)
 	xtext->clip_y2 = 1000000;
 
 xit:
-	x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
+	x = xtext->buffer->indent - xtext->space_width;
 	if (area->x <= x)
 		gtk_xtext_draw_sep (xtext, -1);
 }
@@ -3048,7 +3089,7 @@ gtk_xtext_motion_notify (GtkEventControllerMotion *controller, double event_x, d
 
 	if (xtext->separator && xtext->buffer->indent)
 	{
-		line_x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
+		line_x = xtext->buffer->indent - xtext->space_width;
 		if (line_x == x || line_x == x + 1 || line_x == x - 1)
 		{
 			if (!xtext->cursor_resize)
@@ -3880,7 +3921,7 @@ gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double event_x, d
 	/* check if it was a separator-bar click */
 	if (xtext->separator && xtext->buffer->indent)
 	{
-		line_x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
+		line_x = xtext->buffer->indent - xtext->space_width;
 		if (line_x == x || line_x == x + 1 || line_x == x - 1)
 		{
 			xtext->moving_separator = TRUE;
@@ -4462,6 +4503,8 @@ gtk_xtext_render_subline (GtkXText *xtext, int y, textentry *ent,
 		                               xtext->palette,
 		                               xtext->fontsize,
 		                               xtext->font->ascent);
+		xtext_add_sep_widen_attr (xtext, ent, attrs,
+		                          raw_offset, raw_len, sub_start, sub_len);
 
 		pango_layout_set_text (xtext->layout,
 		                        (char *)(ent->stripped_str + sub_start), sub_len);
@@ -6073,7 +6116,7 @@ gtk_xtext_recalc_widths (xtext_buffer *buf, int do_str_width)
 				ent->indent =
 					(buf->indent -
 					 gtk_xtext_text_width (buf->xtext, ent->str,
-											ent->left_len)) - buf->xtext->space_width;
+											ent->left_len)) - buf->xtext->space_width * 2;
 				if (ent->indent < MARGIN)
 					ent->indent = MARGIN;
 			}
@@ -9285,7 +9328,7 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 	{
 		int cap = gtk_xtext_auto_indent_cap (buf);
 
-		ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+		ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 
 		if (buf->time_stamp)
 			space = buf->xtext->stamp_width;
@@ -9295,7 +9338,7 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 		/* do we need to auto adjust the separator position? */
 		if (buf->indent < cap && ent->indent < MARGIN + space)
 		{
-			tempindent = MARGIN + space + buf->xtext->space_width + left_width;
+			tempindent = MARGIN + space + buf->xtext->space_width * 2 + left_width;
 
 			if (tempindent > buf->indent)
 				buf->indent = tempindent;
@@ -9306,7 +9349,7 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 			gtk_xtext_fix_indent (buf);
 			gtk_xtext_recalc_widths (buf, FALSE);
 
-			ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+			ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 			buf->xtext->force_render = TRUE;
 		}
 	}
@@ -9408,7 +9451,7 @@ gtk_xtext_prepend_indent (xtext_buffer *buf,
 	{
 		int cap = gtk_xtext_auto_indent_cap (buf);
 
-		ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+		ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 
 		if (buf->time_stamp)
 			space = buf->xtext->stamp_width;
@@ -9417,7 +9460,7 @@ gtk_xtext_prepend_indent (xtext_buffer *buf,
 
 		if (buf->indent < cap && ent->indent < MARGIN + space)
 		{
-			tempindent = MARGIN + space + buf->xtext->space_width + left_width;
+			tempindent = MARGIN + space + buf->xtext->space_width * 2 + left_width;
 
 			if (tempindent > buf->indent)
 				buf->indent = tempindent;
@@ -9428,7 +9471,7 @@ gtk_xtext_prepend_indent (xtext_buffer *buf,
 			gtk_xtext_fix_indent (buf);
 			gtk_xtext_recalc_widths (buf, FALSE);
 
-			ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+			ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 			buf->xtext->force_render = TRUE;
 		}
 	}
@@ -9529,7 +9572,7 @@ gtk_xtext_insert_sorted_indent (xtext_buffer *buf,
 	{
 		int cap = gtk_xtext_auto_indent_cap (buf);
 
-		ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+		ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 
 		if (buf->time_stamp)
 			space = buf->xtext->stamp_width;
@@ -9538,7 +9581,7 @@ gtk_xtext_insert_sorted_indent (xtext_buffer *buf,
 
 		if (buf->indent < cap && ent->indent < MARGIN + space)
 		{
-			tempindent = MARGIN + space + buf->xtext->space_width + left_width;
+			tempindent = MARGIN + space + buf->xtext->space_width * 2 + left_width;
 
 			if (tempindent > buf->indent)
 				buf->indent = tempindent;
@@ -9549,7 +9592,7 @@ gtk_xtext_insert_sorted_indent (xtext_buffer *buf,
 			gtk_xtext_fix_indent (buf);
 			gtk_xtext_recalc_widths (buf, FALSE);
 
-			ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+			ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 			buf->xtext->force_render = TRUE;
 		}
 	}
@@ -9802,7 +9845,7 @@ gtk_xtext_set_indent (GtkXText *xtext, gboolean indent)
 			if (ent->left_len <= 0)
 				continue;
 			left_width = gtk_xtext_text_width (xtext, ent->str, ent->left_len);
-			tempindent = MARGIN + space + xtext->space_width + left_width;
+			tempindent = MARGIN + space + xtext->space_width * 2 + left_width;
 			if (tempindent > buf->indent)
 				buf->indent = tempindent;
 		}
@@ -9911,7 +9954,7 @@ gtk_xtext_set_time_stamp (xtext_buffer *buf, gboolean time_stamp)
 			if (ent->left_len <= 0)
 				continue;
 			left_width = gtk_xtext_text_width (buf->xtext, ent->str, ent->left_len);
-			tempindent = MARGIN + space + buf->xtext->space_width + left_width;
+			tempindent = MARGIN + space + buf->xtext->space_width * 2 + left_width;
 			if (tempindent > buf->indent)
 				buf->indent = tempindent;
 		}
@@ -10505,7 +10548,7 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	if (left_len >= 0 && buf->xtext->auto_indent)
 	{
 		left_width = gtk_xtext_text_width (buf->xtext, (unsigned char *)msg->text, left_len);
-		ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+		ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 	}
 	else if (left_len >= 0)
 	{
