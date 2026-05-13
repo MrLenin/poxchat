@@ -5762,10 +5762,16 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 			? MIN(COLLAPSE_PREVIEW_LINES, (int)g_slist_length (ent->sublines))
 			: INT_MAX;
 
-		/* Look up cached PangoLayout for this entry */
-		xtext_line_display *cached_disp = display_cache_get (
-			xtext->buffer->display_cache, ent->entry_id,
-			xtext->buffer->window_width);
+		/* Look up cached PangoLayout for this entry.  Skip the cache while
+		 * the entry is in pending state: cached lines were shaped without
+		 * the pango_attr_foreground_alpha that the cache-miss path adds for
+		 * dimming, so continuation sublines would render at full opacity
+		 * even though the first subline is dimmed.  The cache is rebuilt
+		 * naturally on the next render once state transitions back. */
+		xtext_line_display *cached_disp = (ent->state == XTEXT_STATE_PENDING)
+			? NULL
+			: display_cache_get (xtext->buffer->display_cache, ent->entry_id,
+			                     xtext->buffer->window_width);
 
 		do
 		{
