@@ -812,11 +812,17 @@ xtext_draw_layout_line (GtkXText         *xtext,
 	pango_cairo_show_layout_line (xtext->cr, line);
 }
 
-/* Set cairo source from palette, applying render_alpha for pending-state dimming */
+/* Set cairo source from palette, applying render_alpha for pending-state
+ * dimming.  Background roles (XTEXT_BG, XTEXT_MARK_BG) skip the alpha
+ * multiplication so pending lines stay opaque-backed; only foreground/text
+ * colors fade, which reads as the text being tentative rather than the
+ * whole row turning translucent over the window chrome. */
 static void
 xtext_set_source_color (GtkXText *xtext, int color_index)
 {
-	if (xtext->render_alpha >= 1.0)
+	gboolean is_bg = (color_index == XTEXT_BG || color_index == XTEXT_MARK_BG);
+
+	if (xtext->render_alpha >= 1.0 || is_bg)
 	{
 		gdk_cairo_set_source_rgba (xtext->cr, &xtext->palette[color_index]);
 	}
@@ -4506,6 +4512,20 @@ gtk_xtext_render_subline (GtkXText *xtext, int y, textentry *ent,
 		xtext_add_sep_widen_attr (xtext, ent, attrs,
 		                          raw_offset, raw_len, sub_start, sub_len);
 
+		/* Pending-state dim: per-span fg colors (mIRC palette, nick coloring,
+		 * etc.) bypass the cairo source so the render_alpha multiplier in
+		 * xtext_set_source_color only affects default-fg glyphs.  Apply the
+		 * dim uniformly via pango_attr_foreground_alpha so colored spans fade
+		 * too.  Background spans are unaffected — the dim stays text-only. */
+		if (xtext->render_alpha < 1.0)
+		{
+			PangoAttribute *fg_alpha = pango_attr_foreground_alpha_new (
+				(guint16) (xtext->render_alpha * 65535));
+			fg_alpha->start_index = 0;
+			fg_alpha->end_index = sub_len;
+			pango_attr_list_insert (attrs, fg_alpha);
+		}
+
 		pango_layout_set_text (xtext->layout,
 		                        (char *)(ent->stripped_str + sub_start), sub_len);
 		pango_layout_set_attributes (xtext->layout, attrs);
@@ -6714,7 +6734,7 @@ gtk_xtext_render_ents (GtkXText * xtext, textentry * enta, textentry * entb)
 			if (ent->state == XTEXT_STATE_REDACTED)
 				xtext->col_fore = XTEXT_REDACTED_FG;
 			if (ent->state == XTEXT_STATE_PENDING)
-				xtext->render_alpha = 0.5;
+				xtext->render_alpha = 0.45;
 			line += gtk_xtext_render_line (xtext, ent, line, lines_max,
 													 subline, width);
 			xtext->render_alpha = 1.0;
@@ -7035,7 +7055,7 @@ top_down:
 			if (ent->state == XTEXT_STATE_REDACTED || ent->state == XTEXT_STATE_REDACTED_PROMPT)
 				xtext->col_fore = XTEXT_REDACTED_FG;
 			if (ent->state == XTEXT_STATE_PENDING)
-				xtext->render_alpha = 0.5;
+				xtext->render_alpha = 0.45;
 			line += gtk_xtext_render_line (xtext, ent, line, lines_max,
 													 subline, width);
 			xtext->render_alpha = 1.0;
@@ -11226,8 +11246,13 @@ gtk_xtext_entry_set_state (xtext_buffer *buf, textentry *ent,
 
 	ent->state = (guchar)new_state;
 
-	if (buf->xtext->buffer == buf &&
-	    gtk_xtext_check_ent_visibility (buf->xtext, ent, 0))
+	/* State transitions are rare (pending→normal once per outgoing message,
+	 * redacted toggles on demand) so skip the visibility check and just
+	 * queue a redraw whenever this buffer is on-screen.  The previous
+	 * check_ent_visibility short-circuit had an off-by-one that returned
+	 * FALSE when the target was the last entry at the bottom edge — i.e.
+	 * exactly the just-sent message we're trying to refresh. */
+	if (buf->xtext->buffer == buf)
 		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
 }
 
