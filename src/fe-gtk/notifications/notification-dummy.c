@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 2015 Patrick Griffis.
  *
  * This program is free software; you can redistribute it and/or modify

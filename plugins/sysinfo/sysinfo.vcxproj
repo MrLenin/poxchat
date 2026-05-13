@@ -24,20 +24,20 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  <Import Project="..\..\win32\hexchat.props" />
+  <Import Project="..\..\win32\poxchat.props" />
   <PropertyGroup>
     <TargetName>hcsysinfo</TargetName>
-    <OutDir>$(HexChatRel)plugins\</OutDir>
+    <OutDir>$(PoxChatRel)plugins\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;SYSINFO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\..\src\common;$(DepsRoot)\include;$(Glib);$(HexChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\src\common;$(DepsRoot)\include;$(Glib);$(PoxChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <TreatWChar_tAsBuiltInType>false</TreatWChar_tAsBuiltInType>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(DepsRoot)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(HexChatLib)common.lib;wbemuuid.lib;comsupp.lib;$(DepLibs);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(PoxChatLib)common.lib;wbemuuid.lib;comsupp.lib;$(DepLibs);%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>comsupp.lib</IgnoreSpecificDefaultLibraries>
       <ModuleDefinitionFile>sysinfo.def</ModuleDefinitionFile>
     </Link>
@@ -45,13 +45,13 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;_WIN64;_AMD64_;NDEBUG;_WINDOWS;_USRDLL;SYSINFO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\..\src\common;$(DepsRoot)\include;$(Glib);$(HexChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\src\common;$(DepsRoot)\include;$(Glib);$(PoxChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <TreatWChar_tAsBuiltInType>false</TreatWChar_tAsBuiltInType>
       <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(DepsRoot)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(HexChatLib)common.lib;wbemuuid.lib;comsupp.lib;$(DepLibs);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(PoxChatLib)common.lib;wbemuuid.lib;comsupp.lib;$(DepLibs);%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>comsupp.lib</IgnoreSpecificDefaultLibraries>
       <ModuleDefinitionFile>sysinfo.def</ModuleDefinitionFile>
     </Link>

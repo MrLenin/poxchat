@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>io.github.evilnet.PoxChat.Plugin.@NAME@</id>
+  <extends>io.github.evilnet.PoxChat</extends>
+  <name>@NAME@ Plugin</name>
+  <summary>@SUMMARY@</summary>
+  <url type="homepage">https://github.com/evilnet/poxchat</url>
+  <project_license>@LICENSE@</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+  <update_contact>tingping_AT_fedoraproject.org</update_contact>
+</component>

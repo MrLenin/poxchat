@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 2023 Patrick Okraku
  *
  * This program is free software; you can redistribute it and/or modify
@@ -15,8 +15,8 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#ifndef HEXCHAT_SCRAM_H
-#define HEXCHAT_SCRAM_H
+#ifndef POXCHAT_SCRAM_H
+#define POXCHAT_SCRAM_H
 
 #include "config.h"
 #ifdef USE_OPENSSL

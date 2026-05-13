@@ -1,8 +1,8 @@
-# OAuth2/OIDC Implementation Plan for HexChat GTK Frontend
+# OAuth2/OIDC Implementation Plan for PoxChat GTK Frontend
 
 ## Overview
 
-Add OAuth2/OIDC support to HexChat using the WebSocket server's HTTP callback for OAuth redirects, implementing the SASL OAUTHBEARER mechanism per RFC 7628.
+Add OAuth2/OIDC support to PoxChat using the WebSocket server's HTTP callback for OAuth redirects, implementing the SASL OAUTHBEARER mechanism per RFC 7628.
 
 ## Key Specifications
 - **RFC 7628**: OAUTHBEARER SASL mechanism format
@@ -23,12 +23,12 @@ Add OAuth2/OIDC support to HexChat using the WebSocket server's HTTP callback fo
 #### Files Modified
 - [x] **src/common/servlist.h** - Added OAuth fields to `ircnet` struct, `LOGIN_SASL_OAUTHBEARER` constant
 - [x] **src/common/servlist.c** - OAuth field persistence in servlist.conf, token loading on connect
-- [x] **src/common/hexchat.h** - Added `MECH_OAUTHBEARER` constant and OAuth fields to `server` struct
+- [x] **src/common/poxchat.h** - Added `MECH_OAUTHBEARER` constant and OAuth fields to `server` struct
 - [x] **src/common/inbound.c** - Full SASL OAUTHBEARER mechanism with 400-byte chunking
 - [x] **src/fe-gtk/servlistgui.c** - OAuth configuration UI with Authorize button
 - [x] **src/common/meson.build** - Added oauth.c, secure-storage.c, libsoup3, libsecret dependencies
 - [x] **src/common/common.vcxproj** - Added oauth.c, oauth.h, secure-storage.c, secure-storage.h
-- [x] **win32/hexchat.props** - Added USE_LIBCURL flag and libcurl paths
+- [x] **win32/poxchat.props** - Added USE_LIBCURL flag and libcurl paths
 
 #### Features Implemented
 - [x] OAuth2 Authorization Code flow with PKCE (RFC 7636)
@@ -93,7 +93,7 @@ Platform-specific implementations:
 
 ## Files Modified
 
-### 1. src/common/hexchat.h - DONE
+### 1. src/common/poxchat.h - DONE
 Added after MECH_SCRAM_SHA_512:
 ```c
 #define MECH_OAUTHBEARER 5
@@ -219,7 +219,7 @@ n,,\x01auth=Bearer <access_token>\x01host=<hostname>\x01port=<port>\x01\x01
 2. DONE - **secure-storage.h/secure-storage.c** - Platform keychain integration
 3. DONE - **servlist.h** - Add constants and struct fields
 4. DONE - **servlist.c** - Config persistence + token loading on connect
-5. DONE - **hexchat.h** - Add MECH_OAUTHBEARER constant and server struct fields
+5. DONE - **poxchat.h** - Add MECH_OAUTHBEARER constant and server struct fields
 6. DONE - **inbound.c** - SASL OAUTHBEARER mechanism with 400-byte chunking
 7. DONE - **servlistgui.c** - GTK UI for OAuth configuration
 8. DONE - **meson.build, vcxproj** - Build system updates

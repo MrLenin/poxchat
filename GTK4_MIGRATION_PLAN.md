@@ -1,8 +1,8 @@
-# HexChat GTK4 Migration Status
+# PoxChat GTK4 Migration Status
 
 ## Executive Summary
 
-HexChat has been fully migrated to GTK4. **GTK3 is no longer supported.**
+PoxChat has been fully migrated to GTK4. **GTK3 is no longer supported.**
 
 **Build Status (2025-12-18):**
 - ✅ **GTK4 Compilation**: SUCCESSFUL (Visual Studio on Windows, Meson on Linux)
@@ -173,7 +173,7 @@ The compatibility layer provides macros and inline functions for API differences
 - `hc_page_container_remove_page()` - Remove page by index
 
 ### Debug Logging Utility
-File-based debug logging for troubleshooting GTK4 migration issues. On Windows GUI apps, stdout/stderr are not available, so this writes to a log file in the HexChat config directory.
+File-based debug logging for troubleshooting GTK4 migration issues. On Windows GUI apps, stdout/stderr are not available, so this writes to a log file in the PoxChat config directory.
 
 **Usage:**
 ```c
@@ -187,7 +187,7 @@ hc_debug_log("widget visible=%d, parent=%p",
     (void*)gtk_widget_get_parent(widget));
 ```
 
-**Log file location:** `<config_dir>/hexchat_debug.log` (e.g., `%APPDATA%\HexChat\hexchat_debug.log` on Windows)
+**Log file location:** `<config_dir>/poxchat_debug.log` (e.g., `%APPDATA%\PoxChat\poxchat_debug.log` on Windows)
 
 ---
 
@@ -214,11 +214,11 @@ All 12 list/tree views migrated from GtkTreeView to GtkColumnView/GtkListView:
 ## Build Configuration
 
 ### Visual Studio (Windows)
-`win32/hexchat.props` configured for GTK4:
+`win32/poxchat.props` configured for GTK4:
 - `HC_GTK4=1` preprocessor define
 - GTK4 include paths (`gtk-4.0`)
 - GTK4 libraries (`gtk-4.lib`, `graphene-1.0.lib`)
-- Output: `hexchat-build-gtk4/`
+- Output: `poxchat-build-gtk4/`
 
 ### Meson (Linux/Cross-platform)
 ```bash

@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 2024 John E
  *
  * This program is free software; you can redistribute it and/or modify
@@ -15,8 +15,8 @@
  * along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef HEXCHAT_SECURE_STORAGE_H
-#define HEXCHAT_SECURE_STORAGE_H
+#ifndef POXCHAT_SECURE_STORAGE_H
+#define POXCHAT_SECURE_STORAGE_H
 
 #include <glib.h>
 
@@ -129,4 +129,4 @@ gboolean secure_storage_retrieve_oauth_tokens (const char *network_name,
  */
 gboolean secure_storage_clear_oauth_tokens (const char *network_name);
 
-#endif /* HEXCHAT_SECURE_STORAGE_H */
+#endif /* POXCHAT_SECURE_STORAGE_H */

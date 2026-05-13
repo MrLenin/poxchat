@@ -1,5 +1,5 @@
 ﻿/**
- * HexChat Theme Manager
+ * PoxChat Theme Manager
  *
  * Copyright (C) 2012 Patrick Griffs
  * Copyright (C) 2012 Berke Viktor

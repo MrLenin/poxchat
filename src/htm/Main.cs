@@ -1,5 +1,5 @@
 /**
- * HexChat Theme Manager
+ * PoxChat Theme Manager
  *
  * Copyright (C) 2012 Patrick Griffs
  * Copyright (C) 2012 Berke Viktor
@@ -37,7 +37,7 @@ namespace thememan
 {
     public partial class HTM : Form
     {
-        public string hexchatdir;
+        public string poxchatdir;
         public string themedir;
 
         OpenFileDialog importDialog;
@@ -62,11 +62,11 @@ namespace thememan
 
             if (RunningOnWindows() && IsPortable(out portableDir))
             {
-                hexchatdir = Path.Combine(portableDir, "config\\");
+                poxchatdir = Path.Combine(portableDir, "config\\");
 
-                if (!Directory.Exists(hexchatdir))
+                if (!Directory.Exists(poxchatdir))
                 {
-                    MessageBox.Show("HexChat installation not found!\nCheck your .\\config folder", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("PoxChat installation not found!\nCheck your .\\config folder", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     Environment.Exit(1);
                 }
             }
@@ -75,26 +75,26 @@ namespace thememan
                 /* Environment.SpecialFolder.ApplicationData
                  * Windows: %APPDATA%
                  * Unix: ~/.config
-                 * Windows is case-insensitive so 'hexchat' should be fine for both
+                 * Windows is case-insensitive so 'poxchat' should be fine for both
                  */
-                hexchatdir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hexchat");
+                poxchatdir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "poxchat");
 
-                if (!Directory.Exists(hexchatdir))
+                if (!Directory.Exists(poxchatdir))
                 {
                     if (RunningOnWindows())
                     {
-                        MessageBox.Show("HexChat installation not found!\nCheck your %APPDATA%\\HexChat folder", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);    
+                        MessageBox.Show("PoxChat installation not found!\nCheck your %APPDATA%\\PoxChat folder", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);    
                     }
                     else
                     {
-                        MessageBox.Show("HexChat installation not found!\nCheck your ~/.config/hexchat folder", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show("PoxChat installation not found!\nCheck your ~/.config/poxchat folder", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                     
                     Environment.Exit(1);
                 }
             }
 
-            themedir = Path.Combine(hexchatdir, "themes");
+            themedir = Path.Combine(poxchatdir, "themes");
             ListThemes();
 
             String[] arguments = Environment.GetCommandLineArgs();
@@ -196,17 +196,17 @@ namespace thememan
 
         private void applybutton_Click_1(object sender, EventArgs e)
         {
-            DialogResult result = MessageBox.Show("HexChat must be closed and this will overwrite your current theme!\n\nDo you wish to continue?", "Warning", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+            DialogResult result = MessageBox.Show("PoxChat must be closed and this will overwrite your current theme!\n\nDo you wish to continue?", "Warning", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
             if (result == DialogResult.OK)
             {
-                File.Copy(Path.Combine(themedir, themelist.SelectedItem.ToString(), "colors.conf"), Path.Combine(hexchatdir, "colors.conf"), true);
+                File.Copy(Path.Combine(themedir, themelist.SelectedItem.ToString(), "colors.conf"), Path.Combine(poxchatdir, "colors.conf"), true);
                 if (File.Exists(Path.Combine(themedir, themelist.SelectedItem.ToString(), "pevents.conf")))
                 {
-                    File.Copy(Path.Combine(themedir, themelist.SelectedItem.ToString(), "pevents.conf"), Path.Combine(hexchatdir, "pevents.conf"), true);
+                    File.Copy(Path.Combine(themedir, themelist.SelectedItem.ToString(), "pevents.conf"), Path.Combine(poxchatdir, "pevents.conf"), true);
                 }
-                else if (File.Exists(Path.Combine(hexchatdir, "pevents.conf")))
+                else if (File.Exists(Path.Combine(poxchatdir, "pevents.conf")))
                 {
-                    File.Delete(Path.Combine(hexchatdir, "pevents.conf"));
+                    File.Delete(Path.Combine(poxchatdir, "pevents.conf"));
                 }
             }
         }
@@ -224,7 +224,7 @@ namespace thememan
         private void importbutton_Click_1(object sender, EventArgs e)
         {
             importDialog = new OpenFileDialog();
-            importDialog.Filter = "HexChat Theme Files|*.hct";
+            importDialog.Filter = "PoxChat Theme Files|*.hct";
             importDialog.FilterIndex = 1;
             importDialog.FileOk += new CancelEventHandler(importdialog_FileOk);
             importDialog.ShowDialog();

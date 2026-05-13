@@ -6,7 +6,7 @@ The xtext widget's append-only linked list buffer is architecturally inadequate 
 
 ### The Endgame Vision
 
-A fully modernized xtext that enables HexChat to deliver a **Discord/Slack-tier chat experience** on IRC:
+A fully modernized xtext that enables PoxChat to deliver a **Discord/Slack-tier chat experience** on IRC:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -673,7 +673,7 @@ R 1705780900 *<tab>alice<tab>REDACTED<tab>msgid=abc123<tab>redactor=bob<tab>reas
 
 **Alternative: Separate deletion log file:**
 ```c
-/* hexchat/deletions/<network>/<target>.log */
+/* poxchat/deletions/<network>/<target>.log */
 1705780900	abc123	bob	spam	Hello world
 ```
 - Keeps scrollback clean
@@ -1347,7 +1347,7 @@ patterns compresses extremely well.
 
 **Rejected because:**
 - GtkTextView designed for editing, not chat display
-- Would lose HexChat-specific features (mIRC colors, etc.)
+- Would lose PoxChat-specific features (mIRC colors, etc.)
 - Massive rewrite with uncertain benefits
 - xtext is fundamentally sound, just needs enhancement
 
@@ -1635,7 +1635,7 @@ backend_get_text_width_with_emoji (GtkXText *xtext, char *str, int len)
 
 /* Defaults */
 prefs.hex_gui_emoji_sprites = TRUE;     /* Use sprites by default */
-prefs.hex_gui_emoji_path = "share/hexchat/emoji/twemoji";
+prefs.hex_gui_emoji_path = "share/poxchat/emoji/twemoji";
 ```
 
 **Settings UI:**

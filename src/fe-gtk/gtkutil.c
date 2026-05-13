@@ -35,11 +35,11 @@
 #include <gdk/x11/gdkx.h>
 #endif
 
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #include "../common/fe.h"
 #include "../common/util.h"
 #include "../common/cfgfiles.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/typedef.h"
 #include "gtkutil.h"
 #include "pixmaps.h"
@@ -649,7 +649,7 @@ gtkutil_set_icon (GtkWidget *win)
 	/* GTK4: Use icon name instead of GdkPixbuf.
 	 * The icon must be installed in the icon theme (e.g., hicolor).
 	 */
-	gtk_window_set_icon_name (GTK_WINDOW (win), "io.github.Hexchat");
+	gtk_window_set_icon_name (GTK_WINDOW (win), "io.github.evilnet.PoxChat");
 #endif
 }
 

@@ -365,7 +365,7 @@ MARKREAD <target>
 5. Server 2 (with Device B) notifies Device B
 6. Device B updates its unread count
 
-**HexChat implementation plan:**
+**PoxChat implementation plan:**
 
 *When to send MARKREAD:*
 - [ ] On window focus (if auto-mark enabled) - use newest message timestamp

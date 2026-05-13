@@ -1,4 +1,4 @@
-hexchat-theme-manager
+poxchat-theme-manager
 ------------------
 
 - Shows previews of and can load/save themes

@@ -1,7 +1,7 @@
-# HexChat Development Guide
+# PoxChat Development Guide
 
 ## Project Overview
-HexChat is an IRC client originally forked from XChat. This fork is being modernized with GTK4 support and comprehensive IRCv3 protocol implementation.
+PoxChat is an IRC client originally forked from XChat. This fork is being modernized with GTK4 support and comprehensive IRCv3 protocol implementation.
 
 ## Guiding Principle
 
@@ -18,8 +18,8 @@ When using subagent-driven development to implement plans, use a worktree unless
 ## Build System
 
 ### Windows (Visual Studio)
-- Open `win32/hexchat.sln` in Visual Studio 2022
-- Configuration is in `win32/hexchat.props` - **this file contains environment-specific paths and should not be committed**
+- Open `win32/poxchat.sln` in Visual Studio 2022
+- Configuration is in `win32/poxchat.props` - **this file contains environment-specific paths and should not be committed**
 - Build dependencies come from [gvsbuild](https://github.com/wingtk/gvsbuild) for GTK4
 - Additional dependencies: OpenSSL (separate install), optionally libwebsockets/jansson/libcurl for OAuth2
 
@@ -51,10 +51,10 @@ meson compile -C builddir
 - Outgoing: `outbound.c` commands → `tcp_sendf()` → socket
 
 ### Key Structures
-- `server` (hexchat.h) - Server connection state, capabilities, channels
-- `session` (hexchat.h) - A tab/window (channel, query, or server console)
+- `server` (poxchat.h) - Server connection state, capabilities, channels
+- `session` (poxchat.h) - A tab/window (channel, query, or server console)
 - `message_tags_data` (proto-irc.h) - IRCv3 message tags for a single message
-- `batch_info` (hexchat.h) - IRCv3 batch state for collecting related messages
+- `batch_info` (poxchat.h) - IRCv3 batch state for collecting related messages
 
 ## IRCv3 Implementation
 
@@ -91,7 +91,7 @@ meson compile -C builddir
 
 ### Adding New Capabilities
 1. Add to `supported_caps[]` array in `inbound.c`
-2. Add `have_xxx` flag to server struct in `hexchat.h`
+2. Add `have_xxx` flag to server struct in `poxchat.h`
 3. Handle in `inbound_toggle_caps()` to set/clear flag
 4. Implement protocol handling in `proto-irc.c` or `inbound.c`
 

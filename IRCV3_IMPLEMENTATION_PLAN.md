@@ -1,14 +1,14 @@
-# Comprehensive IRCv3 Implementation Plan for HexChat
+# Comprehensive IRCv3 Implementation Plan for PoxChat
 
 ## Overview
 
-This plan completes IRCv3 support in HexChat using Nefarious IRCd and X3 services as reference implementations. The plan covers all finalized IRCv3.1/3.2 specs plus widely-deployed draft specifications.
+This plan completes IRCv3 support in PoxChat using Nefarious IRCd and X3 services as reference implementations. The plan covers all finalized IRCv3.1/3.2 specs plus widely-deployed draft specifications.
 
 ---
 
 ## Current State Analysis
 
-### HexChat - Already Implemented
+### PoxChat - Already Implemented
 | Capability | Status | Notes |
 |------------|--------|-------|
 | multi-prefix | ✅ | `serv->have_namesx` |
@@ -24,7 +24,7 @@ This plan completes IRCv3 support in HexChat using Nefarious IRCd and X3 service
 | account-tag | ✅ | `serv->have_account_tag` |
 | SASL | ⚠️ | PLAIN, EXTERNAL, SCRAM-SHA-* complete; OAUTHBEARER missing token refresh/re-auth |
 
-### HexChat - Missing (Gap Analysis vs Nefarious)
+### PoxChat - Missing (Gap Analysis vs Nefarious)
 | Capability | Priority | Dependency |
 |------------|----------|------------|
 | batch | **Critical** | Foundation for chathistory, multiline |
@@ -67,13 +67,13 @@ This plan completes IRCv3 support in HexChat using Nefarious IRCd and X3 service
 
 **Files to modify:**
 - [proto-irc.h](src/common/proto-irc.h) - Extend `message_tags_data` with batch fields
-- [hexchat.h](src/common/hexchat.h) - Add `have_batch` flag, `batch_info` struct, `active_batches` hash table
+- [poxchat.h](src/common/poxchat.h) - Add `have_batch` flag, `batch_info` struct, `active_batches` hash table
 - [inbound.c](src/common/inbound.c) - Add to `supported_caps[]`, implement `inbound_batch_start()`, `inbound_batch_end()`
 - [proto-irc.c](src/common/proto-irc.c) - Parse `batch` tag, add BATCH command handler
 
 **Key structures:**
 ```c
-// In hexchat.h
+// In poxchat.h
 typedef struct batch_info {
     char *id;
     char *type;           // "chathistory", "multiline", "netjoin", etc.
@@ -98,7 +98,7 @@ GHashTable *active_batches;  // batch_id -> batch_info
 
 **Files to modify:**
 - [proto-irc.h](src/common/proto-irc.h) - Add `all_tags` hash table, `msgid`, `label` fields
-- [hexchat.h](src/common/hexchat.h) - Add `have_message_tags` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_message_tags` flag
 - [inbound.c](src/common/inbound.c) - Add capability support
 - [proto-irc.c](src/common/proto-irc.c) - Parse all tags, handle `+` client-only tags, tag escaping
 
@@ -130,7 +130,7 @@ typedef struct {
 #### 2.1 echo-message Capability
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_echo_message` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_echo_message` flag
 - [inbound.c](src/common/inbound.c) - Add capability, modify `inbound_chanmsg()`/`inbound_privmsg()` to detect self-echoes
 - [outbound.c](src/common/outbound.c) - Modify `handle_say()` to defer display when echo-message enabled
 
@@ -142,7 +142,7 @@ typedef struct {
 #### 2.2 labeled-response Capability
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_labeled_response`, `label_counter`, `pending_labels` hash table
+- [poxchat.h](src/common/poxchat.h) - Add `have_labeled_response`, `label_counter`, `pending_labels` hash table
 - [inbound.c](src/common/inbound.c) - Add capability, label management functions
 - [proto-irc.c](src/common/proto-irc.c) - Parse `label` tag, handle ACK batch type
 - [outbound.c](src/common/outbound.c) - Add labels to outgoing commands
@@ -154,7 +154,7 @@ typedef struct {
 #### 3.1 draft/chathistory Capability
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_chathistory` flag, `chathistory_limit` from ISUPPORT
+- [poxchat.h](src/common/poxchat.h) - Add `have_chathistory` flag, `chathistory_limit` from ISUPPORT
 - [inbound.c](src/common/inbound.c) - Add capability, handle `chathistory` batch type
 - [outbound.c](src/common/outbound.c) - Add `/HISTORY` command
 - [textevents.in](src/common/textevents.in) - Add history events
@@ -195,7 +195,7 @@ gboolean history_loading;    /* Request in progress */
 **Rationale:** Extends chathistory to include non-message events (JOIN, PART, QUIT, KICK, MODE, TOPIC). Essential for understanding channel context when reviewing history.
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_event_playback` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_event_playback` flag
 - [inbound.c](src/common/inbound.c) - Add capability to `supported_caps[]`
 - [chathistory.c](src/common/chathistory.c) - Handle event messages in batch processing
 
@@ -217,7 +217,7 @@ gboolean history_loading;    /* Request in progress */
 #### 3.3 draft/read-marker Capability
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_read_marker`, add `last_read_msgid` to session struct
+- [poxchat.h](src/common/poxchat.h) - Add `have_read_marker`, add `last_read_msgid` to session struct
 - [inbound.c](src/common/inbound.c) - Add capability, handle MARKREAD response
 - [proto-irc.c](src/common/proto-irc.c) - Add MARKREAD handler
 - [outbound.c](src/common/outbound.c) - Add `/MARKREAD` command
@@ -228,7 +228,7 @@ gboolean history_loading;    /* Request in progress */
 **Rationale:** Optimization - prevents server from sending NAMES automatically on JOIN when client will request history anyway.
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_no_implicit_names` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_no_implicit_names` flag
 - [inbound.c](src/common/inbound.c) - Add capability
 - [inbound.c](src/common/inbound.c) - Modify JOIN handler to explicitly request NAMES when needed
 
@@ -241,7 +241,7 @@ gboolean history_loading;    /* Request in progress */
 **Critical:** Multiline messages must be displayed as a single cohesive unit, not individual lines.
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_multiline`, `multiline_max_bytes`, `multiline_max_lines`, `multiline_message` struct
+- [poxchat.h](src/common/poxchat.h) - Add `have_multiline`, `multiline_max_bytes`, `multiline_max_lines`, `multiline_message` struct
 - [inbound.c](src/common/inbound.c) - Add capability, handle `multiline` batch type with line collection
 - [modes.c](src/common/modes.c) - Parse MULTILINE ISUPPORT token (`max-bytes`, `max-lines`)
 - [outbound.c](src/common/outbound.c) - Add `/MULTILINE` command, modify paste handling
@@ -276,7 +276,7 @@ gboolean history_loading;    /* Request in progress */
 #### 4.2 draft/message-redaction Capability
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_redact` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_redact` flag
 - [inbound.c](src/common/inbound.c) - Add capability, handle REDACT (find message by msgid, mark redacted)
 - [proto-irc.c](src/common/proto-irc.c) - Add REDACT handler
 - [outbound.c](src/common/outbound.c) - Add `/REDACT <target> <msgid> [reason]` command
@@ -289,7 +289,7 @@ gboolean history_loading;    /* Request in progress */
 #### 5.1 sts (Strict Transport Security)
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `sts_policy` struct
+- [poxchat.h](src/common/poxchat.h) - Add `sts_policy` struct
 - [servlist.c](src/common/servlist.c) - Persistent STS policy storage
 - [inbound.c](src/common/inbound.c) - Parse `sts` capability with `port=` and `duration=` values
 - [server.c](src/common/server.c) - Check STS policy before connect, redirect to TLS port
@@ -307,7 +307,7 @@ typedef struct sts_policy {
 #### 5.2 draft/account-registration
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_account_registration` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_account_registration` flag
 - [inbound.c](src/common/inbound.c) - Add capability, handle REGISTER responses (VERIFY, etc.)
 - [outbound.c](src/common/outbound.c) - Add `/REGISTER <account> <email> <password>` command
 
@@ -318,14 +318,14 @@ typedef struct sts_policy {
 #### 6.1 MONITOR Command (IRCv3 Extension)
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add MONITOR support alongside existing WATCH
+- [poxchat.h](src/common/poxchat.h) - Add MONITOR support alongside existing WATCH
 - [notify.c](src/common/notify.c) - Use MONITOR when available (730-734 numerics)
 - [outbound.c](src/common/outbound.c) - `/MONITOR +nick,-nick,C,L,S`
 
 #### 6.2 draft/metadata-2
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_metadata` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_metadata` flag
 - [inbound.c](src/common/inbound.c) - Handle METADATA responses
 - [outbound.c](src/common/outbound.c) - `/METADATA GET/SET/LIST/SUB/UNSUB` commands
 
@@ -398,7 +398,7 @@ Virtual keys are prefixed with `$` and computed dynamically - they cannot be SET
 - Use METADATA numerics: 760 (WHOIS), 761 (KEYVALUE), 766 (KEYNOTSET), 770-772 (SUB/UNSUB/SUBS), 774 (SYNCLATER)
 - Handle FAIL METADATA responses gracefully
 
-**HexChat UX for metadata:**
+**PoxChat UX for metadata:**
 - Display `avatar` in user profile popup (if supported)
 - Use `display-name` instead of nick where appropriate (tooltip, profile)
 - Show `status` in user info/WHOIS display
@@ -422,14 +422,14 @@ Virtual keys are prefixed with `$` and computed dynamically - they cannot be SET
 **Rationale:** Allows channels to be renamed without requiring users to rejoin.
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_channel_rename` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_channel_rename` flag
 - [proto-irc.c](src/common/proto-irc.c) - Add RENAME command handler
 - [inbound.c](src/common/inbound.c) - `inbound_rename()` to update session channel name
 - [fe-gtk/chanview.c](src/fe-gtk/chanview.c) - Update tab/tree label on rename
 
 #### 6.4 SASL OAUTHBEARER Token Refresh & Re-authentication
 
-**Rationale:** OAuth2 access tokens expire. HexChat must proactively refresh tokens and re-authenticate to maintain the session without reconnecting. Per IRCv3.2, clients can send `AUTHENTICATE` at any time to re-authenticate; servers that don't support this return 907 `ERR_SASLALREADY`.
+**Rationale:** OAuth2 access tokens expire. PoxChat must proactively refresh tokens and re-authenticate to maintain the session without reconnecting. Per IRCv3.2, clients can send `AUTHENTICATE` at any time to re-authenticate; servers that don't support this return 907 `ERR_SASLALREADY`.
 
 **Current state:**
 - Token storage exists (`secure_storage_store_oauth_tokens()` stores access_token, refresh_token, expires_at)
@@ -466,7 +466,7 @@ Virtual keys are prefixed with `$` and computed dynamically - they cannot be SET
 - [oauth.c](src/common/oauth.c) - Complete `oauth_refresh_token()` implementation
 - [oauth.h](src/common/oauth.h) - Add refresh callback types if needed
 - [inbound.c](src/common/inbound.c) - Add `sasl_reauthenticate()`, handle 903/907 for re-auth case
-- [hexchat.h](src/common/hexchat.h) - Add `oauth_refresh_timer` to server struct
+- [poxchat.h](src/common/poxchat.h) - Add `oauth_refresh_timer` to server struct
 - [server.c](src/common/server.c) - Cancel refresh timer on disconnect
 
 **UX considerations:**
@@ -504,7 +504,7 @@ Virtual keys are prefixed with `$` and computed dynamically - they cannot be SET
    - Base64 encode signature and send
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `MECH_ECDSA_CHALLENGE`, `LOGIN_SASL_ECDSA`
+- [poxchat.h](src/common/poxchat.h) - Add `MECH_ECDSA_CHALLENGE`, `LOGIN_SASL_ECDSA`
 - [inbound.c](src/common/inbound.c) - Add mechanism to SASL negotiation
 - [proto-irc.c](src/common/proto-irc.c) - Handle ECDSA challenge-response state machine
 - [servlist.h](src/common/servlist.h) - Add ECDSA key path to `ircnet` struct
@@ -611,10 +611,10 @@ if (strstr(text, "session cookie is:") && is_authserv_notice(sender))
 - Receiving `*` as away message means user is away for unspecified reason
 
 **Use cases:**
-1. **Bouncer reconnection** - When HexChat reconnects to a bouncer, send `AWAY *` pre-registration to indicate this connection doesn't mean user is present
+1. **Bouncer reconnection** - When PoxChat reconnects to a bouncer, send `AWAY *` pre-registration to indicate this connection doesn't mean user is present
 2. **Multi-device** - User connected on phone (active) and desktop (idle) - desktop sends `AWAY *`, phone's explicit away message takes precedence
 3. **Auto-away** - Better integration with server-side auto-away systems
-4. **Minimized to tray** - When HexChat is minimized to system tray, send `AWAY *` to indicate user isn't actively present
+4. **Minimized to tray** - When PoxChat is minimized to system tray, send `AWAY *` to indicate user isn't actively present
 
 **Implementation:**
 
@@ -633,7 +633,7 @@ if (strstr(text, "session cookie is:") && is_authserv_notice(sender))
    - Or use server-substituted human-readable message if provided
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `have_pre_away` flag
+- [poxchat.h](src/common/poxchat.h) - Add `have_pre_away` flag
 - [inbound.c](src/common/inbound.c) - Add capability, handle `*` away message
 - [server.c](src/common/server.c) - Send `AWAY *` pre-registration if enabled
 - [cfgfiles.c](src/common/cfgfiles.c) - Add preference for pre-away behavior
@@ -763,7 +763,7 @@ These are client-only tags (prefixed with `+`) that require the `message-tags` c
 - [proto-irc.c](src/common/proto-irc.c) - Parse react tag from TAGMSG
 - [outbound.c](src/common/outbound.c) - Send reaction TAGMSG
 - [inbound.c](src/common/inbound.c) - Handle reaction aggregation
-- [hexchat.h](src/common/hexchat.h) - Add reactions field to message struct
+- [poxchat.h](src/common/poxchat.h) - Add reactions field to message struct
 - [xtext.c](src/fe-gtk/xtext.c) - Render reactions inline with messages
 - [menu.c](src/fe-gtk/menu.c) - Add "React" context menu with emoji picker
 - [emojipicker.c](src/fe-gtk/emojipicker.c) - **NEW** - Emoji picker widget
@@ -807,13 +807,13 @@ These are client-only tags (prefixed with `+`) that require the `message-tags` c
    - Display user-friendly error: "Message contained invalid characters"
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `utf8only` flag to server struct
+- [poxchat.h](src/common/poxchat.h) - Add `utf8only` flag to server struct
 - [modes.c](src/common/modes.c) - Parse UTF8ONLY from ISUPPORT
 - [server.c](src/common/server.c) - Force UTF-8 encoding when flag set
 - [outbound.c](src/common/outbound.c) - Validate UTF-8 before sending, safe truncation
 - [inbound.c](src/common/inbound.c) - Handle INVALID_UTF8 standard reply
 
-**Note:** HexChat already defaults to UTF-8 in most cases, but this ensures proper handling when server mandates it and provides correct error feedback.
+**Note:** PoxChat already defaults to UTF-8 in most cases, but this ensures proper handling when server mandates it and provides correct error feedback.
 
 #### 6.10 draft/ICON ISUPPORT Token
 
@@ -844,13 +844,13 @@ These are client-only tags (prefixed with `+`) that require the `message-tags` c
    - Show in network properties dialog
 
 **Files to modify:**
-- [hexchat.h](src/common/hexchat.h) - Add `network_icon_url` to server struct
+- [poxchat.h](src/common/poxchat.h) - Add `network_icon_url` to server struct
 - [modes.c](src/common/modes.c) - Parse draft/ICON from ISUPPORT
 - [fe-gtk/chanview.c](src/fe-gtk/chanview.c) - Display icon in channel tree
 - [fe-gtk/servlistgui.c](src/fe-gtk/servlistgui.c) - Display icon in server list
 
 **Caching:**
-- Store downloaded icons in `~/.config/hexchat/icons/`
+- Store downloaded icons in `~/.config/poxchat/icons/`
 - Key by network name or hash of URL
 - Check for updates periodically or on reconnect
 
@@ -886,7 +886,7 @@ These are client-only tags (prefixed with `+`) that require the `message-tags` c
 **Files to modify:**
 - [ssl.c](src/common/ssl.c) - Add SNI hostname to SSL context before connect
 
-**Note:** HexChat likely already supports SNI through OpenSSL defaults, but this should be verified and explicitly implemented if not present.
+**Note:** PoxChat likely already supports SNI through OpenSSL defaults, but this should be verified and explicitly implemented if not present.
 
 ---
 
@@ -897,7 +897,7 @@ These are client-only tags (prefixed with `+`) that require the `message-tags` c
 | [src/common/proto-irc.c](src/common/proto-irc.c) | BATCH, TAGMSG, MARKREAD, REDACT, RENAME handlers; full tag parsing |
 | [src/common/proto-irc.h](src/common/proto-irc.h) | Extended `message_tags_data` structure |
 | [src/common/inbound.c](src/common/inbound.c) | All capability negotiations; batch processing; event playback |
-| [src/common/hexchat.h](src/common/hexchat.h) | Server struct flags; batch_info; sts_policy; session read marker |
+| [src/common/poxchat.h](src/common/poxchat.h) | Server struct flags; batch_info; sts_policy; session read marker |
 | [src/common/outbound.c](src/common/outbound.c) | New commands: /HISTORY, /MARKREAD, /REDACT, /TAGMSG, /MULTILINE, /REGISTER, /MONITOR, /METADATA; typing indicator state machine |
 | [src/common/modes.c](src/common/modes.c) | ISUPPORT parsing for MULTILINE, CHATHISTORY limits |
 | [src/common/server.c](src/common/server.c) | STS policy enforcement |
@@ -985,7 +985,7 @@ Phase 6.x ──► Independent
 ## Verification
 
 After implementation:
-1. Run HexChat against Nefarious IRCd testnet
+1. Run PoxChat against Nefarious IRCd testnet
 2. Verify all capabilities negotiated in CAP LS/ACK
 3. Test each feature manually per checklist above
 4. Test plugin API access to message tags
@@ -1024,23 +1024,23 @@ After implementation:
 
 1. **Reconnect scenario:**
    - User disconnects, reconnects 2 hours later
-   - HexChat automatically: requests chathistory AFTER last known msgid
+   - PoxChat automatically: requests chathistory AFTER last known msgid
    - Result: missed messages appear seamlessly, no user action needed
 
 2. **Multi-device scenario:**
-   - User reads messages on mobile, opens HexChat on desktop
-   - HexChat automatically: fetches read-marker position, shows unread line
+   - User reads messages on mobile, opens PoxChat on desktop
+   - PoxChat automatically: fetches read-marker position, shows unread line
    - Result: user sees exactly where they left off
 
 3. **Paste code block:**
    - User pastes 15 lines of code
-   - HexChat automatically: detects multiline, sends as batch (if available)
+   - PoxChat automatically: detects multiline, sends as batch (if available)
    - Receivers see: single cohesive message (truncated if needed)
    - No dialog needed if under threshold and server supports multiline
 
 4. **Message deleted:**
    - Someone redacts a message in channel
-   - HexChat automatically: updates display to show "[Message deleted]"
+   - PoxChat automatically: updates display to show "[Message deleted]"
    - No user configuration needed
 
 **Progressive enhancement model:**
@@ -1065,7 +1065,7 @@ Server supports cap?
 **Relationship to Local Logging/Scrollback:**
 
 Chathistory supplements (not replaces) local logging. Key considerations:
-- **Local scrollback** - HexChat already has `hex_text_max_lines` buffer and optional disk logging
+- **Local scrollback** - PoxChat already has `hex_text_max_lines` buffer and optional disk logging
 - **Server history** - Provides continuity across devices, fills gaps when client was offline
 - **Coordination** - Don't duplicate: if message already in local buffer (by msgid), skip it
 - **Pagination** - Never try to load years of history; always fetch in bounded pages (50-100 messages)
@@ -1427,24 +1427,24 @@ Extend plugin API for IRCv3 features:
 
 ```c
 /* Get message tag by name */
-const char *hexchat_get_info_tag(hexchat_plugin *ph, const char *tag);
+const char *poxchat_get_info_tag(poxchat_plugin *ph, const char *tag);
 
 /* Get all message tags as list */
-hexchat_list *hexchat_list_get_tags(hexchat_plugin *ph);
+poxchat_list *poxchat_list_get_tags(poxchat_plugin *ph);
 
 /* Request chat history */
-void hexchat_chathistory_request(hexchat_plugin *ph, const char *target,
+void poxchat_chathistory_request(poxchat_plugin *ph, const char *target,
                                   const char *subcommand, int limit);
 
 /* Send TAGMSG */
-void hexchat_tagmsg(hexchat_plugin *ph, const char *target, const char *tags);
+void poxchat_tagmsg(poxchat_plugin *ph, const char *target, const char *tags);
 
 /* Redact message */
-void hexchat_redact(hexchat_plugin *ph, const char *target, const char *msgid,
+void poxchat_redact(poxchat_plugin *ph, const char *target, const char *msgid,
                     const char *reason);
 
 /* Mark as read */
-void hexchat_markread(hexchat_plugin *ph, const char *target, const char *msgid);
+void poxchat_markread(poxchat_plugin *ph, const char *target, const char *msgid);
 ```
 
 **Files:**
@@ -1491,9 +1491,9 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ✅ | `batch_info` struct | hexchat.h | Defined |
-| ✅ | `active_batches` hash table | hexchat.h, server.c | In server struct |
-| ✅ | `have_batch` capability flag | hexchat.h, inbound.c | CAP negotiation |
+| ✅ | `batch_info` struct | poxchat.h | Defined |
+| ✅ | `active_batches` hash table | poxchat.h, server.c | In server struct |
+| ✅ | `have_batch` capability flag | poxchat.h, inbound.c | CAP negotiation |
 | ✅ | BATCH command handler | proto-irc.c | Parse +id/-id |
 | ✅ | `inbound_batch_start()` | inbound.c | Create batch context |
 | ✅ | `inbound_batch_end()` | inbound.c | Finalize batch |
@@ -1503,7 +1503,7 @@ These have no dependencies and can be done anytime.
 | ✅ | `message_tags_data.msgid` | proto-irc.h | Field exists |
 | ✅ | `message_tags_data.label` | proto-irc.h | Field exists |
 | ✅ | `message_tags_data.all_tags` | proto-irc.h | Hash table for all tags |
-| ✅ | `have_message_tags` capability | hexchat.h, inbound.c | CAP negotiation |
+| ✅ | `have_message_tags` capability | poxchat.h, inbound.c | CAP negotiation |
 | ✅ | Client-only tag parsing (`+`) | proto-irc.c | Handle `+typing` etc. |
 | ✅ | TAGMSG command handler | proto-irc.c | Parse tag-only messages |
 | ✅ | `inbound_tagmsg()` | inbound.c | Process TAGMSG |
@@ -1518,8 +1518,8 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ✅ | `have_chathistory` capability | hexchat.h, inbound.c | CAP negotiation |
-| ✅ | `chathistory_limit` from ISUPPORT | hexchat.h, modes.c | Parse CHATHISTORY token |
+| ✅ | `have_chathistory` capability | poxchat.h, inbound.c | CAP negotiation |
+| ✅ | `chathistory_limit` from ISUPPORT | poxchat.h, modes.c | Parse CHATHISTORY token |
 | ✅ | chathistory.c module | chathistory.c | New file created |
 | ✅ | `chathistory_request_latest()` | chathistory.c | LATEST subcommand |
 | ✅ | `chathistory_request_before()` | chathistory.c | BEFORE subcommand |
@@ -1531,13 +1531,13 @@ These have no dependencies and can be done anytime.
 | ✅ | Hold JOIN banner for history | inbound.c, chathistory.c | Defer display until history fetched |
 | ✅ | Auto-fetch on reconnect | inbound.c | Uses AFTER with scrollback_newest_msgid |
 | ✅ | Scroll debouncing | fe-gtk/xtext.c | `scroll_top_debounce_tag` with backoff |
-| ✅ | `history_loading` flag | hexchat.h | Prevent concurrent requests |
+| ✅ | `history_loading` flag | poxchat.h | Prevent concurrent requests |
 | ✅ | Scroll debounce timer | xtext.h | `scroll_top_debounce_tag` in GtkXText |
 | ✅ | Rate limiting | chathistory.c | history_loading prevents concurrent |
-| ✅ | Msgid deduplication | hexchat.h, chathistory.c, inbound.c | `known_msgids` hash table |
-| ✅ | Session `oldest_msgid` | hexchat.h | For BEFORE pagination |
-| ✅ | Session `newest_msgid` | hexchat.h | For AFTER catch-up |
-| ✅ | `history_exhausted` flag | hexchat.h | Server has no more |
+| ✅ | Msgid deduplication | poxchat.h, chathistory.c, inbound.c | `known_msgids` hash table |
+| ✅ | Session `oldest_msgid` | poxchat.h | For BEFORE pagination |
+| ✅ | Session `newest_msgid` | poxchat.h | For AFTER catch-up |
+| ✅ | `history_exhausted` flag | poxchat.h | Server has no more |
 | ✅ | Chathistory preferences | cfgfiles.c | `hex_irc_chathistory_*` |
 | ✅ | Background history fetching | chathistory.c | Gradual older history retrieval |
 | ✅ | Background fetch time cap | chathistory.c | Max age limit (default 24h) |
@@ -1551,16 +1551,16 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ✅ | `have_echo_message` capability | hexchat.h, inbound.c | CAP negotiation |
+| ✅ | `have_echo_message` capability | poxchat.h, inbound.c | CAP negotiation |
 | ⬜ | Self-echo detection | inbound.c | Check if message is from self |
 | ✅ | Defer outgoing display | outbound.c | Skips local display when echo-message enabled |
-| ⬜ | Pending message tracking | hexchat.h | Track unechoed messages |
+| ⬜ | Pending message tracking | poxchat.h | Track unechoed messages |
 | ⬜ | Pending message visual | fe-gtk/xtext.c | **UX #1**: Muted color, theme-aware |
 | ⬜ | Echo timeout (10s) | outbound.c | Fall back to local display |
 | ⬜ | Msgid correlation | inbound.c | Match echo to pending by msgid |
-| ✅ | `have_labeled_response` cap | hexchat.h, inbound.c | CAP negotiation |
-| ✅ | Label counter | hexchat.h, server.c | `tcp_generate_label()` exists |
-| ⬜ | `pending_labels` hash table | hexchat.h | Track pending responses |
+| ✅ | `have_labeled_response` cap | poxchat.h, inbound.c | CAP negotiation |
+| ✅ | Label counter | poxchat.h, server.c | `tcp_generate_label()` exists |
+| ⬜ | `pending_labels` hash table | poxchat.h | Track pending responses |
 | ✅ | Add labels to commands | server.c | `tcp_sendf_labeled()` exists |
 | ⬜ | ACK batch handling | inbound.c | Handle labeled-response batch |
 | ⬜ | Echo-message preference | cfgfiles.c | `hex_irc_echo_message` |
@@ -1574,10 +1574,10 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ⬜ | `have_read_marker` capability | hexchat.h, inbound.c | CAP negotiation |
+| ⬜ | `have_read_marker` capability | poxchat.h, inbound.c | CAP negotiation |
 | ⬜ | MARKREAD command handler | proto-irc.c | Parse server response |
 | ⬜ | `/MARKREAD` command | outbound.c | Set/query marker |
-| ⬜ | Session `last_read_timestamp` | hexchat.h | Track marker position |
+| ⬜ | Session `last_read_timestamp` | poxchat.h | Track marker position |
 | ⬜ | Query marker on JOIN | inbound.c | `MARKREAD #channel` |
 | ⬜ | Update on scroll past | fe-gtk/xtext.c | **UX #7**: Advance marker |
 | ⬜ | Update on send message | outbound.c | **UX #7**: Implies caught up |
@@ -1594,7 +1594,7 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ⬜ | `have_multiline` capability | hexchat.h, inbound.c | CAP negotiation |
+| ⬜ | `have_multiline` capability | poxchat.h, inbound.c | CAP negotiation |
 | ⬜ | MULTILINE ISUPPORT parsing | modes.c | `max-bytes`, `max-lines` |
 | ⬜ | Multiline batch collection | inbound.c | Collect PRIVMSG lines |
 | ⬜ | Join lines with `\n` | inbound.c | Single message display |
@@ -1616,7 +1616,7 @@ These have no dependencies and can be done anytime.
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
 | ⬜ | Parse `+typing` tag | proto-irc.c | From TAGMSG |
-| ⬜ | Typing state per user | hexchat.h | Track who's typing |
+| ⬜ | Typing state per user | poxchat.h | Track who's typing |
 | ⬜ | Typing timeout (6s) | userlist.c | Auto-clear state |
 | ⬜ | Clear on message receive | inbound.c | User sent message |
 | ⬜ | Userlist typing icon | fe-gtk/userlist.c | **UX #10**: Pencil/ellipsis |
@@ -1635,7 +1635,7 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ⬜ | `have_redact` capability | hexchat.h, inbound.c | CAP negotiation |
+| ⬜ | `have_redact` capability | poxchat.h, inbound.c | CAP negotiation |
 | ⬜ | REDACT command handler | proto-irc.c | Parse redaction |
 | ⬜ | Find message by msgid | text.c | Lookup in buffer |
 | ⬜ | Mark message redacted | text.c | Update display state |
@@ -1686,12 +1686,12 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ⬜ | `have_metadata` capability | hexchat.h, inbound.c | CAP negotiation |
+| ⬜ | `have_metadata` capability | poxchat.h, inbound.c | CAP negotiation |
 | ⬜ | METADATA command handlers | proto-irc.c | GET/SET/LIST/SUB/UNSUB |
 | ⬜ | `/METADATA` command | outbound.c | User interface |
 | ⬜ | Virtual key queries | outbound.c | `$presence`, `$idle`, etc. |
 | ⬜ | Metadata caching | servlist.c | Per-target storage |
-| ⬜ | `have_pre_away` capability | hexchat.h, inbound.c | CAP negotiation |
+| ⬜ | `have_pre_away` capability | poxchat.h, inbound.c | CAP negotiation |
 | ⬜ | `/AWAY *` support | outbound.c | Hidden connection |
 | ⬜ | Pre-away preference | cfgfiles.c | Send AWAY * on connect |
 
@@ -1703,7 +1703,7 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ⬜ | `have_account_registration` | hexchat.h, inbound.c | CAP negotiation |
+| ⬜ | `have_account_registration` | poxchat.h, inbound.c | CAP negotiation |
 | ⬜ | REGISTER response handler | proto-irc.c | SUCCESS/VERIFY/FAIL |
 | ⬜ | `/REGISTER` command | outbound.c | **UX #15**: All args required |
 | ⬜ | `/VERIFY` command | outbound.c | Verification code |
@@ -1721,8 +1721,8 @@ These have no dependencies and can be done anytime.
 |--------|------|-------|-------|
 | ✅ | Token storage | secure-storage.c | `secure_storage_store_oauth_tokens()` exists |
 | ⬜ | Complete `oauth_refresh_token()` | oauth.c | Currently stub, needs HTTP POST |
-| ⬜ | Token expiry timer | hexchat.h, server.c | Schedule refresh before expiry |
-| ⬜ | `oauth_refresh_timer` in server | hexchat.h | Timer ID storage |
+| ⬜ | Token expiry timer | poxchat.h, server.c | Schedule refresh before expiry |
+| ⬜ | `oauth_refresh_timer` in server | poxchat.h | Timer ID storage |
 | ⬜ | Cancel timer on disconnect | server.c | Cleanup |
 | ⬜ | SASL re-authentication | inbound.c | `sasl_reauthenticate()` function |
 | ⬜ | Handle 903 (success) | inbound.c | Update tokens, reschedule timer |
@@ -1736,8 +1736,8 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ⬜ | `MECH_ECDSA_CHALLENGE` enum | hexchat.h | New SASL mechanism |
-| ⬜ | `LOGIN_SASL_ECDSA` login type | hexchat.h | New login method |
+| ⬜ | `MECH_ECDSA_CHALLENGE` enum | poxchat.h | New SASL mechanism |
+| ⬜ | `LOGIN_SASL_ECDSA` login type | poxchat.h | New login method |
 | ⬜ | ECDSA key generation | secure-storage.c | P-256 via OpenSSL |
 | ⬜ | Key storage (secure) | secure-storage.c | Private key storage |
 | ⬜ | Public key export | secure-storage.c | For registration with services |
@@ -1770,10 +1770,10 @@ These have no dependencies and can be done anytime.
 
 | Status | Task | Files | Notes |
 |--------|------|-------|-------|
-| ✅ | `network_icon_url` storage | hexchat.h | Field exists |
+| ✅ | `network_icon_url` storage | poxchat.h | Field exists |
 | ⬜ | Icon URL validation | modes.c | HTTPS preferred |
 | ⬜ | Async icon fetch | network.c | Download in background |
-| ⬜ | Icon caching | cfgfiles.c | `~/.config/hexchat/icons/` |
+| ⬜ | Icon caching | cfgfiles.c | `~/.config/poxchat/icons/` |
 | ⬜ | Channel tree icon | fe-gtk/chanview.c | **UX #3**: Replace pix_tree_server |
 | ⬜ | Network list icon | fe-gtk/servlistgui.c | Show in server list |
 

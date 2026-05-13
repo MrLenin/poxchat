@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -22,8 +22,8 @@
 #include <time.h>						/* for time_t */
 #include "proto-irc.h"
 
-#ifndef HEXCHAT_DCC_H
-#define HEXCHAT_DCC_H
+#ifndef POXCHAT_DCC_H
+#define POXCHAT_DCC_H
 
 enum dcc_state {
 	STAT_QUEUED = 0,

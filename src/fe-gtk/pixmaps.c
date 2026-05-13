@@ -22,7 +22,7 @@
 
 #include "fe-gtk.h"
 #include "../common/cfgfiles.h"
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #include "../common/fe.h"
 #include "resources.h"
 
@@ -47,7 +47,7 @@ GdkPixbuf *pix_tree_server;
 GdkPixbuf *pix_tree_util;
 
 GdkPixbuf *pix_book;
-GdkPixbuf *pix_hexchat;
+GdkPixbuf *pix_poxchat;
 
 static cairo_surface_t *
 pixmap_load_from_file_real (char *file)
@@ -179,7 +179,7 @@ load_pixmap (const char *filename)
 void
 pixmaps_init (void)
 {
-	hexchat_register_resource();
+	poxchat_register_resource();
 
 	pix_ulist_voice = load_pixmap ("ulist_voice");
 	pix_ulist_halfop = load_pixmap ("ulist_halfop");
@@ -202,5 +202,5 @@ pixmaps_init (void)
 	pix_book = gdk_pixbuf_new_from_resource ("/icons/book.png", NULL);
 
 	/* used in About window, tray icon and WindowManager icon. */
-	pix_hexchat = load_pixmap ("hexchat");
+	pix_poxchat = load_pixmap ("poxchat");
 }

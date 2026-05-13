@@ -4,7 +4,7 @@ Go to the [Transifex client documentation](http://help.transifex.com/features/cl
 
 <pre>
 tx init
-tx set --auto-local -r hexchat.main "po\<lang>.po" --source-lang en --source-file po\hexchat.pot --execute
+tx set --auto-local -r poxchat.main "po\<lang>.po" --source-lang en --source-file po\poxchat.pot --execute
 </pre>
 
 Append `type = PO` to _.tx\config_.
@@ -18,10 +18,10 @@ tx push --source --translation
 
 ## Updating online translations with the template
 
-Regenerate the source file ( _hexchat.pot_ ) on a Unix machine:
+Regenerate the source file ( _poxchat.pot_ ) on a Unix machine:
 
 <pre>
-rm po/hexchat.pot && ./autogen.sh && ./configure --enable-nls && cd src/common && make textevents.h && cd../.. && make
+rm po/poxchat.pot && ./autogen.sh && ./configure --enable-nls && cd src/common && make textevents.h && cd../.. && make
 </pre>
 
 Push the updated source file to Transifex (this automatically updates all translation files):

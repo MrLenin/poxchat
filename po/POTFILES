@@ -1,10 +1,10 @@
-data/misc/io.github.Hexchat.appdata.xml.in
-data/misc/io.github.Hexchat.desktop.in.in
-data/misc/io.github.Hexchat.ThemeManager.desktop.in
+data/misc/io.github.evilnet.PoxChat.appdata.xml.in
+data/misc/io.github.evilnet.PoxChat.desktop.in.in
+data/misc/io.github.evilnet.PoxChat.ThemeManager.desktop.in
 src/common/cfgfiles.c
 src/common/chanopt.c
 src/common/dcc.c
-src/common/hexchat.c
+src/common/poxchat.c
 src/common/ignore.c
 src/common/inbound.c
 src/common/notify.c

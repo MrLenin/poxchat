@@ -32,8 +32,8 @@
 
 #include <gdk/gdkkeysyms.h>
 
-#include "../common/hexchat.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchat.h"
+#include "../common/poxchatc.h"
 #include "../common/cfgfiles.h"
 #include "../common/outbound.h"
 #include "../common/util.h"
@@ -430,12 +430,12 @@ chanlist_filereq_done (server *serv, char *file)
 	if (!file)
 		return;
 
-	fh = hexchat_open_file (file, O_TRUNC | O_WRONLY | O_CREAT, 0600,
+	fh = poxchat_open_file (file, O_TRUNC | O_WRONLY | O_CREAT, 0600,
 								 XOF_DOMODE | XOF_FULLPATH);
 	if (fh == -1)
 		return;
 
-	g_snprintf (buf, sizeof buf, "HexChat Channel List: %s - %s\n",
+	g_snprintf (buf, sizeof buf, "PoxChat Channel List: %s - %s\n",
 				 serv->servername, ctime (&t));
 	HC_IGNORE_RESULT (write (fh, buf, strlen (buf)));
 
@@ -1038,7 +1038,7 @@ chanlist_create_columnview (server *serv)
 
 	/* Create the column view */
 	view = gtk_column_view_new (GTK_SELECTION_MODEL (sel_model));
-	gtk_widget_set_name (view, "hexchat-list");
+	gtk_widget_set_name (view, "poxchat-list");
 	gtk_column_view_set_show_column_separators (GTK_COLUMN_VIEW (view), TRUE);
 
 	/* Enable sorting on the column view */

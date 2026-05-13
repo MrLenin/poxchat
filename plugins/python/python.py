@@ -9,7 +9,7 @@ import traceback
 import weakref
 from contextlib import contextmanager
 
-from _hexchat_embedded import ffi, lib
+from _poxchat_embedded import ffi, lib
 
 if sys.version_info < (3, 0):
     from io import BytesIO as HelpEater
@@ -17,17 +17,17 @@ else:
     from io import StringIO as HelpEater
 
 if not hasattr(sys, 'argv'):
-    sys.argv = ['<hexchat>']
+    sys.argv = ['<poxchat>']
 
-VERSION = b'2.0'  # Sync with hexchat.__version__
+VERSION = b'2.0'  # Sync with poxchat.__version__
 PLUGIN_NAME = ffi.new('char[]', b'Python')
 PLUGIN_DESC = ffi.new('char[]', b'Python %d.%d scripting interface' % (sys.version_info[0], sys.version_info[1]))
 PLUGIN_VERSION = ffi.new('char[]', VERSION)
 
 # TODO: Constants should be screaming snake case
-hexchat = None
+poxchat = None
 local_interp = None
-hexchat_stdout = None
+poxchat_stdout = None
 plugins = set()
 
 
@@ -36,11 +36,11 @@ def redirected_stdout():
     sys.stdout = sys.__stdout__
     sys.stderr = sys.__stderr__
     yield
-    sys.stdout = hexchat_stdout
-    sys.stderr = hexchat_stdout
+    sys.stdout = poxchat_stdout
+    sys.stderr = poxchat_stdout
 
 
-if os.getenv('HEXCHAT_LOG_PYTHON'):
+if os.getenv('POXCHAT_LOG_PYTHON'):
     def log(*args):
         with redirected_stdout():
             print(*args)
@@ -59,13 +59,13 @@ class Stdout:
         idx = string.rfind(b'\n')
         if idx != -1:
             self.buffer += string[:idx]
-            lib.hexchat_print(lib.ph, bytes(self.buffer))
+            lib.poxchat_print(lib.ph, bytes(self.buffer))
             self.buffer = bytearray(string[idx + 1:])
         else:
             self.buffer += string
 
     def flush(self):
-        lib.hexchat_print(lib.ph, bytes(self.buffer))
+        lib.poxchat_print(lib.ph, bytes(self.buffer))
         self.buffer = bytearray()
 
     def isatty(self):
@@ -86,14 +86,14 @@ class Hook:
         self.plugin = weakref.proxy(plugin)
         self.callback = callback
         self.userdata = userdata
-        self.hexchat_hook = None
+        self.poxchat_hook = None
         self.handle = ffi.new_handle(weakref.proxy(self))
 
     def __del__(self):
         log('Removing hook', id(self))
         if self.is_unload is False:
-            assert self.hexchat_hook is not None
-            lib.hexchat_unhook(lib.ph, self.hexchat_hook)
+            assert self.poxchat_hook is not None
+            lib.poxchat_unhook(lib.ph, self.poxchat_hook)
 
 
 if sys.version_info[0] == 2:
@@ -159,17 +159,17 @@ class Plugin:
                 self.name = self.globals['__module_name__']
 
             except KeyError:
-                lib.hexchat_print(lib.ph, b'Failed to load module: __module_name__ must be set')
+                lib.poxchat_print(lib.ph, b'Failed to load module: __module_name__ must be set')
 
                 return False
 
             self.version = self.globals.get('__module_version__', '')
             self.description = self.globals.get('__module_description__', '')
-            self.ph = lib.hexchat_plugingui_add(lib.ph, filename.encode(), self.name.encode(),
+            self.ph = lib.poxchat_plugingui_add(lib.ph, filename.encode(), self.name.encode(),
                                                 self.description.encode(), self.version.encode(), ffi.NULL)
 
         except Exception as e:
-            lib.hexchat_print(lib.ph, 'Failed to load module: {}'.format(e).encode())
+            lib.poxchat_print(lib.ph, 'Failed to load module: {}'.format(e).encode())
             traceback.print_exc()
             return False
 
@@ -188,7 +188,7 @@ class Plugin:
 
         del self.hooks
         if self.ph is not None:
-            lib.hexchat_plugingui_remove(lib.ph, self.ph)
+            lib.poxchat_plugingui_remove(lib.ph, self.ph)
 
 
 if sys.version_info[0] == 2:
@@ -292,7 +292,7 @@ def _on_timer_hook(userdata):
         return 1
 
     try:
-        # Avoid calling hexchat_unhook twice if unnecessary
+        # Avoid calling poxchat_unhook twice if unnecessary
         hook.is_unload = True
     except ReferenceError:
         # hook is a weak reference, it might have been destroyed by the callback
@@ -310,10 +310,10 @@ def _on_timer_hook(userdata):
 
 @ffi.def_extern(error=3)
 def _on_say_command(word, word_eol, userdata):
-    channel = ffi.string(lib.hexchat_get_info(lib.ph, b'channel'))
+    channel = ffi.string(lib.poxchat_get_info(lib.ph, b'channel'))
     if channel == b'>>python<<':
         python = ffi.string(word_eol[1])
-        lib.hexchat_print(lib.ph, b'>>> ' + python)
+        lib.poxchat_print(lib.ph, b'>>> ' + python)
         exec_in_interp(__decode(python))
         return 1
 
@@ -323,7 +323,7 @@ def _on_say_command(word, word_eol, userdata):
 def load_filename(filename):
     filename = os.path.expanduser(filename)
     if not os.path.isabs(filename):
-        configdir = __decode(ffi.string(lib.hexchat_get_info(lib.ph, b'configdir')))
+        configdir = __decode(ffi.string(lib.poxchat_get_info(lib.ph, b'configdir')))
 
         filename = os.path.join(configdir, 'addons', filename)
 
@@ -366,7 +366,7 @@ def change_cwd(path):
 
 
 def autoload():
-    configdir = __decode(ffi.string(lib.hexchat_get_info(lib.ph, b'configdir')))
+    configdir = __decode(ffi.string(lib.poxchat_get_info(lib.ph, b'configdir')))
     addondir = os.path.join(configdir, 'addons')
     try:
         with change_cwd(addondir):  # Maintaining old behavior
@@ -382,7 +382,7 @@ def autoload():
 
 def list_plugins():
     if not plugins:
-        lib.hexchat_print(lib.ph, b'No python modules loaded')
+        lib.poxchat_print(lib.ph, b'No python modules loaded')
         return
 
     tbl_headers = [b'Name', b'Version', b'Filename', b'Description']
@@ -404,9 +404,9 @@ def list_plugins():
     ]
 
     for row in tbl:
-        lib.hexchat_print(lib.ph, b' '.join(item.ljust(column_sizes[i])
+        lib.poxchat_print(lib.ph, b' '.join(item.ljust(column_sizes[i])
                                             for i, item in enumerate(row)))
-    lib.hexchat_print(lib.ph, b'')
+    lib.poxchat_print(lib.ph, b'')
 
 
 def exec_in_interp(python):
@@ -418,16 +418,16 @@ def exec_in_interp(python):
     if local_interp is None:
         local_interp = Plugin()
         local_interp.locals = {}
-        local_interp.globals['hexchat'] = hexchat
+        local_interp.globals['poxchat'] = poxchat
 
     code = compile_line(python)
     try:
         ret = eval(code, local_interp.globals, local_interp.locals)
         if ret is not None:
-            lib.hexchat_print(lib.ph, '{}'.format(ret).encode())
+            lib.poxchat_print(lib.ph, '{}'.format(ret).encode())
 
     except Exception as e:
-        traceback.print_exc(file=hexchat_stdout)
+        traceback.print_exc(file=poxchat_stdout)
 
 
 @ffi.def_extern()
@@ -475,32 +475,32 @@ def _on_py_command(word, word_eol, userdata):
     elif subcmd == 'unload':
         name = __decode(ffi.string(word[3]))
         if not unload_name(name):
-            lib.hexchat_print(lib.ph, b'Can\'t find a python plugin with that name')
+            lib.poxchat_print(lib.ph, b'Can\'t find a python plugin with that name')
 
     elif subcmd == 'reload':
         name = __decode(ffi.string(word[3]))
         if not reload_name(name):
-            lib.hexchat_print(lib.ph, b'Can\'t find a python plugin with that name')
+            lib.poxchat_print(lib.ph, b'Can\'t find a python plugin with that name')
 
     elif subcmd == 'console':
-        lib.hexchat_command(lib.ph, b'QUERY >>python<<')
+        lib.poxchat_command(lib.ph, b'QUERY >>python<<')
 
     elif subcmd == 'list':
         list_plugins()
 
     elif subcmd == 'about':
-        lib.hexchat_print(lib.ph, b'HexChat Python interface version ' + VERSION)
+        lib.poxchat_print(lib.ph, b'PoxChat Python interface version ' + VERSION)
 
     else:
-        lib.hexchat_command(lib.ph, b'HELP PY')
+        lib.poxchat_command(lib.ph, b'HELP PY')
 
     return 3
 
 
 @ffi.def_extern()
 def _on_plugin_init(plugin_name, plugin_desc, plugin_version, arg, libdir):
-    global hexchat
-    global hexchat_stdout
+    global poxchat
+    global poxchat_stdout
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -512,23 +512,23 @@ def _on_plugin_init(plugin_name, plugin_desc, plugin_version, arg, libdir):
         libdir = __decode(ffi.string(libdir))
         modpath = os.path.join(libdir, '..', 'python')
         sys.path.append(os.path.abspath(modpath))
-        hexchat = importlib.import_module('hexchat')
+        poxchat = importlib.import_module('poxchat')
 
     except (UnicodeDecodeError, ImportError) as e:
-        lib.hexchat_print(lib.ph, b'Failed to import module: ' + repr(e).encode())
+        lib.poxchat_print(lib.ph, b'Failed to import module: ' + repr(e).encode())
 
         return 0
 
-    hexchat_stdout = Stdout()
-    sys.stdout = hexchat_stdout
-    sys.stderr = hexchat_stdout
+    poxchat_stdout = Stdout()
+    sys.stdout = poxchat_stdout
+    sys.stderr = poxchat_stdout
     pydoc.help = pydoc.Helper(HelpEater(), HelpEater())
 
-    lib.hexchat_hook_command(lib.ph, b'', 0, lib._on_say_command, ffi.NULL, ffi.NULL)
-    lib.hexchat_hook_command(lib.ph, b'LOAD', 0, lib._on_load_command, ffi.NULL, ffi.NULL)
-    lib.hexchat_hook_command(lib.ph, b'UNLOAD', 0, lib._on_unload_command, ffi.NULL, ffi.NULL)
-    lib.hexchat_hook_command(lib.ph, b'RELOAD', 0, lib._on_reload_command, ffi.NULL, ffi.NULL)
-    lib.hexchat_hook_command(lib.ph, b'PY', 0, lib._on_py_command, b'''Usage: /PY LOAD   <filename>
+    lib.poxchat_hook_command(lib.ph, b'', 0, lib._on_say_command, ffi.NULL, ffi.NULL)
+    lib.poxchat_hook_command(lib.ph, b'LOAD', 0, lib._on_load_command, ffi.NULL, ffi.NULL)
+    lib.poxchat_hook_command(lib.ph, b'UNLOAD', 0, lib._on_unload_command, ffi.NULL, ffi.NULL)
+    lib.poxchat_hook_command(lib.ph, b'RELOAD', 0, lib._on_reload_command, ffi.NULL, ffi.NULL)
+    lib.poxchat_hook_command(lib.ph, b'PY', 0, lib._on_py_command, b'''Usage: /PY LOAD   <filename>
            UNLOAD <filename|name>
            RELOAD <filename|name>
            LIST
@@ -536,7 +536,7 @@ def _on_plugin_init(plugin_name, plugin_desc, plugin_version, arg, libdir):
            CONSOLE
            ABOUT''', ffi.NULL)
 
-    lib.hexchat_toast(lib.ph, b'Python interface loaded', 0)
+    lib.poxchat_toast(lib.ph, b'Python interface loaded', 0)
     autoload()
     return 1
 
@@ -544,19 +544,19 @@ def _on_plugin_init(plugin_name, plugin_desc, plugin_version, arg, libdir):
 @ffi.def_extern()
 def _on_plugin_deinit():
     global local_interp
-    global hexchat
-    global hexchat_stdout
+    global poxchat
+    global poxchat_stdout
     global plugins
 
     plugins = set()
     local_interp = None
-    hexchat = None
-    hexchat_stdout = None
+    poxchat = None
+    poxchat_stdout = None
     sys.stdout = sys.__stdout__
     sys.stderr = sys.__stderr__
     pydoc.help = pydoc.Helper()
 
-    for mod in ('_hexchat', 'hexchat', 'xchat', '_hexchat_embedded'):
+    for mod in ('_poxchat', 'poxchat', 'xchat', '_poxchat_embedded'):
         try:
             del sys.modules[mod]
 

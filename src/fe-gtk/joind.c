@@ -31,8 +31,8 @@
 #include <unistd.h>
 #endif
 
-#include "../common/hexchat.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchat.h"
+#include "../common/poxchatc.h"
 #include "../common/server.h"
 #include "../common/servlist.h"
 #include "../common/fe.h"
@@ -217,7 +217,7 @@ joind_show_dialog (server *serv)
 	if (serv->network)
 		if (g_ascii_strcasecmp(((ircnet*)serv->network)->name, "Libera.Chat") == 0)
 		{
-			hc_entry_set_text (entry1, "#hexchat");
+			hc_entry_set_text (entry1, "#poxchat");
 		}
 
 	gtk_widget_grab_focus (okbutton1);

@@ -1,5 +1,5 @@
 /*
- * SysInfo - sysinfo plugin for HexChat
+ * SysInfo - sysinfo plugin for PoxChat
  * Copyright (c) 2012 Berke Viktor.
  *
  * xsys.c - main functions for X-Sys 2
@@ -29,14 +29,14 @@
 #include <string.h>
 #include <glib.h>
 
-#include "hexchat-plugin.h"
+#include "poxchat-plugin.h"
 #include "sysinfo-backend.h"
 #include "sysinfo.h"
 
-#define _(x) hexchat_gettext(ph,x)
+#define _(x) poxchat_gettext(ph,x)
 #define DEFAULT_ANNOUNCE TRUE
 
-static hexchat_plugin *ph;
+static poxchat_plugin *ph;
 
 static char name[] = "Sysinfo";
 static char desc[] = "Display info about your hardware and OS";
@@ -54,7 +54,7 @@ typedef struct
 static char *
 get_client (void)
 {
-	return g_strdup_printf ("HexChat %s", hexchat_get_info(ph, "version"));
+	return g_strdup_printf ("PoxChat %s", poxchat_get_info(ph, "version"));
 }
 
 static hwinfo hwinfos[] = {
@@ -102,7 +102,7 @@ print_summary (gboolean announce)
 	}
 
 	output = g_strjoinv (" \002\342\200\242\002 ", strings);
-	hexchat_commandf (ph, "%s %s", announce ? "SAY" : "ECHO", output);
+	poxchat_commandf (ph, "%s %s", announce ? "SAY" : "ECHO", output);
 
 	g_strfreev (strings);
 	g_free (output);
@@ -120,23 +120,23 @@ print_info (char *info, gboolean announce)
 			char *str = hwinfos[i].callback();
 			if (str)
 			{
-				hexchat_commandf (ph, "%s \002%s\002: %s", announce ? "SAY" : "ECHO",
+				poxchat_commandf (ph, "%s \002%s\002: %s", announce ? "SAY" : "ECHO",
 									hwinfos[i].title, str);
 				g_free (str);
 			}
 			else
-				hexchat_print (ph, _("Sysinfo: Failed to get info. Either not supported or error."));
+				poxchat_print (ph, _("Sysinfo: Failed to get info. Either not supported or error."));
 			return;
 		}
 	}
 
-	hexchat_print (ph, _("Sysinfo: No info by that name\n"));
+	poxchat_print (ph, _("Sysinfo: No info by that name\n"));
 }
 
 static gboolean
 sysinfo_get_bool_pref (const char *pref, gboolean def)
 {
-	int value = hexchat_pluginpref_get_int (ph, pref);
+	int value = poxchat_pluginpref_get_int (ph, pref);
 
 	if (value != -1)
 		return value;
@@ -150,12 +150,12 @@ sysinfo_set_pref_real (const char *pref, char *value, gboolean def)
 	if (value && value[0])
 	{
 		guint64 i = g_ascii_strtoull (value, NULL, 0);
-		hexchat_pluginpref_set_int (ph, pref, i != 0);
-		hexchat_printf (ph, _("Sysinfo: %s is set to: %d\n"), pref, i != 0);
+		poxchat_pluginpref_set_int (ph, pref, i != 0);
+		poxchat_printf (ph, _("Sysinfo: %s is set to: %d\n"), pref, i != 0);
 	}
 	else
 	{
-		hexchat_printf (ph, _("Sysinfo: %s is set to: %d\n"), pref,
+		poxchat_printf (ph, _("Sysinfo: %s is set to: %d\n"), pref,
 						sysinfo_get_bool_pref(pref, def));
 	}
 }
@@ -165,7 +165,7 @@ sysinfo_set_pref (char *key, char *value)
 {
 	if (!key || !key[0])
 	{
-		hexchat_print (ph, _("Sysinfo: Valid settings are: announce and hide_* for each piece of information. e.g. hide_os. Without a value it will show current (or default) setting.\n"));
+		poxchat_print (ph, _("Sysinfo: Valid settings are: announce and hide_* for each piece of information. e.g. hide_os. Without a value it will show current (or default) setting.\n"));
 		return;
 	}
 
@@ -187,7 +187,7 @@ sysinfo_set_pref (char *key, char *value)
 		}
 	}
 
-	hexchat_print (ph, _("Sysinfo: Invalid variable name\n"));
+	poxchat_print (ph, _("Sysinfo: Invalid variable name\n"));
 }
 
 static int
@@ -210,7 +210,7 @@ sysinfo_cb (char *word[], char *word_eol[], void *userdata)
 	}
 
 	/* Cannot send to server tab */
-	channel_type = hexchat_list_int (ph, NULL, "type");
+	channel_type = poxchat_list_int (ph, NULL, "type");
 	if (channel_type != 2 /* SESS_CHANNEL */ && channel_type != 3 /* SESS_DIALOG */)
 		announce = FALSE;
 
@@ -222,28 +222,28 @@ sysinfo_cb (char *word[], char *word_eol[], void *userdata)
 	else
 		print_info (cmd, announce);
 
-	return HEXCHAT_EAT_ALL;
+	return POXCHAT_EAT_ALL;
 }
 
 int
-hexchat_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name, char **plugin_desc, char **plugin_version, char *arg)
+poxchat_plugin_init (poxchat_plugin *plugin_handle, char **plugin_name, char **plugin_desc, char **plugin_version, char *arg)
 {
 	ph = plugin_handle;
 	*plugin_name = name;
 	*plugin_desc = desc;
 	*plugin_version = version;
 
-	hexchat_hook_command (ph, "SYSINFO", HEXCHAT_PRI_NORM, sysinfo_cb, sysinfo_help, NULL);
+	poxchat_hook_command (ph, "SYSINFO", POXCHAT_PRI_NORM, sysinfo_cb, sysinfo_help, NULL);
 
-	hexchat_command (ph, "MENU ADD \"Window/Send System Info\" \"SYSINFO\"");
-	hexchat_toastf (ph, HEXCHAT_TOAST_INFO, _("%s plugin loaded"), name);
+	poxchat_command (ph, "MENU ADD \"Window/Send System Info\" \"SYSINFO\"");
+	poxchat_toastf (ph, POXCHAT_TOAST_INFO, _("%s plugin loaded"), name);
 	return 1;
 }
 
 int
-hexchat_plugin_deinit (void)
+poxchat_plugin_deinit (void)
 {
-	hexchat_command (ph, "MENU DEL \"Window/Display System Info\"");
-	hexchat_toastf (ph, HEXCHAT_TOAST_INFO, _("%s plugin unloaded"), name);
+	poxchat_command (ph, "MENU DEL \"Window/Display System Info\"");
+	poxchat_toastf (ph, POXCHAT_TOAST_INFO, _("%s plugin unloaded"), name);
 	return 1;
 }

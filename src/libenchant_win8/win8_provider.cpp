@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (c) 2015 Patrick Griffis
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy

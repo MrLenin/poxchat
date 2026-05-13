@@ -32,7 +32,7 @@
 #include <sys/mman.h>
 #endif
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "cfgfiles.h"
 #include "chanopt.h"
 #include "plugin.h"
@@ -40,7 +40,7 @@
 #include "server.h"
 #include "util.h"
 #include "outbound.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 #include "text.h"
 #include "typedef.h"
 #include "scrollback.h"
@@ -1593,7 +1593,7 @@ pevent_make_pntevts (void)
 
 			if (pevt_build_string (pntevts_text[i], &(pntevts[i]), &m) != 0 && !translate)
 			{
-				g_error ("HexChat CRITICAL *** default event text failed to build!");
+				g_error ("PoxChat CRITICAL *** default event text failed to build!");
 			}
 			else
 			{
@@ -1604,7 +1604,7 @@ pevent_make_pntevts (void)
 
 				if (pevt_build_string (pntevts_text[i], &(pntevts[i]), &m) != 0)
 				{
-					g_error ("HexChat CRITICAL *** default event text failed to build!");
+					g_error ("PoxChat CRITICAL *** default event text failed to build!");
 				}
 			}
 		}
@@ -1674,9 +1674,9 @@ pevent_load (char *filename)
 	char *ofs;
 
 	if (filename == NULL)
-		fd = hexchat_open_file ("pevents.conf", O_RDONLY, 0, 0);
+		fd = poxchat_open_file ("pevents.conf", O_RDONLY, 0, 0);
 	else
-		fd = hexchat_open_file (filename, O_RDONLY, 0, XOF_FULLPATH);
+		fd = poxchat_open_file (filename, O_RDONLY, 0, XOF_FULLPATH);
 
 	if (fd == -1)
 		return 1;
@@ -1733,7 +1733,7 @@ pevent_check_all_loaded (void)
 		if (pntevts_text[i] == NULL)
 		{
 			/*printf ("%s\n", te[i].name);
-			g_snprintf(out, sizeof(out), "The data for event %s failed to load. Reverting to defaults.\nThis may be because a new version of HexChat is loading an old config file.\n\nCheck all print event texts are correct", evtnames[i]);
+			g_snprintf(out, sizeof(out), "The data for event %s failed to load. Reverting to defaults.\nThis may be because a new version of PoxChat is loading an old config file.\n\nCheck all print event texts are correct", evtnames[i]);
 			   gtkutil_simpledialog(out); */
 			/* make-te.c sets this 128 flag (DON'T call gettext() flag) */
 			if (te[i].num_args & 128)
@@ -1802,7 +1802,7 @@ format_event (session *sess, int index, char **args, char *o, gsize sizeofo, uns
 			if (a > numargs)
 			{
 				fprintf (stderr,
-							"HexChat DEBUG: display_event: arg > numargs (%d %d %s)\n",
+							"PoxChat DEBUG: display_event: arg > numargs (%d %d %s)\n",
 							a, numargs, i);
 				break;
 			}
@@ -2192,10 +2192,10 @@ pevent_save (char *fn)
 	char buf[1024];
 
 	if (!fn)
-		fd = hexchat_open_file ("pevents.conf", O_CREAT | O_TRUNC | O_WRONLY,
+		fd = poxchat_open_file ("pevents.conf", O_CREAT | O_TRUNC | O_WRONLY,
 									 0x180, XOF_DOMODE);
 	else
-		fd = hexchat_open_file (fn, O_CREAT | O_TRUNC | O_WRONLY, 0x180,
+		fd = poxchat_open_file (fn, O_CREAT | O_TRUNC | O_WRONLY, 0x180,
 									 XOF_FULLPATH | XOF_DOMODE);
 	if (fd == -1)
 	{
@@ -2262,7 +2262,7 @@ sound_play (const char *file, gboolean quiet)
 	}
 	else
 	{
-		wavfile = g_build_filename (get_xdir (), HEXCHAT_SOUND_DIR, file, NULL);
+		wavfile = g_build_filename (get_xdir (), POXCHAT_SOUND_DIR, file, NULL);
 	}
 
 	if (g_access (wavfile, R_OK) == 0)
@@ -2282,9 +2282,9 @@ sound_play (const char *file, gboolean quiet)
 		{
 			ca_context_create (&ca_con);
 			ca_context_change_props (ca_con,
-											CA_PROP_APPLICATION_ID, "hexchat",
-											CA_PROP_APPLICATION_NAME, "HexChat",
-											CA_PROP_APPLICATION_ICON_NAME, "hexchat", NULL);
+											CA_PROP_APPLICATION_ID, "poxchat",
+											CA_PROP_APPLICATION_NAME, "PoxChat",
+											CA_PROP_APPLICATION_ICON_NAME, "poxchat", NULL);
 		}
 
 		if (ca_context_play (ca_con, 0, CA_PROP_MEDIA_FILENAME, wavfile, NULL) != 0)
@@ -2295,7 +2295,7 @@ sound_play (const char *file, gboolean quiet)
 			if (cmd)
 			{
 				buf = g_strdup_printf ("%s \"%s\"", cmd, wavfile);
-				hexchat_exec (buf);
+				poxchat_exec (buf);
 				g_free (buf);
 				g_free (cmd);
 			}
@@ -2345,7 +2345,7 @@ sound_load ()
 
 	memset (&sound_files, 0, sizeof (char *) * (NUM_XP));
 
-	fd = hexchat_open_file ("sound.conf", O_RDONLY, 0, 0);
+	fd = poxchat_open_file ("sound.conf", O_RDONLY, 0, 0);
 	if (fd == -1)
 		return;
 
@@ -2375,7 +2375,7 @@ sound_save ()
 	int fd, i;
 	char buf[512];
 
-	fd = hexchat_open_file ("sound.conf", O_CREAT | O_TRUNC | O_WRONLY, 0x180,
+	fd = poxchat_open_file ("sound.conf", O_CREAT | O_TRUNC | O_WRONLY, 0x180,
 								 XOF_DOMODE);
 	if (fd == -1)
 		return;

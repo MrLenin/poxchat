@@ -57,21 +57,21 @@ jobs:
       - name: Build
         run: |
           call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\Common7\Tools\VsDevCmd.bat"
-          msbuild win32\hexchat.sln /m /verbosity:minimal /p:Configuration=Release /p:Platform=${{ matrix.platform }}
+          msbuild win32\poxchat.sln /m /verbosity:minimal /p:Configuration=Release /p:Platform=${{ matrix.platform }}
         shell: cmd
 
       - name: Preparing Artifacts
         run: |
-          move ..\hexchat-build\${{ matrix.platform }}\HexChat*.exe .\
-          move ..\hexchat-build .\
+          move ..\poxchat-build\${{ matrix.platform }}\PoxChat*.exe .\
+          move ..\poxchat-build .\
         shell: cmd
 
       - uses: actions/upload-artifact@v2
         with:
           name: Installer ${{ matrix.arch }}
-          path: HexChat*.exe
+          path: PoxChat*.exe
 
       - uses: actions/upload-artifact@v2
         with:
           name: Build Files ${{ matrix.arch  }}
-          path: hexchat-build
+          path: poxchat-build

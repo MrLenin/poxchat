@@ -21,7 +21,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  <Import Project="..\hexchat.props" />
+  <Import Project="..\poxchat.props" />
 
   <!-- GTK4 build files -->
   <ItemGroup>
@@ -75,7 +75,7 @@
     <!-- Tray icons -->
     <TrayIcons Include="..\..\data\icons\tray_*.ico" />
     <DepsRootDocs Include="$(DepsRoot)\share\doc\**\*" />
-    <Locale Include="$(HexChatBin)locale\**\*;$(DepsRoot)\share\locale\**\*" />
+    <Locale Include="$(PoxChatBin)locale\**\*;$(DepsRoot)\share\locale\**\*" />
     <MSWindowsTheme Include="$(DepsRoot)\share\themes\MS-Windows\**\*" />
     <!-- GSettings schemas (required for GTK color chooser, file chooser, etc.) -->
     <GSettingsSchemas Include="$(DepsRoot)\share\glib-2.0\schemas\gschemas.compiled" />
@@ -108,30 +108,30 @@
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="Build">
-    <Copy SourceFiles="@(None)" DestinationFolder="$(HexChatRel)" />
-    <Copy SourceFiles="@(OptionalFiles)" DestinationFolder="$(HexChatRel)" />
-    <Copy SourceFiles="@(LuaExe)" DestinationFolder="$(HexChatRel)" />
-    <Copy SourceFiles="@(PythonCffi)" DestinationFolder="$(HexChatRel)" />
-    <Copy SourceFiles="@(FontConfig)" DestinationFolder="$(HexChatRel)\etc\fonts" />
-    <Copy SourceFiles="@(Share)" DestinationFiles="@(Share->'$(HexChatRel)\share\%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Copy SourceFiles="@(TrayIcons)" DestinationFolder="$(HexChatRel)\share\icons" />
-    <Copy SourceFiles="..\..\COPYING" DestinationFolder="$(HexChatRel)\share\doc\hexchat" />
-    <Copy SourceFiles="$(WinSparklePath)\COPYING" DestinationFolder="$(HexChatRel)\share\doc\WinSparkle" />
+    <Copy SourceFiles="@(None)" DestinationFolder="$(PoxChatRel)" />
+    <Copy SourceFiles="@(OptionalFiles)" DestinationFolder="$(PoxChatRel)" />
+    <Copy SourceFiles="@(LuaExe)" DestinationFolder="$(PoxChatRel)" />
+    <Copy SourceFiles="@(PythonCffi)" DestinationFolder="$(PoxChatRel)" />
+    <Copy SourceFiles="@(FontConfig)" DestinationFolder="$(PoxChatRel)\etc\fonts" />
+    <Copy SourceFiles="@(Share)" DestinationFiles="@(Share->'$(PoxChatRel)\share\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(TrayIcons)" DestinationFolder="$(PoxChatRel)\share\icons" />
+    <Copy SourceFiles="..\..\COPYING" DestinationFolder="$(PoxChatRel)\share\doc\poxchat" />
+    <Copy SourceFiles="$(WinSparklePath)\COPYING" DestinationFolder="$(PoxChatRel)\share\doc\WinSparkle" />
     <!-- Enchant hunspell provider (optional) -->
-    <Copy SourceFiles="$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll" DestinationFolder="$(HexChatRel)\lib\enchant-2" Condition="Exists('$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll')" />
-    <Copy SourceFiles="@(Locale)" DestinationFiles="@(Locale->'$(HexChatRel)\share\locale\%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Copy SourceFiles="@(MSWindowsTheme)" DestinationFiles="@(MSWindowsTheme->'$(HexChatRel)\share\themes\MS-Windows\%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Copy SourceFiles="@(LuaShare)" DestinationFiles="@(LuaShare->'$(HexChatRel)\share\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Copy SourceFiles="@(LuaLib)" DestinationFiles="@(LuaLib->'$(HexChatRel)\lib\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Copy SourceFiles="@(Typelib)" DestinationFiles="@(Typelib->'$(HexChatRel)\lib\girepository-1.0\%(Filename)%(Extension)')" />
-    <Copy SourceFiles="..\..\plugins\python\xchat.py" DestinationFolder="$(HexChatRel)\python" />
-    <Copy SourceFiles="..\..\plugins\python\hexchat.py" DestinationFolder="$(HexChatRel)\python" />
-    <Copy SourceFiles="..\..\plugins\python\_hexchat.py" DestinationFolder="$(HexChatRel)\python" />
-    <WriteLinesToFile File="$(HexChatRel)portable-mode" Lines="2" Overwrite="true" />
-    <Copy SourceFiles="@(DepsRootDocs)" DestinationFiles="@(DepsRootDocs->'$(HexChatRel)\share\doc\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll" DestinationFolder="$(PoxChatRel)\lib\enchant-2" Condition="Exists('$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll')" />
+    <Copy SourceFiles="@(Locale)" DestinationFiles="@(Locale->'$(PoxChatRel)\share\locale\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(MSWindowsTheme)" DestinationFiles="@(MSWindowsTheme->'$(PoxChatRel)\share\themes\MS-Windows\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(LuaShare)" DestinationFiles="@(LuaShare->'$(PoxChatRel)\share\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(LuaLib)" DestinationFiles="@(LuaLib->'$(PoxChatRel)\lib\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(Typelib)" DestinationFiles="@(Typelib->'$(PoxChatRel)\lib\girepository-1.0\%(Filename)%(Extension)')" />
+    <Copy SourceFiles="..\..\plugins\python\xchat.py" DestinationFolder="$(PoxChatRel)\python" />
+    <Copy SourceFiles="..\..\plugins\python\poxchat.py" DestinationFolder="$(PoxChatRel)\python" />
+    <Copy SourceFiles="..\..\plugins\python\_poxchat.py" DestinationFolder="$(PoxChatRel)\python" />
+    <WriteLinesToFile File="$(PoxChatRel)portable-mode" Lines="2" Overwrite="true" />
+    <Copy SourceFiles="@(DepsRootDocs)" DestinationFiles="@(DepsRootDocs->'$(PoxChatRel)\share\doc\%(RecursiveDir)%(Filename)%(Extension)')" />
     <!-- GSettings schemas for GTK4 dialogs -->
-    <Copy SourceFiles="@(GSettingsSchemas)" DestinationFolder="$(HexChatRel)\share\glib-2.0\schemas" />
+    <Copy SourceFiles="@(GSettingsSchemas)" DestinationFolder="$(PoxChatRel)\share\glib-2.0\schemas" />
     <!-- Copy CA certificate bundle as cert.pem (expected by ssl.c) -->
-    <Copy SourceFiles="@(CACert)" DestinationFiles="$(HexChatRel)\cert.pem" />
+    <Copy SourceFiles="@(CACert)" DestinationFiles="$(PoxChatRel)\cert.pem" />
   </Target>
 </Project>

@@ -1,5 +1,5 @@
 ﻿/**
- * HexChat Theme Manager
+ * PoxChat Theme Manager
  *
  * Copyright (C) 2012 Patrick Griffs
  * Copyright (C) 2012 Berke Viktor
@@ -27,8 +27,8 @@ using System.Resources;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("HexChat Theme Manager")]
-[assembly: AssemblyDescription("Manages HexChat Themes.")]
+[assembly: AssemblyTitle("PoxChat Theme Manager")]
+[assembly: AssemblyDescription("Manages PoxChat Themes.")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("thememan")]

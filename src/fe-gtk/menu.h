@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -17,8 +17,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef HEXCHAT_MENU_H
-#define HEXCHAT_MENU_H
+#ifndef POXCHAT_MENU_H
+#define POXCHAT_MENU_H
 
 #include "gtk-helpers.h"
 
@@ -70,9 +70,9 @@ void menu_sync_toggle_states (void);
 #define MENU_ID_JOIN 11
 #define MENU_ID_USERMENU 12
 #define MENU_ID_FULLSCREEN 13
-#define MENU_ID_HEXCHAT 14
+#define MENU_ID_POXCHAT 14
 
-#if (MENU_ID_NUM < MENU_ID_HEXCHAT)
+#if (MENU_ID_NUM < MENU_ID_POXCHAT)
 #error MENU_ID_NUM is set wrong
 #endif
 

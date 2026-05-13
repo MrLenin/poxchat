@@ -1,6 +1,6 @@
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the hexchat package.
+# This file is distributed under the same license as the poxchat package.
 # 
 # Translators:
 # Birger Langkjer <birger.langkjer@image.dk>, 1999
@@ -17,66 +17,66 @@
 # scootergrisen, 2017-2018
 msgid ""
 msgstr ""
-"Project-Id-Version: HexChat\n"
+"Project-Id-Version: PoxChat\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2018-04-03 16:10-0400\n"
 "PO-Revision-Date: 2018-11-27 22:25+0000\n"
 "Last-Translator: scootergrisen\n"
-"Language-Team: Danish (http://www.transifex.com/hexchat/hexchat/language/da/)\n"
+"Language-Team: Danish (http://www.transifex.com/poxchat/poxchat/language/da/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Language: da\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: data/misc/io.github.Hexchat.appdata.xml.in:4
-#: data/misc/io.github.Hexchat.appdata.xml.in:5
-#: data/misc/io.github.Hexchat.desktop.in.in:3
-msgid "HexChat"
-msgstr "HexChat"
+#: data/misc/io.github.evilnet.PoxChat.appdata.xml.in:4
+#: data/misc/io.github.evilnet.PoxChat.appdata.xml.in:5
+#: data/misc/io.github.evilnet.PoxChat.desktop.in.in:3
+msgid "PoxChat"
+msgstr "PoxChat"
 
-#: data/misc/io.github.Hexchat.appdata.xml.in:9
-#: data/misc/io.github.Hexchat.desktop.in.in:4
+#: data/misc/io.github.evilnet.PoxChat.appdata.xml.in:9
+#: data/misc/io.github.evilnet.PoxChat.desktop.in.in:4
 msgid "IRC Client"
 msgstr "IRC-klient"
 
-#: data/misc/io.github.Hexchat.appdata.xml.in:11
+#: data/misc/io.github.evilnet.PoxChat.appdata.xml.in:11
 msgid ""
-"HexChat is an easy to use yet extensible IRC Client. It allows you to "
+"PoxChat is an easy to use yet extensible IRC Client. It allows you to "
 "securely join multiple networks and talk to users privately or in channels "
 "using a customizable interface. You can even transfer files."
-msgstr "HexChat er en IRC-klient, der er nem at bruge, men som alligevel også kan udvides. Den tillader dig sikkert at forbinde til flere netværk og tale med brugere privat eller i kanaler ved brug af en tilpasselig grænseflade. Du kan endda overføre filer."
+msgstr "PoxChat er en IRC-klient, der er nem at bruge, men som alligevel også kan udvides. Den tillader dig sikkert at forbinde til flere netværk og tale med brugere privat eller i kanaler ved brug af en tilpasselig grænseflade. Du kan endda overføre filer."
 
-#: data/misc/io.github.Hexchat.appdata.xml.in:12
+#: data/misc/io.github.evilnet.PoxChat.appdata.xml.in:12
 msgid ""
-"HexChat supports features such as: DCC, SASL, proxies, spellcheck, alerts, "
+"PoxChat supports features such as: DCC, SASL, proxies, spellcheck, alerts, "
 "logging, custom themes, and Python/Perl scripts."
-msgstr "HexChat understøtter funktioner som: DCC, SASL, proxyer, stavekontrol, underretninger, logning, tilpassede temaer og Python-/Perl-scripts."
+msgstr "PoxChat understøtter funktioner som: DCC, SASL, proxyer, stavekontrol, underretninger, logning, tilpassede temaer og Python-/Perl-scripts."
 
-#: data/misc/io.github.Hexchat.appdata.xml.in:22
+#: data/misc/io.github.evilnet.PoxChat.appdata.xml.in:22
 msgid "Main Chat Window"
 msgstr "Primære chatvindue"
 
-#: data/misc/io.github.Hexchat.desktop.in.in:5
+#: data/misc/io.github.evilnet.PoxChat.desktop.in.in:5
 msgid "Chat with other people online"
 msgstr "Chat med andre personer online"
 
-#: data/misc/io.github.Hexchat.desktop.in.in:6
+#: data/misc/io.github.evilnet.PoxChat.desktop.in.in:6
 msgid "IM;Chat;"
 msgstr "IM;Chat;"
 
-#: data/misc/io.github.Hexchat.desktop.in.in:8
-#: data/misc/io.github.Hexchat.ThemeManager.desktop.in:5
-msgid "hexchat"
-msgstr "hexchat"
+#: data/misc/io.github.evilnet.PoxChat.desktop.in.in:8
+#: data/misc/io.github.evilnet.PoxChat.ThemeManager.desktop.in:5
+msgid "poxchat"
+msgstr "poxchat"
 
-#: data/misc/io.github.Hexchat.desktop.in.in:19
+#: data/misc/io.github.evilnet.PoxChat.desktop.in.in:19
 msgid "Open Safe Mode"
 msgstr "Åbn fejlsikret tilstand"
 
-#: data/misc/io.github.Hexchat.ThemeManager.desktop.in:3
-msgid "HexChat Theme Manager"
-msgstr "HexChat-temahåndtering"
+#: data/misc/io.github.evilnet.PoxChat.ThemeManager.desktop.in:3
+msgid "PoxChat Theme Manager"
+msgstr "PoxChat-temahåndtering"
 
 #. 0 means unlimited
 #. STRINGS
@@ -169,142 +169,142 @@ msgstr "%s tilbyder \"%s\". Accepterer du?"
 msgid "No active DCCs\n"
 msgstr "Ingen aktive DCC'er\n"
 
-#: src/common/hexchat.c:885
+#: src/common/poxchat.c:885
 msgid "_Open Dialog Window"
 msgstr "_Åbn dialogvindue"
 
-#: src/common/hexchat.c:886
+#: src/common/poxchat.c:886
 msgid "_Send a File"
 msgstr "_Send en fil"
 
-#: src/common/hexchat.c:887
+#: src/common/poxchat.c:887
 msgid "_User Info (WhoIs)"
 msgstr "_Brugerinfo (WhoIs)"
 
-#: src/common/hexchat.c:888
+#: src/common/poxchat.c:888
 msgid "_Add to Friends List"
 msgstr "_Tilføj til venneliste"
 
-#: src/common/hexchat.c:889
+#: src/common/poxchat.c:889
 msgid "_Ignore"
 msgstr "_Ignorer"
 
-#: src/common/hexchat.c:890
+#: src/common/poxchat.c:890
 msgid "O_perator Actions"
 msgstr "O_peratørhandlinger"
 
-#: src/common/hexchat.c:892
+#: src/common/poxchat.c:892
 msgid "Give Ops"
 msgstr "Giv operatørstatus"
 
-#: src/common/hexchat.c:893
+#: src/common/poxchat.c:893
 msgid "Take Ops"
 msgstr "Fratag operatørstatus"
 
-#: src/common/hexchat.c:894
+#: src/common/poxchat.c:894
 msgid "Give Voice"
 msgstr "Giv Tale"
 
-#: src/common/hexchat.c:895
+#: src/common/poxchat.c:895
 msgid "Take Voice"
 msgstr "Fratag stemme"
 
-#: src/common/hexchat.c:897
+#: src/common/poxchat.c:897
 msgid "Kick/Ban"
 msgstr "Spark/udeluk"
 
-#: src/common/hexchat.c:898 src/common/hexchat.c:935
+#: src/common/poxchat.c:898 src/common/poxchat.c:935
 msgid "Kick"
 msgstr "Spark"
 
-#: src/common/hexchat.c:899 src/common/hexchat.c:900 src/common/hexchat.c:901
-#: src/common/hexchat.c:902 src/common/hexchat.c:903 src/common/hexchat.c:934
+#: src/common/poxchat.c:899 src/common/poxchat.c:900 src/common/poxchat.c:901
+#: src/common/poxchat.c:902 src/common/poxchat.c:903 src/common/poxchat.c:934
 #: src/fe-gtk/banlist.c:50
 msgid "Ban"
 msgstr "Udeluk"
 
-#: src/common/hexchat.c:904 src/common/hexchat.c:905 src/common/hexchat.c:906
-#: src/common/hexchat.c:907
+#: src/common/poxchat.c:904 src/common/poxchat.c:905 src/common/poxchat.c:906
+#: src/common/poxchat.c:907
 msgid "KickBan"
 msgstr "SparkUdeluk"
 
-#: src/common/hexchat.c:917
+#: src/common/poxchat.c:917
 msgid "Leave Channel"
 msgstr "Forlad kanal"
 
-#: src/common/hexchat.c:918
+#: src/common/poxchat.c:918
 msgid "Join Channel..."
 msgstr "Deltag i kanal..."
 
-#: src/common/hexchat.c:919 src/fe-gtk/menu.c:1411
+#: src/common/poxchat.c:919 src/fe-gtk/menu.c:1411
 msgid "Enter Channel to Join:"
 msgstr "Skriv kanal, der skal deltages i:"
 
-#: src/common/hexchat.c:920
+#: src/common/poxchat.c:920
 msgid "Server Links"
 msgstr "Serverlink"
 
-#: src/common/hexchat.c:921
+#: src/common/poxchat.c:921
 msgid "Ping Server"
 msgstr "Ping server"
 
-#: src/common/hexchat.c:922
+#: src/common/poxchat.c:922
 msgid "Hide Version"
 msgstr "Skjul version"
 
-#: src/common/hexchat.c:932
+#: src/common/poxchat.c:932
 msgid "Op"
 msgstr "Giv OP"
 
-#: src/common/hexchat.c:933
+#: src/common/poxchat.c:933
 msgid "DeOp"
 msgstr "Fjern OP"
 
-#: src/common/hexchat.c:936
+#: src/common/poxchat.c:936
 msgid "bye"
 msgstr "farvel"
 
-#: src/common/hexchat.c:937
+#: src/common/poxchat.c:937
 #, c-format
 msgid "Enter reason to kick %s:"
 msgstr "Indtast begrundelse til at sparke %s:"
 
-#: src/common/hexchat.c:938
+#: src/common/poxchat.c:938
 msgid "Send File"
 msgstr "Send fil"
 
-#: src/common/hexchat.c:939
+#: src/common/poxchat.c:939
 msgid "Dialog"
 msgstr "Dialog"
 
-#: src/common/hexchat.c:948
+#: src/common/poxchat.c:948
 msgid "WhoIs"
 msgstr "WhoIs"
 
-#: src/common/hexchat.c:949
+#: src/common/poxchat.c:949
 msgid "Send"
 msgstr "Send"
 
-#: src/common/hexchat.c:950
+#: src/common/poxchat.c:950
 msgid "Chat"
 msgstr "Chat"
 
-#: src/common/hexchat.c:951 src/fe-gtk/banlist.c:847 src/fe-gtk/dccgui.c:889
+#: src/common/poxchat.c:951 src/fe-gtk/banlist.c:847 src/fe-gtk/dccgui.c:889
 #: src/fe-gtk/ignoregui.c:387 src/fe-gtk/urlgrab.c:214
 msgid "Clear"
 msgstr "Ryd"
 
-#: src/common/hexchat.c:952
+#: src/common/poxchat.c:952
 msgid "Ping"
 msgstr "Ping"
 
-#: src/common/hexchat.c:1125
+#: src/common/poxchat.c:1125
 #, c-format
 msgid ""
 "You do not have write access to %s. Nothing from this session can be saved."
 msgstr "Du har ikke skriveadgang til %s. Intet fra denne session kan gemmes."
 
-#: src/common/hexchat.c:1134
+#: src/common/poxchat.c:1134
 msgid ""
 "* Running IRC as root is stupid! You should\n"
 "  create a User Account and use that to login.\n"
@@ -576,8 +576,8 @@ msgid "EXECWRITE, sends data to the processes stdin"
 msgstr "EXECWRITE, sender data til processens standard ind"
 
 #: src/common/outbound.c:3993
-msgid "EXPORTCONF, exports HexChat settings"
-msgstr "EXPORTCONF, eksporterer HexChat-indstillinger"
+msgid "EXPORTCONF, exports PoxChat settings"
+msgstr "EXPORTCONF, eksporterer PoxChat-indstillinger"
 
 #: src/common/outbound.c:3996
 msgid "FLUSHQ, flushes the current server's send queue"
@@ -755,9 +755,9 @@ msgstr "RECONNECT [<vært>] [<port>] [<adgangskode>], kan kaldes blot som /RECON
 
 #: src/common/outbound.c:4085
 msgid ""
-"RECV <text>, send raw data to HexChat, as if it was received from the IRC "
+"RECV <text>, send raw data to PoxChat, as if it was received from the IRC "
 "server"
-msgstr "RECV <tekst>, send rådata til HexChat, som var den modtaget fra IRC-serveren"
+msgstr "RECV <tekst>, send rådata til PoxChat, som var den modtaget fra IRC-serveren"
 
 #: src/common/outbound.c:4086
 msgid "RELOAD <name>, reloads a plugin or script"
@@ -898,8 +898,8 @@ msgid "Unknown Command %s. Try /help\n"
 msgstr "Ukendt kommando %s. Prøv /help\n"
 
 #: src/common/plugin.c:403
-msgid "No hexchat_plugin_init symbol; is this really a HexChat plugin?"
-msgstr "Intet hexchat_plugin_init-symbol; er det virkeligt et HexChat-plugin?"
+msgid "No poxchat_plugin_init symbol; is this really a PoxChat plugin?"
+msgstr "Intet poxchat_plugin_init-symbol; er det virkeligt et PoxChat-plugin?"
 
 #: src/common/plugin-identd.c:175
 #, c-format
@@ -3478,8 +3478,8 @@ msgid "Execute command:"
 msgstr "Eksekveringskommando:"
 
 #: src/fe-gtk/fe-gtk.c:89
-msgid "Open URL or execute command in an existing HexChat"
-msgstr "Åbn URL eller eksekver kommando i en eksisterende HexChat"
+msgid "Open URL or execute command in an existing PoxChat"
+msgstr "Åbn URL eller eksekver kommando i en eksisterende PoxChat"
 
 #: src/fe-gtk/fe-gtk.c:91
 msgid "Begin minimized. Level 0=Normal 1=Iconified 2=Tray"
@@ -3760,8 +3760,8 @@ msgid ""
 msgstr "Denne server har stadig %d tilknyttede kanaler eller dialoger. Luk dem alle?"
 
 #: src/fe-gtk/maingui.c:1177
-msgid "Quit HexChat?"
-msgstr "Afslut HexChat?"
+msgid "Quit PoxChat?"
+msgstr "Afslut PoxChat?"
 
 #: src/fe-gtk/maingui.c:1197
 msgid "Don't ask next time."
@@ -4073,7 +4073,7 @@ msgid ""
 "%m  =  machine info\n"
 "%n  =  your nick\n"
 "%t  =  time/date\n"
-"%v  =  HexChat version\n"
+"%v  =  PoxChat version\n"
 "%2  =  word 2\n"
 "%3  =  word 3\n"
 "&2  =  word 2 to the end of line\n"
@@ -4084,7 +4084,7 @@ msgid ""
 "\n"
 "%2 would be \"john\"\n"
 "&2 would be \"john hello\"."
-msgstr "Brugerkommandoer - specielle koder:\n\n%c  =  aktuelle kanal\n%e  =  aktuelle netværksnavn\n%m  =  maskininfo\n%n  =  dit kaldenavn\n%t  =  klokkeslæt/dato\n%v  =  HexChat version\n%2  =  ord 2\n%3  =  ord 3\n&2  =  ord 2 til slutningen af linjen\n&3  =  ord 3 til slutningen af linjen\n\neksempelvis:\n/kommando john hej\n\n%2 vil være \"john\"\n&2 vil være \"john hej\"."
+msgstr "Brugerkommandoer - specielle koder:\n\n%c  =  aktuelle kanal\n%e  =  aktuelle netværksnavn\n%m  =  maskininfo\n%n  =  dit kaldenavn\n%t  =  klokkeslæt/dato\n%v  =  PoxChat version\n%2  =  ord 2\n%3  =  ord 3\n&2  =  ord 2 til slutningen af linjen\n&3  =  ord 3 til slutningen af linjen\n\neksempelvis:\n/kommando john hej\n\n%2 vil være \"john\"\n&2 vil være \"john hej\"."
 
 #: src/fe-gtk/menu.c:1486
 msgid ""
@@ -4141,8 +4141,8 @@ msgid ""
 "\n"
 "Putting a ! in front of the command\n"
 "indicates it should be sent to a\n"
-"shell instead of HexChat"
-msgstr "URL-behandlere - specielle koder:\n\n%s  =  URL-strengen\n\nEt ! foran kommandoen\nindikerer at den skal sendes\ntil en skal i stedet for HexChat"
+"shell instead of PoxChat"
+msgstr "URL-behandlere - specielle koder:\n\n%s  =  URL-strengen\n\nEt ! foran kommandoen\nindikerer at den skal sendes\ntil en skal i stedet for PoxChat"
 
 #: src/fe-gtk/menu.c:1529
 #, c-format

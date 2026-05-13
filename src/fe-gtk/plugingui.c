@@ -22,15 +22,15 @@
 
 #include "fe-gtk.h"
 
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #define PLUGIN_C
-typedef struct session hexchat_context;
-#include "../common/hexchat-plugin.h"
+typedef struct session poxchat_context;
+#include "../common/poxchat-plugin.h"
 #include "../common/plugin.h"
 #include "../common/util.h"
 #include "../common/outbound.h"
 #include "../common/fe.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/cfgfiles.h"
 #include "gtkutil.h"
 #include "maingui.h"
@@ -225,7 +225,7 @@ extern GSList *plugin_list;
 void
 fe_pluginlist_update (void)
 {
-	hexchat_plugin *pl;
+	poxchat_plugin *pl;
 	GSList *list;
 	GListStore *store;
 

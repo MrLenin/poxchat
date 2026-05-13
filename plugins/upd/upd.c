@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (c) 2010-2012 Berke Viktor.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,26 +22,26 @@
 
 #include <winsparkle.h>
 
-#include "hexchat-plugin.h"
+#include "poxchat-plugin.h"
 
-#define APPCAST_URL "https://hexchat.github.io/appcast.xml"
+#define APPCAST_URL "https://github.com/evilnet/poxchat/releases/latest/download/appcast.xml"
 
-static hexchat_plugin *ph;   /* plugin handle */
+static poxchat_plugin *ph;   /* plugin handle */
 static char name[] = "Update Checker";
-static char desc[] = "Check for HexChat updates automatically";
+static char desc[] = "Check for PoxChat updates automatically";
 static char version[] = "5.0";
-static const char upd_help[] = "Update Checker Usage:\n  /UPDCHK, check for HexChat updates\n";
+static const char upd_help[] = "Update Checker Usage:\n  /UPDCHK, check for PoxChat updates\n";
 
 static int
 check_cmd (char *word[], char *word_eol[], void *userdata)
 {
 	win_sparkle_check_update_with_ui ();
 
-	return HEXCHAT_EAT_ALL;
+	return POXCHAT_EAT_ALL;
 }
 
 int
-hexchat_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name, char **plugin_desc, char **plugin_version, char *arg)
+poxchat_plugin_init (poxchat_plugin *plugin_handle, char **plugin_name, char **plugin_desc, char **plugin_version, char *arg)
 {
 	ph = plugin_handle;
 
@@ -52,19 +52,19 @@ hexchat_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name, char **p
 	win_sparkle_set_appcast_url (APPCAST_URL);
 	win_sparkle_init ();
 
-	hexchat_hook_command (ph, "UPDCHK", HEXCHAT_PRI_NORM, check_cmd, upd_help, NULL);
-	hexchat_command (ph, "MENU -ishare\\download.png ADD \"Help/Check for Updates\" \"UPDCHK\"");
-	hexchat_toastf (ph, HEXCHAT_TOAST_INFO, "%s plugin loaded", name);
+	poxchat_hook_command (ph, "UPDCHK", POXCHAT_PRI_NORM, check_cmd, upd_help, NULL);
+	poxchat_command (ph, "MENU -ishare\\download.png ADD \"Help/Check for Updates\" \"UPDCHK\"");
+	poxchat_toastf (ph, POXCHAT_TOAST_INFO, "%s plugin loaded", name);
 
 	return 1;
 }
 
 int
-hexchat_plugin_deinit (void)
+poxchat_plugin_deinit (void)
 {
 	win_sparkle_cleanup ();
 
-	hexchat_command (ph, "MENU DEL \"Help/Check for updates\"");
-	hexchat_toastf (ph, HEXCHAT_TOAST_INFO, "%s plugin unloaded", name);
+	poxchat_command (ph, "MENU DEL \"Help/Check for updates\"");
+	poxchat_toastf (ph, POXCHAT_TOAST_INFO, "%s plugin unloaded", name);
 	return 1;
 }

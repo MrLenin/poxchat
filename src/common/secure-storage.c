@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 2024 John E
  *
  * This program is free software; you can redistribute it and/or modify
@@ -32,12 +32,12 @@
 #endif
 
 /* Credential target prefix for Windows Credential Manager */
-#define CRED_PREFIX "HexChat:"
+#define CRED_PREFIX "PoxChat:"
 
 /* libsecret schema for Linux */
 #ifdef USE_LIBSECRET
-static SecretSchema hexchat_schema = {
-    "org.hexchat.oauth",
+static SecretSchema poxchat_schema = {
+    "org.poxchat.oauth",
     SECRET_SCHEMA_NONE,
     {
         { "network", SECRET_SCHEMA_ATTRIBUTE_STRING },
@@ -148,7 +148,7 @@ secure_storage_store (const char *network_name,
     cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
 
     /* Set a user-friendly comment */
-    char *comment_utf8 = g_strdup_printf ("HexChat OAuth token for %s", network_name);
+    char *comment_utf8 = g_strdup_printf ("PoxChat OAuth token for %s", network_name);
     wchar_t *comment_wide = g_utf8_to_utf16 (comment_utf8, -1, NULL, NULL, NULL);
     g_free (comment_utf8);
     cred.Comment = comment_wide;
@@ -170,9 +170,9 @@ secure_storage_store (const char *network_name,
 #elif defined(USE_LIBSECRET)
     GError *error = NULL;
     gboolean result;
-    char *label = g_strdup_printf ("HexChat %s for %s", key, network_name);
+    char *label = g_strdup_printf ("PoxChat %s for %s", key, network_name);
 
-    result = secret_password_store_sync (&hexchat_schema,
+    result = secret_password_store_sync (&poxchat_schema,
                                          SECRET_COLLECTION_DEFAULT,
                                          label,
                                          value,
@@ -237,7 +237,7 @@ secure_storage_retrieve (const char *network_name,
     GError *error = NULL;
     char *value;
 
-    value = secret_password_lookup_sync (&hexchat_schema,
+    value = secret_password_lookup_sync (&poxchat_schema,
                                          NULL,
                                          &error,
                                          "network", network_name,
@@ -298,7 +298,7 @@ secure_storage_delete (const char *network_name,
     GError *error = NULL;
     gboolean result;
 
-    result = secret_password_clear_sync (&hexchat_schema,
+    result = secret_password_clear_sync (&poxchat_schema,
                                          NULL,
                                          &error,
                                          "network", network_name,

@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -18,15 +18,15 @@
  */
 
 /*
- * GTK4 Helper Functions for HexChat
+ * GTK4 Helper Functions for PoxChat
  *
  * Convenience functions for common GTK4 patterns. These are NOT compatibility
  * wrappers — they provide genuine utility for patterns that would otherwise
  * require several lines of boilerplate at each call site.
  */
 
-#ifndef HEXCHAT_GTK_HELPERS_H
-#define HEXCHAT_GTK_HELPERS_H
+#ifndef POXCHAT_GTK_HELPERS_H
+#define POXCHAT_GTK_HELPERS_H
 
 #include "config.h"
 #include <gtk/gtk.h>
@@ -586,7 +586,7 @@ hc_list_view_new_simple (GListModel *model,
 		g_signal_connect (factory, "bind", bind_cb, user_data);
 
 	GtkWidget *view = gtk_list_view_new (sel_model, factory);
-	gtk_widget_set_name (view, "hexchat-list");
+	gtk_widget_set_name (view, "poxchat-list");
 	return view;
 }
 
@@ -603,7 +603,7 @@ hc_column_view_new_simple (GListModel *model, GtkSelectionMode selection_mode)
 		sel_model = GTK_SELECTION_MODEL (gtk_no_selection_new (model));
 
 	GtkWidget *view = gtk_column_view_new (sel_model);
-	gtk_widget_set_name (view, "hexchat-list");
+	gtk_widget_set_name (view, "poxchat-list");
 	return view;
 }
 
@@ -808,12 +808,12 @@ hc_debug_log (const char *fmt, ...)
 	va_list args;
 	if (!hc_debug_file)
 	{
-		char *path = g_build_filename (get_xdir (), "hexchat_debug.log", NULL);
+		char *path = g_build_filename (get_xdir (), "poxchat_debug.log", NULL);
 		hc_debug_file = fopen (path, "a");
 		g_free (path);
 		if (hc_debug_file)
 		{
-			fprintf (hc_debug_file, "\n=== HexChat Debug Log ===\n");
+			fprintf (hc_debug_file, "\n=== PoxChat Debug Log ===\n");
 			fflush (hc_debug_file);
 		}
 	}
@@ -935,7 +935,7 @@ hc_editable_label_new (GtkListItem *list_item, GtkEditableLabel **editing_label)
 	GtkGesture *click;
 	HcEditableClickData *data;
 
-	gtk_widget_set_name (label, "hexchat-editable");
+	gtk_widget_set_name (label, "poxchat-editable");
 	gtk_widget_set_hexpand (label, TRUE);
 	gtk_widget_set_vexpand (label, TRUE);
 	gtk_widget_set_halign (label, GTK_ALIGN_FILL);
@@ -1054,4 +1054,4 @@ hc_widget_string_width (GtkWidget *widget, const char *str)
 	return w;
 }
 
-#endif /* HEXCHAT_GTK_HELPERS_H */
+#endif /* POXCHAT_GTK_HELPERS_H */

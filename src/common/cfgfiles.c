@@ -23,19 +23,19 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "cfgfiles.h"
 #include "util.h"
 #include "fe.h"
 #include "text.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 #include "typedef.h"
 
 #ifdef WIN32
 #include <io.h>
 #else
 #include <unistd.h>
-#define HEXCHAT_DIR "hexchat"
+#define POXCHAT_DIR "poxchat"
 #endif
 
 #define DEF_FONT "Monospace 9"
@@ -319,7 +319,7 @@ get_xdir (void)
 				xdir = g_strdup ("./config");
 		}
 		else
-			xdir = g_build_filename (g_get_user_config_dir (), HEXCHAT_DIR, NULL);
+			xdir = g_build_filename (g_get_user_config_dir (), POXCHAT_DIR, NULL);
 #else
 		wchar_t* roaming_path_wide;
 		gchar* roaming_path;
@@ -340,7 +340,7 @@ get_xdir (void)
 			roaming_path = g_utf16_to_utf8 (roaming_path_wide, -1, NULL, NULL, NULL);
 			CoTaskMemFree (roaming_path_wide);
 
-			xdir = g_build_filename (roaming_path, "HexChat", NULL);
+			xdir = g_build_filename (roaming_path, "PoxChat", NULL);
 
 			g_free (roaming_path);
 		}
@@ -363,7 +363,7 @@ default_file (void)
 
 	if (!dfile)
 	{
-		dfile = g_build_filename (get_xdir (), "hexchat.conf", NULL);
+		dfile = g_build_filename (get_xdir (), "poxchat.conf", NULL);
 	}
 	return dfile;
 }
@@ -568,7 +568,7 @@ const struct prefs vars[] =
 	{"net_auto_reconnect", P_OFFINT (hex_net_auto_reconnect), TYPE_BOOL},
 	{"net_auto_reconnectonfail", P_OFFINT (hex_net_auto_reconnectonfail), TYPE_BOOL},
 	{"net_bind_host", P_OFFSET (hex_net_bind_host), TYPE_STR},
-	{"net_ping_timeout", P_OFFINT (hex_net_ping_timeout), TYPE_INT, hexchat_reinit_timers},
+	{"net_ping_timeout", P_OFFINT (hex_net_ping_timeout), TYPE_INT, poxchat_reinit_timers},
 	{"net_proxy_auth", P_OFFINT (hex_net_proxy_auth), TYPE_BOOL},
 	{"net_proxy_host", P_OFFSET (hex_net_proxy_host), TYPE_STR},
 	{"net_proxy_pass", P_OFFSET (hex_net_proxy_pass), TYPE_STR},
@@ -769,7 +769,7 @@ load_default_config(void)
 	username = convert_with_fallback (username, "username");
 	realname = convert_with_fallback (realname, "realname");
 
-	memset (&prefs, 0, sizeof (struct hexchatprefs));
+	memset (&prefs, 0, sizeof (struct poxchatprefs));
 
 	/* put in default values, anything left out is automatically zero */
 
@@ -985,7 +985,7 @@ make_config_dirs (void)
 	}
 	g_free (buf);
 
-	buf = g_build_filename (get_xdir (), HEXCHAT_SOUND_DIR, NULL);
+	buf = g_build_filename (get_xdir (), POXCHAT_SOUND_DIR, NULL);
 	if (g_mkdir (buf, 0700) != 0)
 	{
 		g_free (buf);
@@ -1409,7 +1409,7 @@ cmd_set (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 }
 
 int
-hexchat_open_file (const char *file, int flags, int mode, int xof_flags)
+poxchat_open_file (const char *file, int flags, int mode, int xof_flags)
 {
 	char *buf;
 	int fd;
@@ -1439,7 +1439,7 @@ hexchat_open_file (const char *file, int flags, int mode, int xof_flags)
 }
 
 FILE *
-hexchat_fopen_file (const char *file, const char *mode, int xof_flags)
+poxchat_fopen_file (const char *file, const char *mode, int xof_flags)
 {
 	char *buf;
 	FILE *fh;

@@ -1,4 +1,4 @@
-# HexChat GtkTreeView → GtkColumnView/GtkListView Migration
+# PoxChat GtkTreeView → GtkColumnView/GtkListView Migration
 
 ## Status: COMPLETE ✅
 

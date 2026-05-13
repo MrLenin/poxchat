@@ -1,4 +1,4 @@
-/* HexChat WebSocket/HTTP Server
+/* PoxChat WebSocket/HTTP Server
  * Copyright (C) 2024
  *
  * This program is free software; you can redistribute it and/or modify
@@ -401,7 +401,7 @@ hc_server_new(int port, const char *protocol_name,
 
 	server = g_new0(HcServer, 1);
 	server->port = port;
-	server->protocol_name = g_strdup(protocol_name ? protocol_name : "hexchat");
+	server->protocol_name = g_strdup(protocol_name ? protocol_name : "poxchat");
 	server->user_data = user_data;
 
 	if (callbacks)

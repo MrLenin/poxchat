@@ -11,11 +11,11 @@ fishlim_sources = [
   'utils.c',
   'irc.c',
   'keystore.c',
-  'plugin_hexchat.c'
+  'plugin_poxchat.c'
 ]
 
 shared_module('fishlim', fishlim_sources,
-  dependencies: [libgio_dep, hexchat_plugin_dep, libssl_dep],
+  dependencies: [libgio_dep, poxchat_plugin_dep, libssl_dep],
   install: true,
   install_dir: plugindir,
   name_prefix: '',

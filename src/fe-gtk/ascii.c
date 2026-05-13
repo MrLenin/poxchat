@@ -23,8 +23,8 @@
 #include "fe-gtk.h"
 #include "hex-input-edit.h"
 
-#include "../common/hexchat.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchat.h"
+#include "../common/poxchatc.h"
 #include "gtkutil.h"
 #include "ascii.h"
 #include "maingui.h"

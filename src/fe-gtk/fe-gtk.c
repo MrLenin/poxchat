@@ -30,12 +30,12 @@
 #include <unistd.h>
 #endif
 
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #include "../common/fe.h"
 #include "../common/util.h"
 #include "../common/text.h"
 #include "../common/cfgfiles.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/plugin.h"
 #include "../common/server.h"
 #include "../common/scrollback.h"
@@ -66,12 +66,12 @@
 
 cairo_surface_t *channelwin_pix;
 
-static GtkApplication *hexchat_app = NULL;
+static GtkApplication *poxchat_app = NULL;
 
 GtkApplication *
 fe_get_application (void)
 {
-	return hexchat_app;
+	return poxchat_app;
 }
 
 #ifdef USE_LIBCANBERRA
@@ -100,7 +100,7 @@ static const GOptionEntry gopt_entries[] =
  {"url",	 0,  G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_STRING, &arg_url, N_("Open an irc://server:port/channel?key URL"), "URL"},
  {"command",	'c', 0, G_OPTION_ARG_STRING,	&arg_command, N_("Execute command:"), "COMMAND"},
 #ifdef USE_DBUS
- {"existing",	'e', 0, G_OPTION_ARG_NONE,	&arg_existing, N_("Open URL or execute command in an existing HexChat"), NULL},
+ {"existing",	'e', 0, G_OPTION_ARG_NONE,	&arg_existing, N_("Open URL or execute command in an existing PoxChat"), NULL},
 #endif
  {"minimize",	 0,  0, G_OPTION_ARG_INT,	&arg_minimize, N_("Begin minimized. Level 0=Normal 1=Iconified 2=Tray"), N_("level")},
  {"version",	'v', 0, G_OPTION_ARG_NONE,	&arg_show_version, N_("Show version information"), NULL},
@@ -325,12 +325,12 @@ fe_args (int argc, char *argv[])
 
 	/* Create GtkApplication — g_application_run() in fe_main() will
 	 * handle registration, startup/activate signals, and the main loop.
-	 * NON_UNIQUE: allow multiple instances (HexChat tradition). */
-	hexchat_app = gtk_application_new ("io.github.Hexchat",
+	 * NON_UNIQUE: allow multiple instances (PoxChat tradition). */
+	poxchat_app = gtk_application_new ("io.github.evilnet.PoxChat",
 	                                   G_APPLICATION_NON_UNIQUE);
-	g_signal_connect (hexchat_app, "startup",
+	g_signal_connect (poxchat_app, "startup",
 	                  G_CALLBACK (on_app_startup), NULL);
-	g_signal_connect (hexchat_app, "activate",
+	g_signal_connect (poxchat_app, "activate",
 	                  G_CALLBACK (on_app_activate), NULL);
 
 #ifdef HAVE_GTK_MAC
@@ -400,7 +400,7 @@ create_input_style (InputStyle *style)
 
 		g_snprintf (css_buf, sizeof (css_buf),
 			/* Main input box — full theme (colors + font) */
-			"#hexchat-inputbox { "
+			"#poxchat-inputbox { "
 			"  caret-color: rgb(%d, %d, %d); "
 			"  background: rgb(%d, %d, %d); "
 			"  color: rgb(%d, %d, %d); "
@@ -409,7 +409,7 @@ create_input_style (InputStyle *style)
 			"  min-height: 0; "
 			"  padding: 0; "
 			"} "
-			"#hexchat-inputbox selection { "
+			"#poxchat-inputbox selection { "
 			"  background-color: rgb(%d, %d, %d); "
 			"  color: rgb(%d, %d, %d); "
 			"} "
@@ -423,22 +423,22 @@ create_input_style (InputStyle *style)
 			"  background-color: rgb(%d, %d, %d); "
 			"  color: rgb(%d, %d, %d); "
 			"}",
-			/* #hexchat-inputbox foreground */
+			/* #poxchat-inputbox foreground */
 			(int)(colors[COL_FG].red * 255),
 			(int)(colors[COL_FG].green * 255),
 			(int)(colors[COL_FG].blue * 255),
-			/* #hexchat-inputbox background */
+			/* #poxchat-inputbox background */
 			(int)(colors[COL_BG].red * 255),
 			(int)(colors[COL_BG].green * 255),
 			(int)(colors[COL_BG].blue * 255),
-			/* #hexchat-inputbox color */
+			/* #poxchat-inputbox color */
 			(int)(colors[COL_FG].red * 255),
 			(int)(colors[COL_FG].green * 255),
 			(int)(colors[COL_FG].blue * 255),
-			/* #hexchat-inputbox font */
+			/* #poxchat-inputbox font */
 			font_family ? font_family : "sans",
 			font_size > 0 ? font_size : 11,
-			/* #hexchat-inputbox selection */
+			/* #poxchat-inputbox selection */
 			(int)(colors[COL_MARK_BG].red * 255),
 			(int)(colors[COL_MARK_BG].green * 255),
 			(int)(colors[COL_MARK_BG].blue * 255),
@@ -517,16 +517,16 @@ apply_tree_css (void)
 	}
 
 
-	/* Apply theme colors to chanview tree, userlist, and all .hexchat-list views.
+	/* Apply theme colors to chanview tree, userlist, and all .poxchat-list views.
 	 * ID selectors for chanview/userlist; class selector for dialog list views. */
 	g_snprintf (css_buf, sizeof (css_buf),
 		/* Chanview tree (GtkListView) */
-		"#hexchat-tree { "
+		"#poxchat-tree { "
 		"  border-radius: 6px; "
 		"  border: 1px solid @borders; "
 		"} "
-		"#hexchat-tree, "
-		"#hexchat-tree row { "
+		"#poxchat-tree, "
+		"#poxchat-tree row { "
 		"  background-color: rgb(%d, %d, %d); "
 		"  color: rgb(%d, %d, %d); "
 		"  font-family: \"%s\"; "
@@ -534,25 +534,25 @@ apply_tree_css (void)
 		"  font-style: %s; "
 		"  font-weight: %s; "
 		"} "
-		"#hexchat-tree row:selected { "
+		"#poxchat-tree row:selected { "
 		"  background-color: rgb(%d, %d, %d); "
 		"} "
-		"#hexchat-tree row:selected label { "
+		"#poxchat-tree row:selected label { "
 		"  color: rgb(%d, %d, %d); "
 		"} "
-		"#hexchat-tree treeexpander { "
+		"#poxchat-tree treeexpander { "
 		"  color: rgb(%d, %d, %d); "
 		"} "
 		/* Userlist (GtkColumnView) */
-		"#hexchat-userlist { "
+		"#poxchat-userlist { "
 		"  border-radius: 6px; "
 		"  border: 1px solid @borders; "
 		"  margin-top: 2px; "
 		"  margin-bottom: 6px; "
 		"} "
-		"#hexchat-userlist, "
-		"#hexchat-userlist listview, "
-		"#hexchat-userlist row { "
+		"#poxchat-userlist, "
+		"#poxchat-userlist listview, "
+		"#poxchat-userlist row { "
 		"  background-color: rgb(%d, %d, %d); "
 		"  color: rgb(%d, %d, %d); "
 		"  font-family: \"%s\"; "
@@ -560,132 +560,132 @@ apply_tree_css (void)
 		"  font-style: %s; "
 		"  font-weight: %s; "
 		"} "
-		"#hexchat-userlist row:selected { "
+		"#poxchat-userlist row:selected { "
 		"  background-color: rgb(%d, %d, %d); "
 		"} "
-		"#hexchat-userlist row:selected label { "
+		"#poxchat-userlist row:selected label { "
 		"  color: rgb(%d, %d, %d); "
 		"} "
-		/* Dialog list/column views named hexchat-list */
-		"#hexchat-list { "
+		/* Dialog list/column views named poxchat-list */
+		"#poxchat-list { "
 		"  border-radius: 6px; "
 		"  border: 1px solid @borders; "
 		"} "
-		"#hexchat-list, "
-		"#hexchat-list listview, "
-		"#hexchat-list row { "
+		"#poxchat-list, "
+		"#poxchat-list listview, "
+		"#poxchat-list row { "
 		"  background-color: rgb(%d, %d, %d); "
 		"  color: rgb(%d, %d, %d); "
 		"} "
-		"#hexchat-list row:selected { "
+		"#poxchat-list row:selected { "
 		"  background-color: rgb(%d, %d, %d); "
 		"} "
-		"#hexchat-list row:selected label { "
+		"#poxchat-list row:selected label { "
 		"  color: rgb(%d, %d, %d); "
 		"} "
-		"#hexchat-list cell { "
+		"#poxchat-list cell { "
 		"  padding: 0; "
 		"} "
-		"#hexchat-list .favorite { "
+		"#poxchat-list .favorite { "
 		"  font-weight: 800; "
 		"} "
-		"#hexchat-list editablelabel { "
+		"#poxchat-list editablelabel { "
 		"  padding: 4px 8px; "
 		"} "
-		"#hexchat-editable text { "
+		"#poxchat-editable text { "
 		"  background: rgb(%d, %d, %d); "
 		"  color: rgb(%d, %d, %d); "
 		"  caret-color: rgb(%d, %d, %d); "
 		"  outline: 1px solid rgb(%d, %d, %d); "
 		"  outline-offset: -1px; "
 		"} "
-		"#hexchat-editable text selection { "
+		"#poxchat-editable text selection { "
 		"  background-color: rgb(%d, %d, %d); "
 		"  color: rgb(%d, %d, %d); "
 		"}",
-		/* #hexchat-tree bg */
+		/* #poxchat-tree bg */
 		(int)(colors[COL_BG].red * 255),
 		(int)(colors[COL_BG].green * 255),
 		(int)(colors[COL_BG].blue * 255),
-		/* #hexchat-tree fg */
+		/* #poxchat-tree fg */
 		(int)(colors[COL_FG].red * 255),
 		(int)(colors[COL_FG].green * 255),
 		(int)(colors[COL_FG].blue * 255),
-		/* #hexchat-tree font */
+		/* #poxchat-tree font */
 		font_family ? font_family : "sans",
 		font_size > 0 ? font_size : 11,
 		font_style,
 		font_weight,
-		/* #hexchat-tree row:selected bg */
+		/* #poxchat-tree row:selected bg */
 		(int)(colors[COL_MARK_BG].red * 255),
 		(int)(colors[COL_MARK_BG].green * 255),
 		(int)(colors[COL_MARK_BG].blue * 255),
-		/* #hexchat-tree row:selected label fg */
+		/* #poxchat-tree row:selected label fg */
 		(int)(colors[COL_MARK_FG].red * 255),
 		(int)(colors[COL_MARK_FG].green * 255),
 		(int)(colors[COL_MARK_FG].blue * 255),
-		/* #hexchat-tree treeexpander fg */
+		/* #poxchat-tree treeexpander fg */
 		(int)(colors[COL_FG].red * 255),
 		(int)(colors[COL_FG].green * 255),
 		(int)(colors[COL_FG].blue * 255),
-		/* #hexchat-userlist bg */
+		/* #poxchat-userlist bg */
 		(int)(colors[COL_BG].red * 255),
 		(int)(colors[COL_BG].green * 255),
 		(int)(colors[COL_BG].blue * 255),
-		/* #hexchat-userlist fg */
+		/* #poxchat-userlist fg */
 		(int)(colors[COL_FG].red * 255),
 		(int)(colors[COL_FG].green * 255),
 		(int)(colors[COL_FG].blue * 255),
-		/* #hexchat-userlist font */
+		/* #poxchat-userlist font */
 		font_family ? font_family : "sans",
 		font_size > 0 ? font_size : 11,
 		font_style,
 		font_weight,
-		/* #hexchat-userlist row:selected bg */
+		/* #poxchat-userlist row:selected bg */
 		(int)(colors[COL_MARK_BG].red * 255),
 		(int)(colors[COL_MARK_BG].green * 255),
 		(int)(colors[COL_MARK_BG].blue * 255),
-		/* #hexchat-userlist row:selected label fg */
+		/* #poxchat-userlist row:selected label fg */
 		(int)(colors[COL_MARK_FG].red * 255),
 		(int)(colors[COL_MARK_FG].green * 255),
 		(int)(colors[COL_MARK_FG].blue * 255),
-		/* #hexchat-list bg */
+		/* #poxchat-list bg */
 		(int)(colors[COL_BG].red * 255),
 		(int)(colors[COL_BG].green * 255),
 		(int)(colors[COL_BG].blue * 255),
-		/* #hexchat-list fg */
+		/* #poxchat-list fg */
 		(int)(colors[COL_FG].red * 255),
 		(int)(colors[COL_FG].green * 255),
 		(int)(colors[COL_FG].blue * 255),
-		/* #hexchat-list row:selected bg */
+		/* #poxchat-list row:selected bg */
 		(int)(colors[COL_MARK_BG].red * 255),
 		(int)(colors[COL_MARK_BG].green * 255),
 		(int)(colors[COL_MARK_BG].blue * 255),
-		/* #hexchat-list row:selected label fg */
+		/* #poxchat-list row:selected label fg */
 		(int)(colors[COL_MARK_FG].red * 255),
 		(int)(colors[COL_MARK_FG].green * 255),
 		(int)(colors[COL_MARK_FG].blue * 255),
-		/* #hexchat-list editablelabel text bg */
+		/* #poxchat-list editablelabel text bg */
 		(int)(colors[COL_BG].red * 255),
 		(int)(colors[COL_BG].green * 255),
 		(int)(colors[COL_BG].blue * 255),
-		/* #hexchat-list editablelabel text fg */
+		/* #poxchat-list editablelabel text fg */
 		(int)(colors[COL_FG].red * 255),
 		(int)(colors[COL_FG].green * 255),
 		(int)(colors[COL_FG].blue * 255),
-		/* #hexchat-list editablelabel text caret */
+		/* #poxchat-list editablelabel text caret */
 		(int)(colors[COL_FG].red * 255),
 		(int)(colors[COL_FG].green * 255),
 		(int)(colors[COL_FG].blue * 255),
-		/* #hexchat-editable text outline */
+		/* #poxchat-editable text outline */
 		(int)(colors[COL_MARK_FG].red * 255),
 		(int)(colors[COL_MARK_FG].green * 255),
 		(int)(colors[COL_MARK_FG].blue * 255),
-		/* #hexchat-editable text selection bg */
+		/* #poxchat-editable text selection bg */
 		(int)(colors[COL_MARK_BG].red * 255),
 		(int)(colors[COL_MARK_BG].green * 255),
 		(int)(colors[COL_MARK_BG].blue * 255),
-		/* #hexchat-editable text selection fg */
+		/* #poxchat-editable text selection fg */
 		(int)(colors[COL_MARK_FG].red * 255),
 		(int)(colors[COL_MARK_FG].green * 255),
 		(int)(colors[COL_MARK_FG].blue * 255));
@@ -694,10 +694,10 @@ apply_tree_css (void)
 	if (prefs.hex_gui_compact)
 	{
 		g_strlcat (css_buf,
-			"#hexchat-userlist row, "
-			"#hexchat-userlist row cell, "
-			"#hexchat-tree row, "
-			"#hexchat-tree row cell { "
+			"#poxchat-userlist row, "
+			"#poxchat-userlist row cell, "
+			"#poxchat-tree row, "
+			"#poxchat-tree row cell { "
 			"  padding: 0; "
 			"  min-height: 0; "
 			"}", sizeof (css_buf));
@@ -705,10 +705,10 @@ apply_tree_css (void)
 	else
 	{
 		g_strlcat (css_buf,
-			"#hexchat-userlist row, "
-			"#hexchat-userlist row cell, "
-			"#hexchat-tree row, "
-			"#hexchat-tree row cell { "
+			"#poxchat-userlist row, "
+			"#poxchat-userlist row cell, "
+			"#poxchat-tree row, "
+			"#poxchat-tree row cell { "
 			"  padding-top: 1px; "
 			"  padding-bottom: 1px; "
 			"}", sizeof (css_buf));
@@ -726,7 +726,7 @@ fe_init (void)
 	pixmaps_init ();
 
 #ifdef HAVE_GTK_MAC
-	gtkosx_application_set_dock_icon_pixbuf (osx_app, pix_hexchat);
+	gtkosx_application_set_dock_icon_pixbuf (osx_app, pix_poxchat);
 #endif
 	channelwin_pix = pixmap_load_from_file (prefs.hex_text_background);
 
@@ -769,47 +769,47 @@ fe_init (void)
 				"paned.collapsed.horizontal > separator { margin: 0 3px; } "
 				"paned.collapsed.vertical > separator { margin: 3px 0; } "
 				/* Nick button — let input box drive the row height */
-				"#hexchat-nickbutton { min-height: 0; padding-top: 0; padding-bottom: 0; } "
-				"#hexchat-emojibtn { min-height: 0; padding-top: 0; padding-bottom: 0; } "
-				"#hexchat-emojibtn > button { min-height: 0; padding-top: 0; padding-bottom: 0; } "
+				"#poxchat-nickbutton { min-height: 0; padding-top: 0; padding-bottom: 0; } "
+				"#poxchat-emojibtn { min-height: 0; padding-top: 0; padding-bottom: 0; } "
+				"#poxchat-emojibtn > button { min-height: 0; padding-top: 0; padding-bottom: 0; } "
 				/* GtkStack (used as page container) styling */
 				"stack { padding: 0; margin: 0; } "
 				/* Mode buttons in topic bar - compact padding */
-				".hexchat-modebutton { min-height: 0; padding: 0 0; padding-top: 0; padding-bottom: 0; } "
+				".poxchat-modebutton { min-height: 0; padding: 0 0; padding-top: 0; padding-bottom: 0; } "
 				/* Horizontal rule between friends and non-friends in the
-				 * userlist. Every row is tagged .hexchat-friend or
-				 * .hexchat-nonfriend in the bind callback; the CSS
+				 * userlist. Every row is tagged .poxchat-friend or
+				 * .poxchat-nonfriend in the bind callback; the CSS
 				 * adjacent-sibling selector below draws the rule at every
 				 * friend→non-friend transition without needing C to
 				 * compute neighbor state per bind. */
-				"row.hexchat-friend + row.hexchat-nonfriend { "
+				"row.poxchat-friend + row.poxchat-nonfriend { "
 				"  border-top: 1px solid alpha(currentColor, 0.4); "
 				"} "
 				/* Layout-swap drop indicators: two transparent strips
 				 * overlaid on each vpane, highlighted when the drop
 				 * cursor is hovering over their half. */
-				".hexchat-drop-indicator { "
+				".poxchat-drop-indicator { "
 				"  min-height: 48px; "
 				"  background-color: transparent; "
 				"  transition: background-color 120ms ease; "
 				"} "
-				".hexchat-drop-indicator.hexchat-drop-hover { "
+				".poxchat-drop-indicator.poxchat-drop-hover { "
 				"  background-color: alpha(@theme_selected_bg_color, 0.35); "
 				"} "
 				/* Tabs-mode drop strips at the very top and bottom of the
 				 * window. Hidden via visible=FALSE by default; revealed
 				 * during a chanview drag. Subtle default tint so the user
 				 * can see where to aim; stronger tint on hover. */
-				".hexchat-drop-strip { "
+				".poxchat-drop-strip { "
 				"  min-height: 24px; "
 				"  background-color: alpha(@theme_selected_bg_color, 0.12); "
 				"  transition: background-color 120ms ease; "
 				"} "
-				".hexchat-drop-strip.hexchat-drop-hover { "
+				".poxchat-drop-strip.poxchat-drop-hover { "
 				"  background-color: alpha(@theme_selected_bg_color, 0.45); "
 				"} "
 				/* Channel tabs - reduce horizontal padding for compact appearance */
-				"#hexchat-tab { "
+				"#poxchat-tab { "
 				"  padding: 2px 4px; "
 				"} "
 				/* HexInputEdit — entry-like appearance without Adwaita min-height */
@@ -825,7 +825,7 @@ fe_init (void)
 			"  outline-offset: -2px; "
 			"} "
 			/* Userlist buttons - minimal padding for shrinkable panel */
-				".hexchat-userlistbutton { "
+				".poxchat-userlistbutton { "
 				"  padding: 1px 2px; "
 				"  margin: 0; "
 				"  min-width: 0; "
@@ -846,7 +846,7 @@ fe_init (void)
 static void
 gtkosx_application_terminate (GtkosxApplication *app, gpointer userdata)
 {
-	hexchat_exit();
+	poxchat_exit();
 }
 #endif
 
@@ -858,7 +858,7 @@ fe_main (void)
 	g_signal_connect (G_OBJECT(osx_app), "NSApplicationWillTerminate",
 					G_CALLBACK(gtkosx_application_terminate), NULL);
 #endif
-	g_application_run (G_APPLICATION (hexchat_app), 0, NULL);
+	g_application_run (G_APPLICATION (poxchat_app), 0, NULL);
 
 	/* sleep for 2 seconds so any QUIT messages are not lost. The  */
 	/* GUI is closed at this point, so the user doesn't even know! */
@@ -876,8 +876,8 @@ fe_cleanup (void)
 void
 fe_exit (void)
 {
-	if (hexchat_app)
-		g_application_quit (G_APPLICATION (hexchat_app));
+	if (poxchat_app)
+		g_application_quit (G_APPLICATION (poxchat_app));
 }
 
 int
@@ -908,7 +908,7 @@ log_handler (const gchar   *log_domain,
 {
 	session *sess;
 
-	/* if (getenv ("HEXCHAT_WARNING_IGNORE")) this gets ignored sometimes, so simply just disable all warnings */
+	/* if (getenv ("POXCHAT_WARNING_IGNORE")) this gets ignored sometimes, so simply just disable all warnings */
 		return;
 
 	sess = find_dialog (serv_list->data, "(warnings)");
@@ -916,7 +916,7 @@ log_handler (const gchar   *log_domain,
 		sess = new_ircwindow (serv_list->data, "(warnings)", SESS_DIALOG, 0);
 
 	PrintTextf (sess, "%s\t%s\n", log_domain, message);
-	if (getenv ("HEXCHAT_WARNING_ABORT"))
+	if (getenv ("POXCHAT_WARNING_ABORT"))
 		abort ();
 }
 
@@ -1145,7 +1145,7 @@ fe_notify_friends_changed_idle (gpointer user_data)
 
 	/* Two updates per view:
 	 *   1. Kick the sorter so friend-first ordering re-runs.
-	 *   2. Re-apply .hexchat-friend / .hexchat-nonfriend on every
+	 *   2. Re-apply .poxchat-friend / .poxchat-nonfriend on every
 	 *      bound row — GtkListView optimizes away bind-cb calls when
 	 *      an item just moves positions, so rows whose underlying
 	 *      user flipped friend-ness (e.g. account-observed) keep
@@ -1764,9 +1764,9 @@ fe_beep (session *sess)
 	{
 		ca_context_create (&ca_con);
 		ca_context_change_props (ca_con,
-										CA_PROP_APPLICATION_ID, "hexchat",
+										CA_PROP_APPLICATION_ID, "poxchat",
 										CA_PROP_APPLICATION_NAME, DISPLAY_NAME,
-										CA_PROP_APPLICATION_ICON_NAME, "hexchat", NULL);
+										CA_PROP_APPLICATION_ICON_NAME, "poxchat", NULL);
 	}
 
 	ca_context_play (ca_con, 0, CA_PROP_EVENT_ID, "message-new-instant", NULL);
@@ -2119,7 +2119,7 @@ osx_show_uri (const char *url)
         open = g_find_program_in_path ("open");
         cmd = g_strjoin (" ", open, encoded_url, NULL);
 
-        hexchat_exec (cmd);
+        poxchat_exec (cmd);
 
         g_free (encoded_url);
         g_free (cmd);

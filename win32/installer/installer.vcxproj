@@ -21,9 +21,9 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  <Import Project="..\hexchat.props" />
+  <Import Project="..\poxchat.props" />
   <PropertyGroup>
-    <OutDir>$(HexChatRel)</OutDir>
+    <OutDir>$(PoxChatRel)</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
@@ -36,15 +36,15 @@
     <PreBuildEvent>
       <Command><![CDATA[
 SET SOLUTIONDIR=$(SolutionDir)..\
-powershell -File "$(SolutionDir)..\win32\version-template.ps1" "$(SolutionDir)..\win32\installer\hexchat.iss.tt" "$(HexChatBin)hexchat.iss"
-$(IsccPath) /dPROJECTDIR="$(ProjectDir)" /dAPPARCH="$(Platform)" "$(HexChatBin)hexchat.iss"
+powershell -File "$(SolutionDir)..\win32\version-template.ps1" "$(SolutionDir)..\win32\installer\poxchat.iss.tt" "$(PoxChatBin)poxchat.iss"
+$(IsccPath) /dPROJECTDIR="$(ProjectDir)" /dAPPARCH="$(Platform)" "$(PoxChatBin)poxchat.iss"
       ]]></Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="wizardimage.bmp" />
     <None Include="wizardsmallimage.bmp" />
-    <None Include="hexchat.iss" />
+    <None Include="poxchat.iss" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

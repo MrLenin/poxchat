@@ -1,5 +1,5 @@
-/* HexChat
- * Copyright (C) 2024 HexChat Contributors
+/* PoxChat
+ * Copyright (C) 2024 PoxChat Contributors
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,8 +26,8 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "hexchat.h"
-#include "hexchatc.h"
+#include "poxchat.h"
+#include "poxchatc.h"
 #include "chathistory.h"
 #include "server.h"
 #include "inbound.h"

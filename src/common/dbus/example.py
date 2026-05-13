@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# HexChat
+# PoxChat
 # Copyright (C) 1998-2010 Peter Zelezny.
 # Copyright (C) 2009-2013 Berke Viktor.
 #
@@ -23,29 +23,29 @@ from gi.repository import Gio
 
 bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 connection = Gio.DBusProxy.new_sync(bus, Gio.DBusProxyFlags.NONE, None,
-  						'org.hexchat.service', '/org/hexchat/Remote', 'org.hexchat.connection', None)
+  						'org.poxchat.service', '/org/poxchat/Remote', 'org.poxchat.connection', None)
 path = connection.Connect('(ssss)', 
 					'example.py',
 					'Python example', 
 					'Example of a D-Bus client written in python', 
 					'1.0')		
-hexchat = Gio.DBusProxy.new_sync(bus, Gio.DBusProxyFlags.NONE, None,
-								'org.hexchat.service', path, 'org.hexchat.plugin', None)
+poxchat = Gio.DBusProxy.new_sync(bus, Gio.DBusProxyFlags.NONE, None,
+								'org.poxchat.service', path, 'org.poxchat.plugin', None)
          
 # Note the type before every arguement, this must be done.
 # Type requirements are listed in our docs and characters are listed in the dbus docs.
 # s = string, u = uint, i = int, etc.
 
-channels = hexchat.ListGet ('(s)', "channels")
-while hexchat.ListNext ('(u)', channels):
-	name = hexchat.ListStr ('(us)', channels, "channel")
+channels = poxchat.ListGet ('(s)', "channels")
+while poxchat.ListNext ('(u)', channels):
+	name = poxchat.ListStr ('(us)', channels, "channel")
 	print("------- " + name + " -------")
-	hexchat.SetContext ('(u)', hexchat.ListInt ('(us)', channels, "context"))
-	hexchat.EmitPrint ('(sas)', "Channel Message", ["John", "Hi there", "@"])
-	users = hexchat.ListGet ('(s)', "users")
-	while hexchat.ListNext ('(u)', users):
-		print("Nick: " + hexchat.ListStr ('(us)', users, "nick"))
-	hexchat.ListFree ('(u)', users)
-hexchat.ListFree ('(u)', channels)
+	poxchat.SetContext ('(u)', poxchat.ListInt ('(us)', channels, "context"))
+	poxchat.EmitPrint ('(sas)', "Channel Message", ["John", "Hi there", "@"])
+	users = poxchat.ListGet ('(s)', "users")
+	while poxchat.ListNext ('(u)', users):
+		print("Nick: " + poxchat.ListStr ('(us)', users, "nick"))
+	poxchat.ListFree ('(u)', users)
+poxchat.ListFree ('(u)', channels)
 
-print(hexchat.Strip ('(sii)', "\00312Blue\003 \002Bold!\002", -1, 1|2))
+print(poxchat.Strip ('(sii)', "\00312Blue\003 \002Bold!\002", -1, 1|2))

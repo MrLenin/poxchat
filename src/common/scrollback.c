@@ -1,5 +1,5 @@
-/* HexChat
- * Copyright (C) 2024 HexChat Contributors
+/* PoxChat
+ * Copyright (C) 2024 PoxChat Contributors
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,8 +28,8 @@
 #include <gio/gio.h>
 #include <sqlite3.h>
 
-#include "hexchat.h"
-#include "hexchatc.h"
+#include "poxchat.h"
+#include "poxchatc.h"
 #include "scrollback.h"
 #include "sqlite-zstd-vfs.h"
 #include "cfgfiles.h"

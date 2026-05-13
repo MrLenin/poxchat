@@ -14,17 +14,17 @@ else
 endif
 
 python3_source = custom_target('python-bindings',
-  input: ['../../src/common/hexchat-plugin.h', 'python.py'],
+  input: ['../../src/common/poxchat-plugin.h', 'python.py'],
   output: 'python.c',
   command: [find_program('generate_plugin.py'), '@INPUT@', '@OUTPUT@']
 )
 
-install_data(['_hexchat.py', 'hexchat.py', 'xchat.py'],
-  install_dir: join_paths(get_option('libdir'), 'hexchat/python')
+install_data(['_poxchat.py', 'poxchat.py', 'xchat.py'],
+  install_dir: join_paths(get_option('libdir'), 'poxchat/python')
 )
 
 shared_module('python', python3_source,
-  dependencies: [hexchat_plugin_dep, python_dep],
+  dependencies: [poxchat_plugin_dep, python_dep],
   install: true,
   install_dir: plugindir,
   name_prefix: '',

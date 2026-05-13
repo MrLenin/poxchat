@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -24,8 +24,8 @@
  * that has full control over text layout, emoji rendering, and selection.
  */
 
-#ifndef HEXCHAT_HEX_INPUT_EDIT_H
-#define HEXCHAT_HEX_INPUT_EDIT_H
+#ifndef POXCHAT_HEX_INPUT_EDIT_H
+#define POXCHAT_HEX_INPUT_EDIT_H
 
 #include <gtk/gtk.h>
 
@@ -105,4 +105,4 @@ gboolean    hex_input_edit_move_cursor_down (HexInputEdit *edit);
 
 G_END_DECLS
 
-#endif /* HEXCHAT_HEX_INPUT_EDIT_H */
+#endif /* POXCHAT_HEX_INPUT_EDIT_H */

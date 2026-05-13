@@ -1,4 +1,4 @@
-project('hexchat', 'c',
+project('poxchat', 'c',
   version: '2.16.2',
   meson_version: '>= 0.56.0',
   default_options: [
@@ -32,10 +32,10 @@ endif
 config_h = configuration_data()
 config_h.set_quoted('PACKAGE_VERSION', meson.project_version())
 config_h.set_quoted('PACKAGE_NAME', meson.project_name())
-config_h.set_quoted('GETTEXT_PACKAGE', 'hexchat')
+config_h.set_quoted('GETTEXT_PACKAGE', 'poxchat')
 config_h.set_quoted('LOCALEDIR', join_paths(get_option('prefix'),
                                  get_option('datadir'), 'locale'))
-config_h.set_quoted('G_LOG_DOMAIN', 'hexchat')
+config_h.set_quoted('G_LOG_DOMAIN', 'poxchat')
 config_h.set10('ENABLE_NLS', true)
 
 # WebSocket/HTTP server support (for OAuth2 callbacks and Electron frontend)
@@ -66,8 +66,8 @@ config_h.set('GDK_VERSION_MAX_ALLOWED', 'GDK_VERSION_4_14')
 config_h.set('HAVE_MEMRCHR', cc.has_function('memrchr'))
 config_h.set('HAVE_STRINGS_H', cc.has_header('strings.h'))
 
-config_h.set_quoted('HEXCHATLIBDIR',
-  join_paths(get_option('prefix'), get_option('libdir'), 'hexchat/plugins')
+config_h.set_quoted('POXCHATLIBDIR',
+  join_paths(get_option('prefix'), get_option('libdir'), 'poxchat/plugins')
 )
 
 if libssl_dep.found()

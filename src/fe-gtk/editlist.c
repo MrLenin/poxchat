@@ -33,9 +33,9 @@
 
 #include "fe-gtk.h"
 
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #include "../common/cfgfiles.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/fe.h"
 #include "menu.h"
 #include "gtkutil.h"
@@ -108,7 +108,7 @@ editlist_save (GtkWidget *igad, gchar *file)
 	char buf[512];
 	int fh;
 
-	fh = hexchat_open_file (file, O_TRUNC | O_WRONLY | O_CREAT, 0600, XOF_DOMODE);
+	fh = poxchat_open_file (file, O_TRUNC | O_WRONLY | O_CREAT, 0600, XOF_DOMODE);
 	if (fh != -1)
 	{
 		n_items = g_list_model_get_n_items (G_LIST_MODEL (store));

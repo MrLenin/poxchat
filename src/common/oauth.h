@@ -1,4 +1,4 @@
-/* HexChat OAuth2/OIDC Support
+/* PoxChat OAuth2/OIDC Support
  * Copyright (C) 2024
  *
  * This program is free software; you can redistribute it and/or modify
@@ -15,8 +15,8 @@
  * and SASL OAUTHBEARER mechanism (RFC 7628) for IRC authentication.
  */
 
-#ifndef HEXCHAT_OAUTH_H
-#define HEXCHAT_OAUTH_H
+#ifndef POXCHAT_OAUTH_H
+#define POXCHAT_OAUTH_H
 
 #include <glib.h>
 #include <time.h>
@@ -174,4 +174,4 @@ void oauth_update_server_tokens(struct server *serv, oauth_token *token);
  */
 void oauth_session_free(oauth_session *session);
 
-#endif /* HEXCHAT_OAUTH_H */
+#endif /* POXCHAT_OAUTH_H */

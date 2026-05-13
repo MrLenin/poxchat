@@ -1,4 +1,4 @@
-i18n.gettext('hexchat', preset: 'glib')
+i18n.gettext('poxchat', preset: 'glib')
 
 validate_translations = find_program('validate-textevent-translations')
 test('Validate translations', validate_translations,

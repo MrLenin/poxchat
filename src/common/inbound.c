@@ -31,7 +31,7 @@
 
 #include "inet.h"
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "util.h"
 #include "ignore.h"
 #include "fe.h"
@@ -43,7 +43,7 @@
 #include "servlist.h"
 #include "text.h"
 #include "ctcp.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 #include "chanopt.h"
 #include "chathistory.h"
 #include "scrollback.h"

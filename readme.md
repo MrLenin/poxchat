@@ -1,6 +1,6 @@
-# HexChat (GTK4 fork)
+# PoxChat (GTK4 fork)
 
-A work-in-progress fork of HexChat modernized around GTK4 with expanded IRCv3 support. **This is not release-ready** — expect bugs, rough edges, and the occasional crash. If you want a stable IRC client today, use [upstream HexChat](https://hexchat.github.io/).
+PoxChat is a fork of [HexChat](https://hexchat.github.io/) modernized around GTK4 with expanded IRCv3 support. **This is not release-ready** — expect bugs, rough edges, and the occasional crash. If you want a stable IRC client today, use [upstream HexChat](https://hexchat.github.io/).
 
 Upstream HexChat [documentation](https://hexchat.readthedocs.org/en/latest/index.html) still applies for most basics ([FAQ](https://hexchat.readthedocs.org/en/latest/faq.html), [Python API](https://hexchat.readthedocs.org/en/latest/script_python.html), [Perl API](https://hexchat.readthedocs.org/en/latest/script_perl.html)).
 
@@ -26,9 +26,9 @@ Upstream HexChat [documentation](https://hexchat.readthedocs.org/en/latest/index
 ## Building
 
 ### Windows (Visual Studio)
-Open `win32/hexchat.sln` in Visual Studio 2022. Build dependencies come from [gvsbuild](https://github.com/wingtk/gvsbuild) built for GTK4, plus a separately installed OpenSSL. Optional: libwebsockets, jansson, libcurl for OAuth2.
+Open `win32/poxchat.sln` in Visual Studio 2022. Build dependencies come from [gvsbuild](https://github.com/wingtk/gvsbuild) built for GTK4, plus a separately installed OpenSSL. Optional: libwebsockets, jansson, libcurl for OAuth2.
 
-`win32/hexchat.props` contains environment-specific paths and is not committed.
+`win32/poxchat.props` contains environment-specific paths and is not committed.
 
 ### Linux (Meson)
 ```bash
@@ -49,7 +49,8 @@ sudo apt install build-essential meson ninja-build gettext libgtk-4-dev libssl-d
 
 <sub>
 X-Chat ("xchat") Copyright (c) 1998-2010 By Peter Zelezny.  
-HexChat ("hexchat") Copyright (c) 2009-2014 By Berke Viktor.
+HexChat ("hexchat") Copyright (c) 2009-2014 By Berke Viktor.  
+PoxChat fork Copyright (c) 2024- contributors.
 </sub>
 
 <sub>

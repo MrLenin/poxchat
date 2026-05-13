@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -17,8 +17,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef HEXCHAT_CHANVIEW_H
-#define HEXCHAT_CHANVIEW_H
+#ifndef POXCHAT_CHANVIEW_H
+#define POXCHAT_CHANVIEW_H
 
 #include "gtk-helpers.h"
 

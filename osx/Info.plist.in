@@ -5,13 +5,13 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>English</string>
     <key>CFBundleExecutable</key>
-    <string>HexChat</string>
+    <string>PoxChat</string>
     <key>CFBundleGetInfoString</key>
     <string>@VERSION@</string>
     <key>CFBundleIconFile</key>
-    <string>hexchat.icns</string>
+    <string>poxchat.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>org.hexchat</string>
+    <string>org.poxchat</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundlePackageType</key>

@@ -1,4 +1,4 @@
-/* HexChat WebSocket/HTTP Server
+/* PoxChat WebSocket/HTTP Server
  * Copyright (C) 2024
  *
  * This program is free software; you can redistribute it and/or modify
@@ -6,13 +6,13 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- * Generic WebSocket and HTTP server for HexChat.
+ * Generic WebSocket and HTTP server for PoxChat.
  * Used by Electron frontend for real-time communication and by
  * GTK frontend for OAuth2/OIDC callbacks.
  */
 
-#ifndef HEXCHAT_WS_SERVER_H
-#define HEXCHAT_WS_SERVER_H
+#ifndef POXCHAT_WS_SERVER_H
+#define POXCHAT_WS_SERVER_H
 
 #include <glib.h>
 
@@ -85,7 +85,7 @@ typedef struct {
 /**
  * Create and start a new WebSocket/HTTP server.
  * @param port Port to listen on
- * @param protocol_name WebSocket protocol name (e.g., "hexchat-protocol")
+ * @param protocol_name WebSocket protocol name (e.g., "poxchat-protocol")
  * @param callbacks Callback functions for events
  * @param user_data User data passed to callbacks
  * @return Server instance, or NULL on failure
@@ -152,4 +152,4 @@ void hc_client_set_data(HcClient *client, gpointer user_data);
  */
 gpointer hc_client_get_data(HcClient *client);
 
-#endif /* HEXCHAT_WS_SERVER_H */
+#endif /* POXCHAT_WS_SERVER_H */

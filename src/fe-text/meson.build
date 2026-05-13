@@ -1,7 +1,7 @@
-executable('hexchat-text',
+executable('poxchat-text',
   sources: [
     'fe-text.c',
   ],
-  dependencies: hexchat_common_dep,
+  dependencies: poxchat_common_dep,
   install: true,
 )

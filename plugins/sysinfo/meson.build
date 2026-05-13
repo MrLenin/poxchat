@@ -5,7 +5,7 @@ sysinfo_sources = [
 
 sysinfo_deps = [
   libgio_dep,
-  hexchat_plugin_dep,
+  poxchat_plugin_dep,
   common_sysinfo_deps,
 ]
 

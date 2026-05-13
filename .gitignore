@@ -3,7 +3,7 @@
 src/htm/.vs/*
 /build
 builddir/
-hexchat-build-gtk4/
+poxchat-build-gtk4/
 doxygen*.tmp
 html/
 *.patch
@@ -18,7 +18,7 @@ win32/ext/perl/perl-x86-cache
 win32/ext/perl/perl-x86-SetupFiles
 win32/ext/perl/perl-x64-cache
 win32/ext/perl/perl-x64-SetupFiles
-win32/installer/hexchat.iss
+win32/installer/poxchat.iss
 resource.h
 *.opensdf
 *.sdf
@@ -26,8 +26,8 @@ resource.h
 *.user
 *.exe
 # OSX
-osx/HexChat.app
-osx/.HexChat.app
+osx/PoxChat.app
+osx/.PoxChat.app
 *.zip
 *.dmg
 *.VC.db

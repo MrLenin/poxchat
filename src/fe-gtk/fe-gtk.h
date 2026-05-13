@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -17,12 +17,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef HEXCHAT_FE_GTK_H
-#define HEXCHAT_FE_GTK_H
+#ifndef POXCHAT_FE_GTK_H
+#define POXCHAT_FE_GTK_H
 
 #include "config.h"
 
-#define DISPLAY_NAME "HexChat"
+#define DISPLAY_NAME "PoxChat"
 
 #ifndef WIN32
 #include <sys/types.h>

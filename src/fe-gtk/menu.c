@@ -35,8 +35,8 @@
 
 #include <gdk/gdkkeysyms.h>
 
-#include "../common/hexchat.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchat.h"
+#include "../common/poxchatc.h"
 #include "../common/cfgfiles.h"
 #include "../common/outbound.h"
 #include "../common/ignore.h"
@@ -99,7 +99,7 @@ static void
 nick_command (session * sess, char *cmd)
 {
 	if (*cmd == '!')
-		hexchat_exec (cmd + 1);
+		poxchat_exec (cmd + 1);
 	else
 		handle_command (sess, cmd, TRUE);
 }
@@ -378,7 +378,7 @@ menu_create (GtkWidget *menu, GSList *list, char *target, int check_path)
 		{
 			char *icon, *label;
 
-			/* default command in hexchat.c */
+			/* default command in poxchat.c */
 			if (pop->cmd[0] == 'n' && !strcmp (pop->cmd, "notify -n ASK %s"))
 			{
 				/* don't create this item if already in notify list */
@@ -1720,7 +1720,7 @@ url_handler_action_cb (GSimpleAction *action, GVariant *parameter, gpointer user
 				 str_copy, "", "", "", "", "");
 
 	if (buf[0] == '!')
-		hexchat_exec (buf + 1);
+		poxchat_exec (buf + 1);
 	else
 		handle_command (current_sess, buf, FALSE);
 
@@ -2642,7 +2642,7 @@ menu_noplugin_info (void)
 									"%m  =  machine info\n"\
                            "%n  =  your nick\n"\
 									"%t  =  time/date\n"\
-                           "%v  =  HexChat version\n"\
+                           "%v  =  PoxChat version\n"\
                            "%2  =  word 2\n"\
                            "%3  =  word 3\n"\
                            "&2  =  word 2 to the end of line\n"\
@@ -2689,7 +2689,7 @@ menu_noplugin_info (void)
                            "%s  =  the URL string\n\n"\
                            "Putting a ! in front of the command\n"\
                            "indicates it should be sent to a\n"\
-                           "shell instead of HexChat")
+                           "shell instead of PoxChat")
 
 static void
 menu_usercommands (void)
@@ -2764,14 +2764,8 @@ menu_ctcpguiopen (void)
 static void
 menu_docs (GtkWidget *wid, gpointer none)
 {
-	fe_open_url ("http://hexchat.readthedocs.org");
+	fe_open_url ("https://github.com/evilnet/poxchat");
 }
-
-/*static void
-menu_webpage (GtkWidget *wid, gpointer none)
-{
-	fe_open_url ("http://xchat.org");
-}*/
 
 static void
 menu_dcc_win (GtkWidget *wid, gpointer none)
@@ -2845,10 +2839,10 @@ menu_about (GtkWidget *wid, gpointer sess)
 	gtk_about_dialog_set_program_name (dialog, _(DISPLAY_NAME));
 	gtk_about_dialog_set_version (dialog, PACKAGE_VERSION);
 	gtk_about_dialog_set_license (dialog, license); /* gtk3 can use GTK_LICENSE_GPL_2_0 */
-	gtk_about_dialog_set_website (dialog, "http://hexchat.github.io");
+	gtk_about_dialog_set_website (dialog, "https://github.com/evilnet/poxchat");
 	gtk_about_dialog_set_website_label (dialog, "Website");
 	{
-		GdkTexture *texture = hc_pixbuf_to_texture (pix_hexchat);
+		GdkTexture *texture = hc_pixbuf_to_texture (pix_poxchat);
 		if (texture)
 		{
 			gtk_about_dialog_set_logo (dialog, GDK_PAINTABLE (texture));
@@ -3600,7 +3594,7 @@ menu_build_gmenu (void)
 
 	menubar = g_menu_new ();
 
-	/* === HexChat Menu === */
+	/* === PoxChat Menu === */
 	menu = g_menu_new ();
 	g_menu_append (menu, _("Network Li_st"), "win.server-list");
 
@@ -3939,7 +3933,7 @@ menu_setup_window (GtkWidget *window, int away, GtkWidget **menu_widgets)
 	{
 		/* menu_widgets is legacy (GTK2) state tracking; actions hold
 		 * their own state in GTK4. Clear for caller compatibility. */
-		memset (menu_widgets, 0, sizeof (GtkWidget *) * (MENU_ID_HEXCHAT + 1));
+		memset (menu_widgets, 0, sizeof (GtkWidget *) * (MENU_ID_POXCHAT + 1));
 	}
 }
 

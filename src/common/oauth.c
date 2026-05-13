@@ -1,4 +1,4 @@
-/* HexChat OAuth2/OIDC Support
+/* PoxChat OAuth2/OIDC Support
  * Copyright (C) 2024
  *
  * This program is free software; you can redistribute it and/or modify
@@ -44,7 +44,7 @@
 #include "oauth.h"
 #include "ws-server.h"
 #include "fe.h"
-#include "hexchat.h"
+#include "poxchat.h"
 #include "servlist.h"
 #include "util.h"
 #include "secure-storage.h"
@@ -737,7 +737,7 @@ oauth_http_callback(HcServer *server,
 
 	/* Success - show success page and exchange code for token */
 	*response_out = g_strdup("<html><body><h1>Authorization Successful</h1>"
-	                         "<p>You can close this window and return to HexChat.</p>"
+	                         "<p>You can close this window and return to PoxChat.</p>"
 	                         "<script>window.close();</script></body></html>");
 	*content_type_out = "text/html";
 	*status_out = 200;

@@ -1,4 +1,4 @@
-# HexChat Python Module Style Guide
+# PoxChat Python Module Style Guide
 
 (This is a work in progress).
 

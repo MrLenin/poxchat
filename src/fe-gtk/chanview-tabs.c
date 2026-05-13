@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -842,7 +842,7 @@ cv_tabs_add (chanview *cv, chan *ch, char *name, gboolean has_parent)
 	GtkWidget *but;
 
 	but = gtk_toggle_button_new_with_label (name);
-	gtk_widget_set_name (but, "hexchat-tab");
+	gtk_widget_set_name (but, "poxchat-tab");
 	g_object_set_data (G_OBJECT (but), "c", ch);
 
 	/* GTK4: Allow button to shrink below natural size for compact tab bar */

@@ -25,13 +25,13 @@
 
 #include <gdk/gdkkeysyms.h>
 
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #include "../common/util.h"
 #include "../common/userlist.h"
 #include "../common/modes.h"
 #include "../common/text.h"
 #include "../common/notify.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/fe.h"
 #include "gtkutil.h"
 #include "palette.h"
@@ -544,8 +544,8 @@ userlist_clear_row_classes (GtkWidget *w)
 	name = gtk_widget_get_css_name (w);
 	if (name && !strcmp (name, "row"))
 	{
-		gtk_widget_remove_css_class (w, "hexchat-friend");
-		gtk_widget_remove_css_class (w, "hexchat-nonfriend");
+		gtk_widget_remove_css_class (w, "poxchat-friend");
+		gtk_widget_remove_css_class (w, "poxchat-nonfriend");
 	}
 
 	for (child = gtk_widget_get_first_child (w);
@@ -773,9 +773,9 @@ userlist_row_from_cell (GtkWidget *cell)
 /* Classify the row as friend or non-friend. Instead of detecting the
  * friend/non-friend boundary in C (which needed the previous row's item
  * and was fragile during session transitions), every row is just tagged
- * with one of `.hexchat-friend` or `.hexchat-nonfriend` based solely on
+ * with one of `.poxchat-friend` or `.poxchat-nonfriend` based solely on
  * its own item. A CSS adjacent-sibling rule
- *     row.hexchat-friend + row.hexchat-nonfriend { border-top: ... }
+ *     row.poxchat-friend + row.poxchat-nonfriend { border-top: ... }
  * then draws the rule at every friend→non-friend transition. GTK's CSS
  * engine handles the adjacency detection, so bind-time state races over
  * neighbor positions can't miss the boundary. */
@@ -791,8 +791,8 @@ userlist_mark_friend_boundary (GtkWidget *view, GtkWidget *cell,
 	if (!row)
 		return;
 
-	gtk_widget_remove_css_class (row, "hexchat-friend");
-	gtk_widget_remove_css_class (row, "hexchat-nonfriend");
+	gtk_widget_remove_css_class (row, "poxchat-friend");
+	gtk_widget_remove_css_class (row, "poxchat-nonfriend");
 
 	if (!hu || !view)
 		return;
@@ -803,7 +803,7 @@ userlist_mark_friend_boundary (GtkWidget *view, GtkWidget *cell,
 
 	is_friend = userlist_item_is_friend (sess, hu);
 	gtk_widget_add_css_class (row,
-		is_friend ? "hexchat-friend" : "hexchat-nonfriend");
+		is_friend ? "poxchat-friend" : "poxchat-nonfriend");
 }
 
 /*
@@ -1245,7 +1245,7 @@ userlist_create (GtkWidget *box)
 	/* Create column view - model set later in userlist_show() */
 	view = hc_column_view_new_simple (NULL, GTK_SELECTION_MULTIPLE);
 	gtk_widget_set_size_request (view, 1, -1);
-	gtk_widget_set_name (view, "hexchat-userlist");
+	gtk_widget_set_name (view, "poxchat-userlist");
 
 	/* Track nick labels for dynamic ellipsize toggling */
 	g_object_set_data_full (G_OBJECT (view), "nick-labels",
@@ -1401,7 +1401,7 @@ userlist_refresh_nick_labels (GtkWidget *view)
 }
 
 /*
- * Refresh the .hexchat-friend / .hexchat-nonfriend CSS class on every
+ * Refresh the .poxchat-friend / .poxchat-nonfriend CSS class on every
  * bound row, based on each row's current item's friend-ness. Does NOT
  * touch the selection model, so GtkColumnView keeps its current size
  * allocation — no re-measure, no paned re-clamp, no host-column flicker.

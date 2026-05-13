@@ -36,24 +36,24 @@
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="..\..\win32\hexchat.props" />
+    <Import Project="..\..\win32\poxchat.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="..\..\win32\hexchat.props" />
+    <Import Project="..\..\win32\poxchat.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>hcsasl</TargetName>
-    <OutDir>$(HexChatBin)</OutDir>
-    <IntDir>$(HexChatObj)$(ProjectName)\</IntDir>
+    <OutDir>$(PoxChatBin)</OutDir>
+    <IntDir>$(PoxChatObj)$(ProjectName)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>hcsasl</TargetName>
-    <OutDir>$(HexChatBin)</OutDir>
-    <IntDir>$(HexChatObj)$(ProjectName)\</IntDir>
+    <OutDir>$(PoxChatBin)</OutDir>
+    <IntDir>$(PoxChatObj)$(ProjectName)\</IntDir>
     <IncludePath>C:\Program Files\OpenSSL\include;$(IncludePath)</IncludePath>
     <LibraryPath>C:\Program Files\OpenSSL\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>

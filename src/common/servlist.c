@@ -26,13 +26,13 @@
 #include <unistd.h>
 #endif
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "cfgfiles.h"
 #include "fe.h"
 #include "server.h"
 #include "text.h"
 #include "util.h" /* token_foreach */
-#include "hexchatc.h"
+#include "poxchatc.h"
 
 #include "servlist.h"
 
@@ -1092,7 +1092,7 @@ servlist_load (void)
 	g_free (oldfile);
 	g_free (newfile);
 
-	fp = hexchat_fopen_file ("servlist.conf", "r", 0);
+	fp = poxchat_fopen_file ("servlist.conf", "r", 0);
 	if (!fp)
 		return FALSE;
 
@@ -1264,7 +1264,7 @@ servlist_save (void)
 		first = TRUE;
 #endif
 
-	fp = hexchat_fopen_file ("servlist.conf", "w", 0);
+	fp = poxchat_fopen_file ("servlist.conf", "w", 0);
 	if (!fp)
 	{
 #ifndef WIN32

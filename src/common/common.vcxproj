@@ -24,7 +24,7 @@
     <ClInclude Include="ignore.h" />
     <ClInclude Include="inbound.h" />
     <ClInclude Include="inet.h" />
-    <ClInclude Include="$(HexChatLib)marshal.h" />
+    <ClInclude Include="$(PoxChatLib)marshal.h" />
     <ClInclude Include="modes.h" />
     <ClInclude Include="network.h" />
     <ClInclude Include="notify.h" />
@@ -39,16 +39,16 @@
     <ClInclude Include="scram.h" />
     <ClInclude Include="sysinfo\sysinfo.h" />
     <ClInclude Include="text.h" />
-    <ClInclude Include="$(HexChatLib)textenums.h" />
-    <ClInclude Include="$(HexChatLib)textevents.h" />
+    <ClInclude Include="$(PoxChatLib)textenums.h" />
+    <ClInclude Include="$(PoxChatLib)textevents.h" />
     <ClInclude Include="tree.h" />
     <ClInclude Include="typedef.h" />
     <ClInclude Include="url.h" />
     <ClInclude Include="userlist.h" />
     <ClInclude Include="util.h" />
-    <ClInclude Include="hexchat-plugin.h" />
-    <ClInclude Include="hexchat.h" />
-    <ClInclude Include="hexchatc.h" />
+    <ClInclude Include="poxchat-plugin.h" />
+    <ClInclude Include="poxchat.h" />
+    <ClInclude Include="poxchatc.h" />
     <ClInclude Include="ws-server.h" />
     <ClInclude Include="oauth.h" />
     <ClInclude Include="secure-storage.h" />
@@ -68,7 +68,7 @@
     <ClCompile Include="plugin-identd.c" />
     <ClCompile Include="ignore.c" />
     <ClCompile Include="inbound.c" />
-    <ClCompile Include="$(HexChatLib)marshal.c" />
+    <ClCompile Include="$(PoxChatLib)marshal.c" />
     <ClCompile Include="modes.c" />
     <ClCompile Include="network.c" />
     <ClCompile Include="network-icon.c" />
@@ -87,7 +87,7 @@
     <ClCompile Include="url.c" />
     <ClCompile Include="userlist.c" />
     <ClCompile Include="util.c" />
-    <ClCompile Include="hexchat.c" />
+    <ClCompile Include="poxchat.c" />
     <ClCompile Include="ws-server.c" />
     <ClCompile Include="oauth.c" />
     <ClCompile Include="secure-storage.c" />
@@ -100,7 +100,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\win32\config.h.tt" />
-    <ClInclude Include="$(HexChatLib)config.h" />
+    <ClInclude Include="$(PoxChatLib)config.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{87554B59-006C-4D94-9714-897B27067BA3}</ProjectGuid>
@@ -111,20 +111,20 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  <Import Project="..\..\win32\hexchat.props" />
+  <Import Project="..\..\win32\poxchat.props" />
   <PropertyGroup>
-    <OutDir>$(HexChatLib)</OutDir>
+    <OutDir>$(PoxChatLib)</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;NDEBUG;_LIB;$(OwnFlags);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(HexChatLib);$(DepsRoot)\include;$(OpenSSLInclude);$(Glib);$(Gtk);$(LibWebSocketsInclude);$(JanssonInclude);$(LibCurlInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(PoxChatLib);$(DepsRoot)\include;$(OpenSSLInclude);$(Glib);$(Gtk);$(LibWebSocketsInclude);$(JanssonInclude);$(LibCurlInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;_WIN64;_AMD64_;NDEBUG;_LIB;$(OwnFlags);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(HexChatLib);$(DepsRoot)\include;$(OpenSSLInclude);$(Glib);$(Gtk);$(LibWebSocketsInclude);$(JanssonInclude);$(LibCurlInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)zstd;$(PoxChatLib);$(DepsRoot)\include;$(OpenSSLInclude);$(Glib);$(Gtk);$(LibWebSocketsInclude);$(JanssonInclude);$(LibCurlInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DisableSpecificWarnings>4267;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -133,10 +133,10 @@
     <PreBuildEvent>
       <Command><![CDATA[
 SET SOLUTIONDIR=$(SolutionDir)..\
-"$(Python3Path)\python.exe" $(ProjectDir)make-te.py "$(ProjectDir)textevents.in" "$(HexChatLib)textevents.h" "$(HexChatLib)textenums.h"
-powershell -File "$(SolutionDir)..\win32\version-template.ps1" "$(SolutionDir)..\win32\config.h.tt" "$(HexChatLib)config.h"
-"$(Python3Path)\python.exe" "$(DepsRoot)\bin\glib-genmarshal" --prefix=_hexchat_marshal --header "$(ProjectDir)marshalers.list" --output "$(HexChatLib)marshal.h"
-"$(Python3Path)\python.exe" "$(DepsRoot)\bin\glib-genmarshal" --prefix=_hexchat_marshal --body "$(ProjectDir)marshalers.list" --output "$(HexChatLib)marshal.c"
+"$(Python3Path)\python.exe" $(ProjectDir)make-te.py "$(ProjectDir)textevents.in" "$(PoxChatLib)textevents.h" "$(PoxChatLib)textenums.h"
+powershell -File "$(SolutionDir)..\win32\version-template.ps1" "$(SolutionDir)..\win32\config.h.tt" "$(PoxChatLib)config.h"
+"$(Python3Path)\python.exe" "$(DepsRoot)\bin\glib-genmarshal" --prefix=_poxchat_marshal --header "$(ProjectDir)marshalers.list" --output "$(PoxChatLib)marshal.h"
+"$(Python3Path)\python.exe" "$(DepsRoot)\bin\glib-genmarshal" --prefix=_poxchat_marshal --body "$(ProjectDir)marshalers.list" --output "$(PoxChatLib)marshal.c"
       ]]></Command>
     </PreBuildEvent>
     <ClCompile>

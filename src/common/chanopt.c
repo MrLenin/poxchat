@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -33,13 +33,13 @@
 #include <unistd.h>
 #endif
 
-#include "hexchat.h"
+#include "poxchat.h"
 
 #include "cfgfiles.h"
 #include "server.h"
 #include "text.h"
 #include "util.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 
 
 static GSList *chanopt_list = NULL;
@@ -266,7 +266,7 @@ chanopt_load_all (void)
 	chanopt_in_memory *current = NULL;
 
 	/* 1. load the old file into our GSList */
-	fh = hexchat_open_file ("chanopt.conf", O_RDONLY, 0, 0);
+	fh = poxchat_open_file ("chanopt.conf", O_RDONLY, 0, 0);
 	if (fh != -1)
 	{
 		while (waitline (fh, buf, sizeof buf, FALSE) != -1)
@@ -413,7 +413,7 @@ chanopt_save_all (gboolean flush)
 		return;
 	}
 
-	fh = hexchat_open_file ("chanopt.conf", O_TRUNC | O_WRONLY | O_CREAT, 0600, XOF_DOMODE);
+	fh = poxchat_open_file ("chanopt.conf", O_TRUNC | O_WRONLY | O_CREAT, 0600, XOF_DOMODE);
 	if (fh == -1)
 	{
 		return;

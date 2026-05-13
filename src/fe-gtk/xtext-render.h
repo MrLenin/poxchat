@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -24,8 +24,8 @@
  * rendering formatted text with emoji sprites.
  */
 
-#ifndef HEXCHAT_XTEXT_RENDER_H
-#define HEXCHAT_XTEXT_RENDER_H
+#ifndef POXCHAT_XTEXT_RENDER_H
+#define POXCHAT_XTEXT_RENDER_H
 
 #include <glib.h>
 #include <pango/pango.h>
@@ -151,4 +151,4 @@ int xtext_raw_to_stripped (const guint16 *r2s_map, int raw_len, int raw_off);
  * Returns the first raw byte that maps to >= stripped_off. */
 int xtext_stripped_to_raw (const guint16 *r2s_map, int raw_len, int stripped_off);
 
-#endif /* HEXCHAT_XTEXT_RENDER_H */
+#endif /* POXCHAT_XTEXT_RENDER_H */

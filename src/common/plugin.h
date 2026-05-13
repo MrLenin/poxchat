@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -17,142 +17,142 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef HEXCHAT_COMMONPLUGIN_H
-#define HEXCHAT_COMMONPLUGIN_H
+#ifndef POXCHAT_COMMONPLUGIN_H
+#define POXCHAT_COMMONPLUGIN_H
 
 #ifdef PLUGIN_C
-struct _hexchat_plugin
+struct _poxchat_plugin
 {
-	/* Keep these in sync with hexchat-plugin.h */
+	/* Keep these in sync with poxchat-plugin.h */
 	/* !!don't change the order, to keep binary compat!! */
-	hexchat_hook *(*hexchat_hook_command) (hexchat_plugin *ph,
+	poxchat_hook *(*poxchat_hook_command) (poxchat_plugin *ph,
 		    const char *name,
 		    int pri,
 		    int (*callback) (char *word[], char *word_eol[], void *user_data),
 		    const char *help_text,
 		    void *userdata);
-	hexchat_hook *(*hexchat_hook_server) (hexchat_plugin *ph,
+	poxchat_hook *(*poxchat_hook_server) (poxchat_plugin *ph,
 		   const char *name,
 		   int pri,
 		   int (*callback) (char *word[], char *word_eol[], void *user_data),
 		   void *userdata);
-	hexchat_hook *(*hexchat_hook_print) (hexchat_plugin *ph,
+	poxchat_hook *(*poxchat_hook_print) (poxchat_plugin *ph,
 		  const char *name,
 		  int pri,
 		  int (*callback) (char *word[], void *user_data),
 		  void *userdata);
-	hexchat_hook *(*hexchat_hook_timer) (hexchat_plugin *ph,
+	poxchat_hook *(*poxchat_hook_timer) (poxchat_plugin *ph,
 		  int timeout,
 		  int (*callback) (void *user_data),
 		  void *userdata);
-	hexchat_hook *(*hexchat_hook_fd) (hexchat_plugin *ph,
+	poxchat_hook *(*poxchat_hook_fd) (poxchat_plugin *ph,
 		   int fd,
 		   int flags,
 		   int (*callback) (int fd, int flags, void *user_data),
 		   void *userdata);
-	void *(*hexchat_unhook) (hexchat_plugin *ph,
-	      hexchat_hook *hook);
-	void (*hexchat_print) (hexchat_plugin *ph,
+	void *(*poxchat_unhook) (poxchat_plugin *ph,
+	      poxchat_hook *hook);
+	void (*poxchat_print) (poxchat_plugin *ph,
 	     const char *text);
-	void (*hexchat_printf) (hexchat_plugin *ph,
+	void (*poxchat_printf) (poxchat_plugin *ph,
 	      const char *format, ...);
-	void (*hexchat_command) (hexchat_plugin *ph,
+	void (*poxchat_command) (poxchat_plugin *ph,
 	       const char *command);
-	void (*hexchat_commandf) (hexchat_plugin *ph,
+	void (*poxchat_commandf) (poxchat_plugin *ph,
 		const char *format, ...);
-	int (*hexchat_nickcmp) (hexchat_plugin *ph,
+	int (*poxchat_nickcmp) (poxchat_plugin *ph,
 	       const char *s1,
 	       const char *s2);
-	int (*hexchat_set_context) (hexchat_plugin *ph,
-		   hexchat_context *ctx);
-	hexchat_context *(*hexchat_find_context) (hexchat_plugin *ph,
+	int (*poxchat_set_context) (poxchat_plugin *ph,
+		   poxchat_context *ctx);
+	poxchat_context *(*poxchat_find_context) (poxchat_plugin *ph,
 		    const char *servname,
 		    const char *channel);
-	hexchat_context *(*hexchat_get_context) (hexchat_plugin *ph);
-	const char *(*hexchat_get_info) (hexchat_plugin *ph,
+	poxchat_context *(*poxchat_get_context) (poxchat_plugin *ph);
+	const char *(*poxchat_get_info) (poxchat_plugin *ph,
 		const char *id);
-	int (*hexchat_get_prefs) (hexchat_plugin *ph,
+	int (*poxchat_get_prefs) (poxchat_plugin *ph,
 		 const char *name,
 		 const char **string,
 		 int *integer);
-	hexchat_list * (*hexchat_list_get) (hexchat_plugin *ph,
+	poxchat_list * (*poxchat_list_get) (poxchat_plugin *ph,
 		const char *name);
-	void (*hexchat_list_free) (hexchat_plugin *ph,
-		 hexchat_list *xlist);
-	const char * const * (*hexchat_list_fields) (hexchat_plugin *ph,
+	void (*poxchat_list_free) (poxchat_plugin *ph,
+		 poxchat_list *xlist);
+	const char * const * (*poxchat_list_fields) (poxchat_plugin *ph,
 		   const char *name);
-	int (*hexchat_list_next) (hexchat_plugin *ph,
-		 hexchat_list *xlist);
-	const char * (*hexchat_list_str) (hexchat_plugin *ph,
-		hexchat_list *xlist,
+	int (*poxchat_list_next) (poxchat_plugin *ph,
+		 poxchat_list *xlist);
+	const char * (*poxchat_list_str) (poxchat_plugin *ph,
+		poxchat_list *xlist,
 		const char *name);
-	int (*hexchat_list_int) (hexchat_plugin *ph,
-		hexchat_list *xlist,
+	int (*poxchat_list_int) (poxchat_plugin *ph,
+		poxchat_list *xlist,
 		const char *name);
-	void * (*hexchat_plugingui_add) (hexchat_plugin *ph,
+	void * (*poxchat_plugingui_add) (poxchat_plugin *ph,
 		     const char *filename,
 		     const char *name,
 		     const char *desc,
 		     const char *version,
 		     char *reserved);
-	void (*hexchat_plugingui_remove) (hexchat_plugin *ph,
+	void (*poxchat_plugingui_remove) (poxchat_plugin *ph,
 			void *handle);
-	int (*hexchat_emit_print) (hexchat_plugin *ph,
+	int (*poxchat_emit_print) (poxchat_plugin *ph,
 			const char *event_name, ...);
-	void *(*hexchat_read_fd) (hexchat_plugin *ph);
-	time_t (*hexchat_list_time) (hexchat_plugin *ph,
-		hexchat_list *xlist,
+	void *(*poxchat_read_fd) (poxchat_plugin *ph);
+	time_t (*poxchat_list_time) (poxchat_plugin *ph,
+		poxchat_list *xlist,
 		const char *name);
-	char *(*hexchat_gettext) (hexchat_plugin *ph,
+	char *(*poxchat_gettext) (poxchat_plugin *ph,
 		const char *msgid);
-	void (*hexchat_send_modes) (hexchat_plugin *ph,
+	void (*poxchat_send_modes) (poxchat_plugin *ph,
 		  const char **targets,
 		  int ntargets,
 		  int modes_per_line,
 		  char sign,
 		  char mode);
-	char *(*hexchat_strip) (hexchat_plugin *ph,
+	char *(*poxchat_strip) (poxchat_plugin *ph,
 	     const char *str,
 	     int len,
 	     int flags);
-	void (*hexchat_free) (hexchat_plugin *ph,
+	void (*poxchat_free) (poxchat_plugin *ph,
 	    void *ptr);
-	int (*hexchat_pluginpref_set_str) (hexchat_plugin *ph,
+	int (*poxchat_pluginpref_set_str) (poxchat_plugin *ph,
 		const char *var,
 		const char *value);
-	int (*hexchat_pluginpref_get_str) (hexchat_plugin *ph,
+	int (*poxchat_pluginpref_get_str) (poxchat_plugin *ph,
 		const char *var,
 		char *dest);
-	int (*hexchat_pluginpref_set_int) (hexchat_plugin *ph,
+	int (*poxchat_pluginpref_set_int) (poxchat_plugin *ph,
 		const char *var,
 		int value);
-	int (*hexchat_pluginpref_get_int) (hexchat_plugin *ph,
+	int (*poxchat_pluginpref_get_int) (poxchat_plugin *ph,
 		const char *var);
-	int (*hexchat_pluginpref_delete) (hexchat_plugin *ph,
+	int (*poxchat_pluginpref_delete) (poxchat_plugin *ph,
 		const char *var);
-	int (*hexchat_pluginpref_list) (hexchat_plugin *ph,
+	int (*poxchat_pluginpref_list) (poxchat_plugin *ph,
 		char *dest);
-	hexchat_hook *(*hexchat_hook_server_attrs) (hexchat_plugin *ph,
+	poxchat_hook *(*poxchat_hook_server_attrs) (poxchat_plugin *ph,
 		   const char *name,
 		   int pri,
 		   int (*callback) (char *word[], char *word_eol[],
-							hexchat_event_attrs *attrs, void *user_data),
+							poxchat_event_attrs *attrs, void *user_data),
 		   void *userdata);
-	hexchat_hook *(*hexchat_hook_print_attrs) (hexchat_plugin *ph,
+	poxchat_hook *(*poxchat_hook_print_attrs) (poxchat_plugin *ph,
 		  const char *name,
 		  int pri,
-		  int (*callback) (char *word[], hexchat_event_attrs *attrs,
+		  int (*callback) (char *word[], poxchat_event_attrs *attrs,
 						   void *user_data),
 		  void *userdata);
-	int (*hexchat_emit_print_attrs) (hexchat_plugin *ph, hexchat_event_attrs *attrs,
+	int (*poxchat_emit_print_attrs) (poxchat_plugin *ph, poxchat_event_attrs *attrs,
 									 const char *event_name, ...);
-	hexchat_event_attrs *(*hexchat_event_attrs_create) (hexchat_plugin *ph);
-	void (*hexchat_event_attrs_free) (hexchat_plugin *ph,
-									  hexchat_event_attrs *attrs);
-	void (*hexchat_toast) (hexchat_plugin *ph,
+	poxchat_event_attrs *(*poxchat_event_attrs_create) (poxchat_plugin *ph);
+	void (*poxchat_event_attrs_free) (poxchat_plugin *ph,
+									  poxchat_event_attrs *attrs);
+	void (*poxchat_toast) (poxchat_plugin *ph,
 	    const char *text,
 	    int type);
-	void (*hexchat_toastf) (hexchat_plugin *ph,
+	void (*poxchat_toastf) (poxchat_plugin *ph,
 	    int type,
 	    const char *format, ...);
 
@@ -163,8 +163,8 @@ struct _hexchat_plugin
 	char *desc;
 	char *version;
 	session *context;
-	void *deinit_callback;	/* pointer to hexchat_plugin_deinit */
-	unsigned int fake:1;		/* fake plugin. Added by hexchat_plugingui_add() */
+	void *deinit_callback;	/* pointer to poxchat_plugin_deinit */
+	unsigned int fake:1;		/* fake plugin. Added by poxchat_plugingui_add() */
 	unsigned int free_strings:1;		/* free name,desc,version? */
 };
 #endif

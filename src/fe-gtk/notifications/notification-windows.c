@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 2015 Arnav Singh.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "plugin.h"
 
 #include <gmodule.h>
@@ -47,7 +47,7 @@ notification_backend_init (const char **error)
 	/* Temporarily suppress the "DLL could not be loaded" dialog box before trying to load hcnotifications-winrt.dll */
 	original_error_mode = GetErrorMode ();
 	SetErrorMode(SEM_FAILCRITICALERRORS);
-	module = module_load (HEXCHATLIBDIR "\\hcnotifications-winrt.dll");
+	module = module_load (POXCHATLIBDIR "\\hcnotifications-winrt.dll");
 	SetErrorMode (original_error_mode);
 
 	if (module == NULL)

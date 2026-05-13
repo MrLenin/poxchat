@@ -23,10 +23,10 @@
 
 #include <gdk/gdkkeysyms.h>
 
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #include "../common/fe.h"
 #include "../common/server.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/outbound.h"
 #include "../common/inbound.h"
 #include "../common/plugin.h"
@@ -1211,7 +1211,7 @@ mg_switch_page (int relative, int num)
 static void
 mg_topdestroy_cb (GtkWidget *win, session *sess)
 {
-	session_free (sess);	/* tell hexchat.c about it */
+	session_free (sess);	/* tell poxchat.c about it */
 }
 
 /* cleanup an IRC tab */
@@ -1221,7 +1221,7 @@ mg_ircdestroy (session *sess)
 {
 	GSList *list;
 
-	session_free (sess);	/* tell hexchat.c about it */
+	session_free (sess);	/* tell poxchat.c about it */
 
 	if (mg_gui == NULL)
 	{
@@ -1361,7 +1361,7 @@ mg_quit_dialog_quit_cb (GtkWidget *button, gpointer user_data)
 	hc_window_destroy_fn (GTK_WINDOW (quit_dialog));
 	quit_dialog = NULL;
 	quit_dialog_checkbox = NULL;
-	hexchat_exit ();
+	poxchat_exit ();
 }
 
 static void
@@ -1413,12 +1413,12 @@ mg_open_quit_dialog (gboolean minimize_button)
 	cons = mg_count_networks ();
 	if (dccs + cons == 0 || !prefs.hex_gui_quit_dialog)
 	{
-		hexchat_exit ();
+		poxchat_exit ();
 		return;
 	}
 
 	quit_dialog = gtk_window_new ();
-	gtk_window_set_title (GTK_WINDOW (quit_dialog), _("Quit HexChat?"));
+	gtk_window_set_title (GTK_WINDOW (quit_dialog), _("Quit PoxChat?"));
 	gtk_window_set_transient_for (GTK_WINDOW (quit_dialog), GTK_WINDOW (parent_window));
 	gtk_window_set_resizable (GTK_WINDOW (quit_dialog), FALSE);
 	gtk_window_set_destroy_with_parent (GTK_WINDOW (quit_dialog), TRUE);
@@ -2134,7 +2134,7 @@ mg_userlist_button (GtkWidget * box, char *label, char *cmd,
 
 	g_signal_connect (G_OBJECT (wid), "clicked",
 							G_CALLBACK (userlist_button_cb), cmd);
-	gtk_widget_add_css_class (wid, "hexchat-userlistbutton");
+	gtk_widget_add_css_class (wid, "poxchat-userlistbutton");
 	gtk_button_set_can_shrink (GTK_BUTTON (wid), TRUE);
 
 	/* Explicitly enable ellipsizing on the button label */
@@ -2250,7 +2250,7 @@ mg_tabwindow_kill_cb (GtkWidget *win, gpointer userdata)
 	GSList *list, *next;
 	session *sess;
 
-	hexchat_is_quitting = TRUE;
+	poxchat_is_quitting = TRUE;
 
 	/* see if there's any non-tab windows left */
 	list = sess_list;
@@ -2260,7 +2260,7 @@ mg_tabwindow_kill_cb (GtkWidget *win, gpointer userdata)
 		next = list->next;
 		if (!sess->gui->is_tab)
 		{
-			hexchat_is_quitting = FALSE;
+			poxchat_is_quitting = FALSE;
 /*			puts("-> will not exit, some toplevel windows left");*/
 		} else
 		{
@@ -2315,7 +2315,7 @@ mg_link_irctab (session *sess, int focus)
 		win = mg_changui_destroy (sess);
 		mg_changui_new (sess, sess->res, 0, focus);
 		mg_populate (sess);
-		hexchat_is_quitting = FALSE;
+		poxchat_is_quitting = FALSE;
 		if (win)
 			hc_window_destroy_fn (GTK_WINDOW (win));
 		return;
@@ -2476,7 +2476,7 @@ mg_create_flagbutton (char *tip, GtkWidget *box, char *face)
 
 	btn = gtk_toggle_button_new ();
 	/* GTK4: Add CSS class for compact styling */
-	gtk_widget_add_css_class (btn, "hexchat-modebutton");
+	gtk_widget_add_css_class (btn, "poxchat-modebutton");
 	gtk_widget_set_tooltip_text (btn, tip);
 	gtk_button_set_child (GTK_BUTTON (btn), lbl);
 
@@ -2561,7 +2561,7 @@ mg_create_chanmodebuttons (session_gui *gui, GtkWidget *box)
 	hex_input_edit_set_max_chars (HEX_INPUT_EDIT (gui->key_entry), 23);
 	hex_input_edit_set_width_chars (HEX_INPUT_EDIT (gui->key_entry), 4);
 	hex_input_edit_set_max_width_chars (HEX_INPUT_EDIT (gui->key_entry), 8);
-	gtk_widget_set_name (gui->key_entry, "hexchat-inputbox");
+	gtk_widget_set_name (gui->key_entry, "poxchat-inputbox");
 	gtk_widget_set_hexpand (gui->key_entry, FALSE);
 	gtk_box_append (GTK_BOX (box), gui->key_entry);
 	g_signal_connect (G_OBJECT (gui->key_entry), "activate",
@@ -2583,7 +2583,7 @@ mg_create_chanmodebuttons (session_gui *gui, GtkWidget *box)
 	hex_input_edit_set_max_chars (HEX_INPUT_EDIT (gui->limit_entry), 10);
 	hex_input_edit_set_width_chars (HEX_INPUT_EDIT (gui->limit_entry), 2);
 	hex_input_edit_set_max_width_chars (HEX_INPUT_EDIT (gui->limit_entry), 3);
-	gtk_widget_set_name (gui->limit_entry, "hexchat-inputbox");
+	gtk_widget_set_name (gui->limit_entry, "poxchat-inputbox");
 	gtk_widget_set_hexpand (gui->limit_entry, FALSE);
 	gtk_box_append (GTK_BOX (box), gui->limit_entry);
 	g_signal_connect (G_OBJECT (gui->limit_entry), "activate",
@@ -2671,7 +2671,7 @@ mg_create_topicbar (session *sess, GtkWidget *box)
 	hex_input_edit_set_checked (HEX_INPUT_EDIT (topic), FALSE);
 	if (input_style && input_style->font_desc)
 		hex_input_edit_set_font (HEX_INPUT_EDIT (topic), input_style->font_desc);
-	gtk_widget_set_name (topic, "hexchat-inputbox");
+	gtk_widget_set_name (topic, "poxchat-inputbox");
 	gtk_widget_set_hexpand (topic, TRUE);
 	gtk_box_append (GTK_BOX (hbox), topic);
 	g_signal_connect (G_OBJECT (topic), "activate",
@@ -3043,14 +3043,14 @@ mg_create_textarea (session *sess, GtkWidget *box)
 
 		gtk_overlay_set_child (GTK_OVERLAY (overlay), GTK_WIDGET (xtext));
 
-		gtk_widget_add_css_class (top_ind, "hexchat-drop-indicator");
+		gtk_widget_add_css_class (top_ind, "poxchat-drop-indicator");
 		gtk_widget_set_can_target (top_ind, FALSE);
 		gtk_widget_set_valign (top_ind, GTK_ALIGN_START);
 		gtk_widget_set_halign (top_ind, GTK_ALIGN_START);
 		gtk_widget_set_visible (top_ind, FALSE);
 		gtk_overlay_add_overlay (GTK_OVERLAY (overlay), top_ind);
 
-		gtk_widget_add_css_class (bot_ind, "hexchat-drop-indicator");
+		gtk_widget_add_css_class (bot_ind, "poxchat-drop-indicator");
 		gtk_widget_set_can_target (bot_ind, FALSE);
 		gtk_widget_set_valign (bot_ind, GTK_ALIGN_END);
 		gtk_widget_set_halign (bot_ind, GTK_ALIGN_START);
@@ -3659,7 +3659,7 @@ mg_rightpane_idle_cb (gpointer user_data)
  * starts clipping the content. */
 #define MG_PANE_DETENT_STICKY_PX 25
 
-#define MG_DETENT_MIN_KEY "hexchat-detent-min-func"
+#define MG_DETENT_MIN_KEY "poxchat-detent-min-func"
 
 void
 mg_set_detent_min_func (GtkWidget *widget, mg_detent_min_func func)
@@ -4482,7 +4482,7 @@ mg_create_entry (session *sess, GtkWidget *box)
 
 	gui->nick_label = but = gtk_button_new ();
 	gtk_widget_add_css_class (but, "flat");
-	gtk_widget_set_name (but, "hexchat-nickbutton");
+	gtk_widget_set_name (but, "poxchat-nickbutton");
 	gtk_widget_set_can_focus (but, FALSE);
 	{
 		GtkWidget *btn_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
@@ -4508,7 +4508,7 @@ mg_create_entry (session *sess, GtkWidget *box)
 	gtk_widget_set_valign (entry, GTK_ALIGN_FILL);
 	gtk_box_append (GTK_BOX (hbox), entry);
 
-	gtk_widget_set_name (entry, "hexchat-inputbox");
+	gtk_widget_set_name (entry, "poxchat-inputbox");
 	{
 		GtkEventController *key_controller = gtk_event_controller_key_new ();
 		/* Use capture phase to handle keys before focus navigation */
@@ -4542,7 +4542,7 @@ mg_create_entry (session *sess, GtkWidget *box)
 		gtk_widget_set_can_focus (emoji_btn, FALSE);
 		gtk_widget_set_tooltip_text (emoji_btn, _("Insert Emoji"));
 		gtk_widget_set_valign (emoji_btn, GTK_ALIGN_FILL);
-		gtk_widget_set_name (emoji_btn, "hexchat-emojibtn");
+		gtk_widget_set_name (emoji_btn, "poxchat-emojibtn");
 		gtk_box_append (GTK_BOX (hbox), emoji_btn);
 
 		emoji_chooser = hex_emoji_chooser_new ();
@@ -4714,10 +4714,10 @@ mg_create_topwindow (session *sess)
 	GtkWidget *table;
 
 	if (sess->type == SESS_DIALOG)
-		win = gtkutil_window_new ("HexChat", NULL,
+		win = gtkutil_window_new ("PoxChat", NULL,
 										  prefs.hex_gui_dialog_width, prefs.hex_gui_dialog_height, 0);
 	else
-		win = gtkutil_window_new ("HexChat", NULL,
+		win = gtkutil_window_new ("PoxChat", NULL,
 										  prefs.hex_gui_win_width,
 										  prefs.hex_gui_win_height, 0);
 	sess->gui->window = win;
@@ -4823,7 +4823,7 @@ mg_create_tabwindow (session *sess)
 	GtkWidget *win;
 	GtkWidget *table;
 
-	win = gtkutil_window_new ("HexChat", NULL, prefs.hex_gui_win_width,
+	win = gtkutil_window_new ("PoxChat", NULL, prefs.hex_gui_win_width,
 									  prefs.hex_gui_win_height, 0);
 	sess->gui->window = win;
 
@@ -5372,8 +5372,8 @@ mg_xtext_file_drop_cb (GtkDropTarget *target, const GValue *value,
 }
 
 /* Internal layout swapping target types */
-#define DND_TARGET_CHANVIEW "HEXCHAT_CHANVIEW"
-#define DND_TARGET_USERLIST "HEXCHAT_USERLIST"
+#define DND_TARGET_CHANVIEW "POXCHAT_CHANVIEW"
+#define DND_TARGET_USERLIST "POXCHAT_USERLIST"
 
 /* Apply a layout drop: put the dragged panel (chanview or userlist) in
  * slot `target_pos` (1 = TL, 2 = BL, 3 = TR, 4 = BR) and bump the other
@@ -5470,7 +5470,7 @@ mg_strip_layout_drop_cb (GtkDropTarget *target, const GValue *value,
 	 * emit a trailing leave event, which leaves the strip tinted. */
 	widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
 	if (widget)
-		gtk_widget_remove_css_class (widget, "hexchat-drop-hover");
+		gtk_widget_remove_css_class (widget, "poxchat-drop-hover");
 
 	/* Hide both strips now too. The layout rebuild triggered by
 	 * mg_apply_layout_drop can reparent chanview / re-run pane placement,
@@ -5505,7 +5505,7 @@ mg_strip_layout_motion_cb (GtkDropTarget *target, double x, double y,
 	(void) x; (void) y; (void) user_data;
 
 	widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
-	gtk_widget_add_css_class (widget, "hexchat-drop-hover");
+	gtk_widget_add_css_class (widget, "poxchat-drop-hover");
 	return GDK_ACTION_MOVE;
 }
 
@@ -5517,7 +5517,7 @@ mg_strip_layout_leave_cb (GtkDropTarget *target, gpointer user_data)
 	(void) user_data;
 
 	widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
-	gtk_widget_remove_css_class (widget, "hexchat-drop-hover");
+	gtk_widget_remove_css_class (widget, "poxchat-drop-hover");
 }
 
 /* Create a tab-bar drop strip for POS_TOP (pos == 5) or POS_BOTTOM
@@ -5529,7 +5529,7 @@ mg_create_drop_strip (int pos)
 	GtkDropTarget *target;
 
 	strip = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_add_css_class (strip, "hexchat-drop-strip");
+	gtk_widget_add_css_class (strip, "poxchat-drop-strip");
 	gtk_widget_set_hexpand (strip, TRUE);
 	gtk_widget_set_visible (strip, FALSE);
 
@@ -5568,8 +5568,8 @@ mg_pane_layout_drop_cb (GtkDropTarget *target, const GValue *value,
 	 * widgets in a way that drag-end's ancestor walk can miss. */
 	top_ind = widget ? g_object_get_data (G_OBJECT (widget), "hc-drop-top") : NULL;
 	bot_ind = widget ? g_object_get_data (G_OBJECT (widget), "hc-drop-bottom") : NULL;
-	if (top_ind) gtk_widget_remove_css_class (top_ind, "hexchat-drop-hover");
-	if (bot_ind) gtk_widget_remove_css_class (bot_ind, "hexchat-drop-hover");
+	if (top_ind) gtk_widget_remove_css_class (top_ind, "poxchat-drop-hover");
+	if (bot_ind) gtk_widget_remove_css_class (bot_ind, "poxchat-drop-hover");
 
 	/* Hide the tabs-mode strips too — if this drop is a chanview drag,
 	 * the drag-begin revealed them and we need to hide them now before
@@ -5657,8 +5657,8 @@ mg_xtext_layout_motion_cb (GtkDropTarget *target, double x, double y,
 	width = gtk_widget_get_width (widget);
 	height = gtk_widget_get_height (widget);
 
-	if (top_ind) gtk_widget_remove_css_class (top_ind, "hexchat-drop-hover");
-	if (bot_ind) gtk_widget_remove_css_class (bot_ind, "hexchat-drop-hover");
+	if (top_ind) gtk_widget_remove_css_class (top_ind, "poxchat-drop-hover");
+	if (bot_ind) gtk_widget_remove_css_class (bot_ind, "poxchat-drop-hover");
 
 	if (!mg_xtext_drop_is_active (&paneless_left))
 	{
@@ -5687,11 +5687,11 @@ mg_xtext_layout_motion_cb (GtkDropTarget *target, double x, double y,
 
 	if (y < height / 2)
 	{
-		if (top_ind) gtk_widget_add_css_class (top_ind, "hexchat-drop-hover");
+		if (top_ind) gtk_widget_add_css_class (top_ind, "poxchat-drop-hover");
 	}
 	else
 	{
-		if (bot_ind) gtk_widget_add_css_class (bot_ind, "hexchat-drop-hover");
+		if (bot_ind) gtk_widget_add_css_class (bot_ind, "poxchat-drop-hover");
 	}
 
 	return GDK_ACTION_MOVE;
@@ -5711,12 +5711,12 @@ mg_xtext_layout_leave_cb (GtkDropTarget *target, gpointer user_data)
 	bot_ind = g_object_get_data (G_OBJECT (widget), "hc-drop-bottom");
 	if (top_ind)
 	{
-		gtk_widget_remove_css_class (top_ind, "hexchat-drop-hover");
+		gtk_widget_remove_css_class (top_ind, "poxchat-drop-hover");
 		gtk_widget_set_visible (top_ind, FALSE);
 	}
 	if (bot_ind)
 	{
-		gtk_widget_remove_css_class (bot_ind, "hexchat-drop-hover");
+		gtk_widget_remove_css_class (bot_ind, "poxchat-drop-hover");
 		gtk_widget_set_visible (bot_ind, FALSE);
 	}
 }
@@ -5897,19 +5897,19 @@ mg_pane_layout_motion_cb (GtkDropTarget *target, double x, double y,
 	height = gtk_widget_get_height (widget);
 
 	if (top_ind)
-		gtk_widget_remove_css_class (top_ind, "hexchat-drop-hover");
+		gtk_widget_remove_css_class (top_ind, "poxchat-drop-hover");
 	if (bot_ind)
-		gtk_widget_remove_css_class (bot_ind, "hexchat-drop-hover");
+		gtk_widget_remove_css_class (bot_ind, "poxchat-drop-hover");
 
 	if (y < height / 2)
 	{
 		if (top_ind)
-			gtk_widget_add_css_class (top_ind, "hexchat-drop-hover");
+			gtk_widget_add_css_class (top_ind, "poxchat-drop-hover");
 	}
 	else
 	{
 		if (bot_ind)
-			gtk_widget_add_css_class (bot_ind, "hexchat-drop-hover");
+			gtk_widget_add_css_class (bot_ind, "poxchat-drop-hover");
 	}
 
 	return GDK_ACTION_MOVE;
@@ -5928,9 +5928,9 @@ mg_pane_layout_leave_cb (GtkDropTarget *target, gpointer user_data)
 	top_ind = g_object_get_data (G_OBJECT (widget), "hc-drop-top");
 	bot_ind = g_object_get_data (G_OBJECT (widget), "hc-drop-bottom");
 	if (top_ind)
-		gtk_widget_remove_css_class (top_ind, "hexchat-drop-hover");
+		gtk_widget_remove_css_class (top_ind, "poxchat-drop-hover");
 	if (bot_ind)
-		gtk_widget_remove_css_class (bot_ind, "hexchat-drop-hover");
+		gtk_widget_remove_css_class (bot_ind, "poxchat-drop-hover");
 }
 
 /* Install a layout-swap drop target on a vpane. `is_left` distinguishes
@@ -5951,11 +5951,11 @@ mg_setup_pane_layout_dnd (GtkWidget *vpane, gboolean is_left)
 
 	/* Two transparent strips, one for each half. They don't consume
 	 * input (can-target = FALSE) so drop events reach the vpane. CSS
-	 * makes them invisible by default; a .hexchat-drop-hover class on
+	 * makes them invisible by default; a .poxchat-drop-hover class on
 	 * the one under the cursor lights it up during a drag. */
 	top_ind = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_add_css_class (top_ind, "hexchat-drop-indicator");
-	gtk_widget_add_css_class (top_ind, "hexchat-drop-indicator-top");
+	gtk_widget_add_css_class (top_ind, "poxchat-drop-indicator");
+	gtk_widget_add_css_class (top_ind, "poxchat-drop-indicator-top");
 	gtk_widget_set_can_target (top_ind, FALSE);
 	gtk_widget_set_halign (top_ind, GTK_ALIGN_FILL);
 	gtk_widget_set_valign (top_ind, GTK_ALIGN_START);
@@ -5963,8 +5963,8 @@ mg_setup_pane_layout_dnd (GtkWidget *vpane, gboolean is_left)
 	gtk_overlay_add_overlay (GTK_OVERLAY (overlay), top_ind);
 
 	bot_ind = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_add_css_class (bot_ind, "hexchat-drop-indicator");
-	gtk_widget_add_css_class (bot_ind, "hexchat-drop-indicator-bottom");
+	gtk_widget_add_css_class (bot_ind, "poxchat-drop-indicator");
+	gtk_widget_add_css_class (bot_ind, "poxchat-drop-indicator-bottom");
 	gtk_widget_set_can_target (bot_ind, FALSE);
 	gtk_widget_set_halign (bot_ind, GTK_ALIGN_FILL);
 	gtk_widget_set_valign (bot_ind, GTK_ALIGN_END);
@@ -6026,12 +6026,12 @@ mg_clear_all_drop_indicators (void)
 
 		if (gui->top_drop_strip)
 		{
-			gtk_widget_remove_css_class (gui->top_drop_strip, "hexchat-drop-hover");
+			gtk_widget_remove_css_class (gui->top_drop_strip, "poxchat-drop-hover");
 			gtk_widget_set_visible (gui->top_drop_strip, FALSE);
 		}
 		if (gui->bottom_drop_strip)
 		{
-			gtk_widget_remove_css_class (gui->bottom_drop_strip, "hexchat-drop-hover");
+			gtk_widget_remove_css_class (gui->bottom_drop_strip, "poxchat-drop-hover");
 			gtk_widget_set_visible (gui->bottom_drop_strip, FALSE);
 		}
 
@@ -6041,13 +6041,13 @@ mg_clear_all_drop_indicators (void)
 			ind = g_object_get_data (G_OBJECT (gui->xtext), "hc-drop-top");
 			if (ind)
 			{
-				gtk_widget_remove_css_class (ind, "hexchat-drop-hover");
+				gtk_widget_remove_css_class (ind, "poxchat-drop-hover");
 				gtk_widget_set_visible (ind, FALSE);
 			}
 			ind = g_object_get_data (G_OBJECT (gui->xtext), "hc-drop-bottom");
 			if (ind)
 			{
-				gtk_widget_remove_css_class (ind, "hexchat-drop-hover");
+				gtk_widget_remove_css_class (ind, "poxchat-drop-hover");
 				gtk_widget_set_visible (ind, FALSE);
 			}
 		}
@@ -6056,16 +6056,16 @@ mg_clear_all_drop_indicators (void)
 		if (gui->vpane_left)
 		{
 			ind = g_object_get_data (G_OBJECT (gui->vpane_left), "hc-drop-top");
-			if (ind) gtk_widget_remove_css_class (ind, "hexchat-drop-hover");
+			if (ind) gtk_widget_remove_css_class (ind, "poxchat-drop-hover");
 			ind = g_object_get_data (G_OBJECT (gui->vpane_left), "hc-drop-bottom");
-			if (ind) gtk_widget_remove_css_class (ind, "hexchat-drop-hover");
+			if (ind) gtk_widget_remove_css_class (ind, "poxchat-drop-hover");
 		}
 		if (gui->vpane_right)
 		{
 			ind = g_object_get_data (G_OBJECT (gui->vpane_right), "hc-drop-top");
-			if (ind) gtk_widget_remove_css_class (ind, "hexchat-drop-hover");
+			if (ind) gtk_widget_remove_css_class (ind, "poxchat-drop-hover");
 			ind = g_object_get_data (G_OBJECT (gui->vpane_right), "hc-drop-bottom");
-			if (ind) gtk_widget_remove_css_class (ind, "hexchat-drop-hover");
+			if (ind) gtk_widget_remove_css_class (ind, "poxchat-drop-hover");
 		}
 	}
 }

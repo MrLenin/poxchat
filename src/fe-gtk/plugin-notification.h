@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 2015 Patrick Griffis.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -16,8 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef HEXCHAT_PLUGIN_NOTIFICATION_H
-#define HEXCHAT_PLUGIN_NOTIFICATION_H
+#ifndef POXCHAT_PLUGIN_NOTIFICATION_H
+#define POXCHAT_PLUGIN_NOTIFICATION_H
 
 int notification_plugin_init (void *, char **, char **, char **, char *);
 int notification_plugin_deinit (void *);

@@ -2,7 +2,7 @@
  *
  * Based on GtkEmojiChooser from GTK 4.x
  * Copyright 2017, Red Hat, Inc.
- * Copyright 2026, HexChat contributors.
+ * Copyright 2026, PoxChat contributors.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public

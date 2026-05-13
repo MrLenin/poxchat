@@ -1,5 +1,5 @@
-/* HexChat
- * Copyright (C) 2024 HexChat Contributors
+/* PoxChat
+ * Copyright (C) 2024 PoxChat Contributors
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,8 +18,8 @@
  * SQLite-based scrollback storage for message history persistence
  */
 
-#ifndef HEXCHAT_SCROLLBACK_H
-#define HEXCHAT_SCROLLBACK_H
+#ifndef POXCHAT_SCROLLBACK_H
+#define POXCHAT_SCROLLBACK_H
 
 #include <glib.h>
 #include <time.h>
@@ -312,4 +312,4 @@ void scrollback_init (void);
  */
 void scrollback_shutdown (void);
 
-#endif /* HEXCHAT_SCROLLBACK_H */
+#endif /* POXCHAT_SCROLLBACK_H */

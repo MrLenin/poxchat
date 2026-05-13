@@ -23,32 +23,32 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  <Import Project="..\..\win32\hexchat.props" />
+  <Import Project="..\..\win32\poxchat.props" />
   <PropertyGroup>
-    <TargetName>hexchat</TargetName>
-    <OutDir>$(HexChatRel)</OutDir>
+    <TargetName>poxchat</TargetName>
+    <OutDir>$(PoxChatRel)</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;TRAY_EXPORTS;$(OwnFlags);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\common;$(HexChatLib);$(DepsRoot)\include;$(DepsRoot)\include\librsvg-2.0;$(OpenSSLInclude);$(Glib);$(Gtk);$(JanssonInclude);$(LibCurlInclude);..\..\external\tray\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\common;$(PoxChatLib);$(DepsRoot)\include;$(DepsRoot)\include\librsvg-2.0;$(OpenSSLInclude);$(Glib);$(Gtk);$(JanssonInclude);$(LibCurlInclude);..\..\external\tray\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DisableSpecificWarnings>4244;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(DepsRoot)\lib;$(OpenSSLLib);$(JanssonLib);$(LibWebSocketsLib);$(LibCurlLib);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(DepLibs);$(HexChatLib)common.lib;wbemuuid.lib;comsupp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(DepLibs);$(PoxChatLib)common.lib;wbemuuid.lib;comsupp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;_WIN64;_AMD64_;NDEBUG;_WINDOWS;TRAY_EXPORTS;$(OwnFlags);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\common;$(HexChatLib);$(DepsRoot)\include;$(DepsRoot)\include\librsvg-2.0;$(OpenSSLInclude);$(Glib);$(Gtk);$(JanssonInclude);$(LibCurlInclude);..\..\external\tray\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\common;$(PoxChatLib);$(DepsRoot)\include;$(DepsRoot)\include\librsvg-2.0;$(OpenSSLInclude);$(Glib);$(Gtk);$(JanssonInclude);$(LibCurlInclude);..\..\external\tray\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DisableSpecificWarnings>4244;4267;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(DepsRoot)\lib;$(OpenSSLLib);$(JanssonLib);$(LibWebSocketsLib);$(LibCurlLib);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(DepLibs);$(HexChatLib)common.lib;wbemuuid.lib;comsupp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(DepLibs);$(PoxChatLib)common.lib;wbemuuid.lib;comsupp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
@@ -56,13 +56,13 @@
     <PreBuildEvent>
       <Command><![CDATA[
 SET SOLUTIONDIR=$(SolutionDir)..\
-powershell -File "$(SolutionDir)..\win32\version-template.ps1" "$(SolutionDir)..\src\fe-gtk\hexchat.rc.tt" "$(HexChatLib)hexchat.rc.utf8"
-REM hexchat.rc needs to be in UCS-2 or Resource Compiler will complain
-powershell "Get-Content -Encoding UTF8 '$(HexChatLib)hexchat.rc.utf8' | Out-File '$(HexChatLib)hexchat.rc'; Remove-Item '$(HexChatLib)hexchat.rc.utf8'"
-"$(DepsRoot)\bin\glib-compile-resources.exe" --generate-header --manual-register --sourcedir "$(DataDir)" --target "$(HexChatLib)resources.h" "$(DataDir)hexchat.gresource.xml"
-"$(DepsRoot)\bin\glib-compile-resources.exe" --generate-source --manual-register --sourcedir "$(DataDir)" --target "$(HexChatLib)resources.c" "$(DataDir)hexchat.gresource.xml"
+powershell -File "$(SolutionDir)..\win32\version-template.ps1" "$(SolutionDir)..\src\fe-gtk\poxchat.rc.tt" "$(PoxChatLib)poxchat.rc.utf8"
+REM poxchat.rc needs to be in UCS-2 or Resource Compiler will complain
+powershell "Get-Content -Encoding UTF8 '$(PoxChatLib)poxchat.rc.utf8' | Out-File '$(PoxChatLib)poxchat.rc'; Remove-Item '$(PoxChatLib)poxchat.rc.utf8'"
+"$(DepsRoot)\bin\glib-compile-resources.exe" --generate-header --manual-register --sourcedir "$(DataDir)" --target "$(PoxChatLib)resources.h" "$(DataDir)poxchat.gresource.xml"
+"$(DepsRoot)\bin\glib-compile-resources.exe" --generate-source --manual-register --sourcedir "$(DataDir)" --target "$(PoxChatLib)resources.c" "$(DataDir)poxchat.gresource.xml"
       ]]></Command>
-      <Message>Build hexchat.rc and gresource file</Message>
+      <Message>Build poxchat.rc and gresource file</Message>
     </PreBuildEvent>
     <ClCompile>
       <LanguageStandard_C Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdc11</LanguageStandard_C>
@@ -123,7 +123,7 @@ powershell "Get-Content -Encoding UTF8 '$(HexChatLib)hexchat.rc.utf8' | Out-File
     <ClCompile Include="..\..\external\tray\src\tray_windows.c" />
     <ClCompile Include="plugingui.c" />
     <ClCompile Include="rawlog.c" />
-    <ClCompile Include="$(HexChatLib)resources.c" />
+    <ClCompile Include="$(PoxChatLib)resources.c" />
     <ClCompile Include="servlistgui.c" />
     <ClCompile Include="setup.c" />
     <ClCompile Include="textgui.c" />
@@ -137,17 +137,17 @@ powershell "Get-Content -Encoding UTF8 '$(HexChatLib)hexchat.rc.utf8' | Out-File
     <ClCompile Include="hex-emoji-chooser.c" />
   </ItemGroup>
   <ItemGroup>
-    <Manifest Include="..\..\win32\hexchat.exe.manifest" />
+    <Manifest Include="..\..\win32\poxchat.exe.manifest" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="hexchat.rc.tt" />
-    <ResourceCompile Include="$(HexChatLib)hexchat.rc" />
+    <None Include="poxchat.rc.tt" />
+    <ResourceCompile Include="$(PoxChatLib)poxchat.rc" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\data\icons\hexchat.ico" />
+    <None Include="..\..\data\icons\poxchat.ico" />
   </ItemGroup>
   <ItemGroup>
-    <Xml Include="..\..\data\hexchat.gresource.xml" />
+    <Xml Include="..\..\data\poxchat.gresource.xml" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

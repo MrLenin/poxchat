@@ -1,5 +1,5 @@
-#ifndef HEXCHAT_SYSINFO_H
-#define HEXCHAT_SYSINFO_H
+#ifndef POXCHAT_SYSINFO_H
+#define POXCHAT_SYSINFO_H
 
 #include <glib.h>
 

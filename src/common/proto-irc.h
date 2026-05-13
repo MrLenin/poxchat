@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -18,10 +18,10 @@
  */
 
 #include <time.h>
-#include "hexchat.h"
+#include "poxchat.h"
 
-#ifndef HEXCHAT_PROTO_H
-#define HEXCHAT_PROTO_H
+#ifndef POXCHAT_PROTO_H
+#define POXCHAT_PROTO_H
 
 #define MESSAGE_TAGS_DATA_INIT			\
 	{									\

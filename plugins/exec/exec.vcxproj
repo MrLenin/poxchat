@@ -23,10 +23,10 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  <Import Project="..\..\win32\hexchat.props" />
+  <Import Project="..\..\win32\poxchat.props" />
   <PropertyGroup>
     <TargetName>hcexec</TargetName>
-    <OutDir>$(HexChatRel)plugins\</OutDir>
+    <OutDir>$(PoxChatRel)plugins\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>

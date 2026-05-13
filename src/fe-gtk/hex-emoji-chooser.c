@@ -2,7 +2,7 @@
  *
  * Based on GtkEmojiChooser from GTK 4.x
  * Copyright 2017, Red Hat, Inc.
- * Copyright 2026, HexChat contributors.
+ * Copyright 2026, PoxChat contributors.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -14,8 +14,8 @@
  */
 
 #include "../common/cfgfiles.h"
-#include "../common/hexchat.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchat.h"
+#include "../common/poxchatc.h"
 
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>

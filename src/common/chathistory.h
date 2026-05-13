@@ -1,5 +1,5 @@
-/* HexChat
- * Copyright (C) 2024 HexChat Contributors
+/* PoxChat
+ * Copyright (C) 2024 PoxChat Contributors
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,10 +19,10 @@
  * See https://ircv3.net/specs/extensions/chathistory
  */
 
-#ifndef HEXCHAT_CHATHISTORY_H
-#define HEXCHAT_CHATHISTORY_H
+#ifndef POXCHAT_CHATHISTORY_H
+#define POXCHAT_CHATHISTORY_H
 
-#include "hexchat.h"
+#include "poxchat.h"
 
 /* --- Request queue types --- */
 
@@ -338,4 +338,4 @@ chreq *chreq_new (chreq_type type, const char *reference, const char *end_ref,
  */
 void chathistory_queue_free (session *sess);
 
-#endif /* HEXCHAT_CHATHISTORY_H */
+#endif /* POXCHAT_CHATHISTORY_H */

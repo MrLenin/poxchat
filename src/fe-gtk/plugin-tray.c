@@ -23,11 +23,11 @@
 #include <string.h>
 #include <stdarg.h>
 
-#include "../common/hexchat-plugin.h"
-#include "../common/hexchat.h"
+#include "../common/poxchat-plugin.h"
+#include "../common/poxchat.h"
 
 #include <gtk/gtk.h>
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/inbound.h"
 #include "../common/server.h"
 #include "../common/fe.h"
@@ -108,7 +108,7 @@ static GList *hidden_dialogs = NULL;
 /* Menu items */
 static struct tray_menu menu_items[10];
 
-static hexchat_plugin *ph;
+static poxchat_plugin *ph;
 
 /* Forward declarations */
 void tray_apply_setup (void);
@@ -122,7 +122,7 @@ tray_get_window_status (void)
 {
 	const char *st;
 
-	st = hexchat_get_info (ph, "win_status");
+	st = poxchat_get_info (ph, "win_status");
 
 	if (!st)
 		return WS_HIDDEN;
@@ -656,9 +656,9 @@ tray_toggle_visibility (gboolean force_hide)
 		return FALSE;
 
 	/* ph may have an invalid context now */
-	hexchat_set_context (ph, hexchat_find_context (ph, NULL, NULL));
+	poxchat_set_context (ph, poxchat_find_context (ph, NULL, NULL));
 
-	win = GTK_WINDOW (hexchat_get_info (ph, "gtkwin_ptr"));
+	win = GTK_WINDOW (poxchat_get_info (ph, "gtkwin_ptr"));
 
 	tray_stop_flash ();
 	tray_reset_counts ();
@@ -675,7 +675,7 @@ tray_toggle_visibility (gboolean force_hide)
 
 		/* Execute away command if enabled */
 		if (prefs.hex_gui_tray_away)
-			hexchat_command (ph, "ALLSERV AWAY");
+			poxchat_command (ph, "ALLSERV AWAY");
 
 		/* Clear any previous hidden dialogs list (remove weak refs) */
 		for (l = hidden_dialogs; l != NULL; l = l->next)
@@ -711,7 +711,7 @@ tray_toggle_visibility (gboolean force_hide)
 	{
 		/* Execute back command if enabled */
 		if (prefs.hex_gui_tray_away)
-			hexchat_command (ph, "ALLSERV BACK");
+			poxchat_command (ph, "ALLSERV BACK");
 
 		/* Restore window using GTK */
 		gtk_widget_set_visible (GTK_WIDGET (win), TRUE);
@@ -753,7 +753,7 @@ tray_apply_setup (void)
 	}
 	else
 	{
-		GtkWindow *window = GTK_WINDOW (hexchat_get_info (ph, "gtkwin_ptr"));
+		GtkWindow *window = GTK_WINDOW (poxchat_get_info (ph, "gtkwin_ptr"));
 		if (prefs.hex_gui_tray && gtkutil_tray_icon_supported (window))
 			tray_init_impl ();
 	}
@@ -770,21 +770,21 @@ tray_hilight_cb (char *word[], void *userdata)
 		tray_hilight_count++;
 		if (tray_hilight_count == 1)
 			tray_set_tipf ("Highlighted message from: %s (%s) - %s",
-								word[1], hexchat_get_info (ph, "channel"), DISPLAY_NAME);
+								word[1], poxchat_get_info (ph, "channel"), DISPLAY_NAME);
 		else
 			tray_set_tipf ("%u highlighted messages, latest from: %s (%s) - %s",
-								tray_hilight_count, word[1], hexchat_get_info (ph, "channel"),
+								tray_hilight_count, word[1], poxchat_get_info (ph, "channel"),
 								DISPLAY_NAME);
 	}
 
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 static int
 tray_message_cb (char *word[], void *userdata)
 {
 	if (tray_status == TS_HIGHLIGHT)
-		return HEXCHAT_EAT_NONE;
+		return POXCHAT_EAT_NONE;
 
 	if (prefs.hex_input_tray_chans)
 	{
@@ -793,12 +793,12 @@ tray_message_cb (char *word[], void *userdata)
 		tray_pub_count++;
 		if (tray_pub_count == 1)
 			tray_set_tipf ("Channel message from: %s (%s) - %s",
-								word[1], hexchat_get_info (ph, "channel"), DISPLAY_NAME);
+								word[1], poxchat_get_info (ph, "channel"), DISPLAY_NAME);
 		else
 			tray_set_tipf ("%u channel messages. - %s", tray_pub_count, DISPLAY_NAME);
 	}
 
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 static void
@@ -809,9 +809,9 @@ tray_priv (char *from, char *text)
 	if (alert_match_word (from, prefs.hex_irc_no_hilight))
 		return;
 
-	network = hexchat_get_info (ph, "network");
+	network = poxchat_get_info (ph, "network");
 	if (!network)
-		network = hexchat_get_info (ph, "server");
+		network = poxchat_get_info (ph, "server");
 
 	if (prefs.hex_input_tray_priv)
 	{
@@ -832,7 +832,7 @@ tray_priv_cb (char *word[], void *userdata)
 {
 	tray_priv (word[1], word[2]);
 
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 static int
@@ -841,7 +841,7 @@ tray_invited_cb (char *word[], void *userdata)
 	if (!prefs.hex_away_omit_alerts || tray_find_away_status () != 1)
 		tray_priv (word[2], "Invited");
 
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 static int
@@ -849,9 +849,9 @@ tray_dcc_cb (char *word[], void *userdata)
 {
 	const char *network;
 
-	network = hexchat_get_info (ph, "network");
+	network = poxchat_get_info (ph, "network");
 	if (!network)
-		network = hexchat_get_info (ph, "server");
+		network = poxchat_get_info (ph, "server");
 
 	if (prefs.hex_input_tray_priv && (!prefs.hex_away_omit_alerts || tray_find_away_status () != 1))
 	{
@@ -866,7 +866,7 @@ tray_dcc_cb (char *word[], void *userdata)
 								tray_file_count, word[1], network, DISPLAY_NAME);
 	}
 
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 static int
@@ -874,39 +874,39 @@ tray_focus_cb (char *word[], void *userdata)
 {
 	tray_stop_flash ();
 	tray_reset_counts ();
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 int
-tray_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name,
+tray_plugin_init (poxchat_plugin *plugin_handle, char **plugin_name,
 				char **plugin_desc, char **plugin_version, char *arg)
 {
-	/* we need to save this for use with any hexchat_* functions */
+	/* we need to save this for use with any poxchat_* functions */
 	ph = plugin_handle;
 
 	*plugin_name = "";
 	*plugin_desc = "";
 	*plugin_version = "";
 
-	hexchat_hook_print (ph, "Channel Msg Hilight", -1, tray_hilight_cb, NULL);
-	hexchat_hook_print (ph, "Channel Action Hilight", -1, tray_hilight_cb, NULL);
+	poxchat_hook_print (ph, "Channel Msg Hilight", -1, tray_hilight_cb, NULL);
+	poxchat_hook_print (ph, "Channel Action Hilight", -1, tray_hilight_cb, NULL);
 
-	hexchat_hook_print (ph, "Channel Message", -1, tray_message_cb, NULL);
-	hexchat_hook_print (ph, "Channel Action", -1, tray_message_cb, NULL);
-	hexchat_hook_print (ph, "Channel Notice", -1, tray_message_cb, NULL);
+	poxchat_hook_print (ph, "Channel Message", -1, tray_message_cb, NULL);
+	poxchat_hook_print (ph, "Channel Action", -1, tray_message_cb, NULL);
+	poxchat_hook_print (ph, "Channel Notice", -1, tray_message_cb, NULL);
 
-	hexchat_hook_print (ph, "Private Message", -1, tray_priv_cb, NULL);
-	hexchat_hook_print (ph, "Private Message to Dialog", -1, tray_priv_cb, NULL);
-	hexchat_hook_print (ph, "Private Action", -1, tray_priv_cb, NULL);
-	hexchat_hook_print (ph, "Private Action to Dialog", -1, tray_priv_cb, NULL);
-	hexchat_hook_print (ph, "Notice", -1, tray_priv_cb, NULL);
-	hexchat_hook_print (ph, "Invited", -1, tray_invited_cb, NULL);
+	poxchat_hook_print (ph, "Private Message", -1, tray_priv_cb, NULL);
+	poxchat_hook_print (ph, "Private Message to Dialog", -1, tray_priv_cb, NULL);
+	poxchat_hook_print (ph, "Private Action", -1, tray_priv_cb, NULL);
+	poxchat_hook_print (ph, "Private Action to Dialog", -1, tray_priv_cb, NULL);
+	poxchat_hook_print (ph, "Notice", -1, tray_priv_cb, NULL);
+	poxchat_hook_print (ph, "Invited", -1, tray_invited_cb, NULL);
 
-	hexchat_hook_print (ph, "DCC Offer", -1, tray_dcc_cb, NULL);
+	poxchat_hook_print (ph, "DCC Offer", -1, tray_dcc_cb, NULL);
 
-	hexchat_hook_print (ph, "Focus Window", -1, tray_focus_cb, NULL);
+	poxchat_hook_print (ph, "Focus Window", -1, tray_focus_cb, NULL);
 
-	GtkWindow *window = GTK_WINDOW (hexchat_get_info (ph, "gtkwin_ptr"));
+	GtkWindow *window = GTK_WINDOW (poxchat_get_info (ph, "gtkwin_ptr"));
 	if (prefs.hex_gui_tray && gtkutil_tray_icon_supported (window))
 		tray_init_impl ();
 
@@ -914,7 +914,7 @@ tray_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name,
 }
 
 int
-tray_plugin_deinit (hexchat_plugin *plugin_handle)
+tray_plugin_deinit (poxchat_plugin *plugin_handle)
 {
 	tray_cleanup ();
 	return 1;
@@ -922,7 +922,7 @@ tray_plugin_deinit (hexchat_plugin *plugin_handle)
 
 #else /* !WIN32 - Stub implementations for non-Windows platforms */
 
-static hexchat_plugin *ph;
+static poxchat_plugin *ph;
 
 void
 fe_tray_set_tooltip (const char *text)
@@ -962,10 +962,10 @@ tray_apply_setup (void)
 }
 
 int
-tray_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name,
+tray_plugin_init (poxchat_plugin *plugin_handle, char **plugin_name,
 				char **plugin_desc, char **plugin_version, char *arg)
 {
-	/* we need to save this for use with any hexchat_* functions */
+	/* we need to save this for use with any poxchat_* functions */
 	ph = plugin_handle;
 
 	*plugin_name = "";
@@ -977,7 +977,7 @@ tray_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name,
 }
 
 int
-tray_plugin_deinit (hexchat_plugin *plugin_handle)
+tray_plugin_deinit (poxchat_plugin *plugin_handle)
 {
 	return 1;
 }

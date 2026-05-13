@@ -23,8 +23,8 @@
 
 #include <gdk/gdkkeysyms.h>
 
-#include "../common/hexchat.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchat.h"
+#include "../common/poxchatc.h"
 #include "../common/servlist.h"
 #include "../common/cfgfiles.h"
 #include "../common/fe.h"
@@ -289,7 +289,7 @@ static const char *pages[]=
  * network list without breaking config compatibility.
  *
  * Also make sure inbound_nickserv_login() won't break, i.e. if you add a new
- * type that is NickServ-based, add it there as well so that HexChat knows to
+ * type that is NickServ-based, add it there as well so that PoxChat knows to
  * treat it as such.
  */
 static int login_types_conf[] =
@@ -1116,7 +1116,7 @@ servlist_savegui (void)
 	if (sp)
 		sp[0] = 0;	/* spaces will break the login */
 	servlist_save ();
-	save_config (); /* For nicks stored in hexchat.conf */
+	save_config (); /* For nicks stored in poxchat.conf */
 
 	return 0;
 }
@@ -1410,7 +1410,7 @@ servlist_delete_cb (GtkWidget *win, gpointer userdata)
 	selected_net = NULL;
 
 	if (sess_list == NULL)
-		hexchat_exit ();
+		poxchat_exit ();
 
 	return FALSE;
 }
@@ -1431,7 +1431,7 @@ servlist_close_cb (GtkWidget *button, gpointer userdata)
 	hc_window_destroy_fn (GTK_WINDOW (win));
 
 	if (sess_list == NULL)
-		hexchat_exit ();
+		poxchat_exit ();
 }
 
 /* convert "host:port" format to "host/port" */
@@ -1967,7 +1967,7 @@ static void
 servlist_net_setup_cb (GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data)
 {
 	GtkWidget *label = hc_editable_label_new (list_item, &servlist_editing_label);
-	gtk_widget_set_name (label, "hexchat-editable");
+	gtk_widget_set_name (label, "poxchat-editable");
 	gtk_list_item_set_child (list_item, label);
 }
 

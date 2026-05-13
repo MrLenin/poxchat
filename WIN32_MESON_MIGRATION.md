@@ -1,4 +1,4 @@
-# HexChat Windows Meson Build Support
+# PoxChat Windows Meson Build Support
 
 ## Overview
 
@@ -17,11 +17,11 @@ This document outlines the plan for adding Meson build support on Windows **alon
 
 ### Visual Studio (Primary - Working)
 
-**Solution:** `win32/hexchat.sln` (Visual Studio 2022, v143 toolset)
+**Solution:** `win32/poxchat.sln` (Visual Studio 2022, v143 toolset)
 
 **Configuration:**
-- `win32/hexchat.props` - Dependency paths, compiler flags (currently GTK4)
-- `win32/hexchat-gtk3.props` - GTK3 configuration (backup)
+- `win32/poxchat.props` - Dependency paths, compiler flags (currently GTK4)
+- `win32/poxchat-gtk3.props` - GTK3 configuration (backup)
 - `win32/Directory.Build.props` - Wildcard support
 
 **Projects (19 total):**
@@ -122,21 +122,21 @@ if host_machine.system() == 'windows'
   rc_config.set('VERSION_PATCH', version_parts.get(2, '0'))
   rc_config.set('VERSION_COMMA', ','.join(version_parts))
 
-  hexchat_rc = configure_file(
-    input: 'hexchat.rc.in',
-    output: 'hexchat.rc',
+  poxchat_rc = configure_file(
+    input: 'poxchat.rc.in',
+    output: 'poxchat.rc',
     configuration: rc_config
   )
 
-  hexchat_gtk_sources += windows_mod.compile_resources(hexchat_rc)
+  poxchat_gtk_sources += windows_mod.compile_resources(poxchat_rc)
 endif
 ```
 
-**Requires:** Creating `hexchat.rc.in` template from existing `hexchat.rc.tt`
+**Requires:** Creating `poxchat.rc.in` template from existing `poxchat.rc.tt`
 
 ### Phase 3: Core Build (common + fe-gtk)
 
-**Goal:** Build hexchat.exe with MSVC via Meson
+**Goal:** Build poxchat.exe with MSVC via Meson
 
 **Tasks:**
 1. Add all Windows-specific source files
@@ -147,7 +147,7 @@ endif
 **Verification:**
 ```bash
 meson compile -C build
-# Should produce build/src/fe-gtk/hexchat.exe
+# Should produce build/src/fe-gtk/poxchat.exe
 ```
 
 ### Phase 4: Plugin Builds
@@ -225,8 +225,8 @@ meson compile -C build
 **Goal:** Remove VS solution after Meson is proven working
 
 **Verification Checklist:**
-- [ ] hexchat.exe builds and runs (MSVC)
-- [ ] hexchat.exe builds and runs (MinGW) - optional
+- [ ] poxchat.exe builds and runs (MSVC)
+- [ ] poxchat.exe builds and runs (MinGW) - optional
 - [ ] All plugins build and load
 - [ ] GTK3 build works
 - [ ] GTK4 build works
@@ -234,7 +234,7 @@ meson compile -C build
 - [ ] CI/CD pipeline passes
 
 **Cleanup Tasks:**
-1. Delete `win32/hexchat.sln`
+1. Delete `win32/poxchat.sln`
 2. Delete `win32/*.props` files
 3. Delete all `*.vcxproj` and `*.vcxproj.filters` files
 4. Update README with Meson-only build instructions
@@ -248,7 +248,7 @@ meson compile -C build
 
 | File | Purpose |
 |------|---------|
-| `src/fe-gtk/hexchat.rc.in` | Resource file template |
+| `src/fe-gtk/poxchat.rc.in` | Resource file template |
 | `.github/workflows/meson-windows.yml` | CI workflow |
 
 ### Modified Files
@@ -264,8 +264,8 @@ meson compile -C build
 
 | File | Notes |
 |------|-------|
-| `win32/hexchat.sln` | Keep until Meson verified |
-| `win32/hexchat.props` | Keep until Meson verified |
+| `win32/poxchat.sln` | Keep until Meson verified |
+| `win32/poxchat.props` | Keep until Meson verified |
 | All `*.vcxproj` files | Keep until Meson verified |
 
 ### Files to Delete (After Migration Verified)
@@ -327,7 +327,7 @@ For using Windows 8+ built-in spell checking, also build the Windows provider:
 - Place in `lib/enchant/` directory alongside libenchant
 
 **Runtime Loading:**
-HexChat loads enchant dynamically at runtime via `g_module_open()`. If `libenchant.dll` is not found, spell checking is simply disabled - the application still works.
+PoxChat loads enchant dynamically at runtime via `g_module_open()`. If `libenchant.dll` is not found, spell checking is simply disabled - the application still works.
 
 ### Windows SDK Libraries
 
@@ -370,14 +370,14 @@ meson setup build --backend=vs2022 \
 meson compile -C build
 
 # Or open in Visual Studio
-start build/hexchat.sln
+start build/poxchat.sln
 ```
 
 ### Parallel with Existing VS Build
 
 The Meson build outputs to `build/` directory, completely separate from the existing:
-- `win32/hexchat.sln` - Original VS solution
-- `hexchat-build-gtk4/` - Original VS output directory
+- `win32/poxchat.sln` - Original VS solution
+- `poxchat-build-gtk4/` - Original VS output directory
 
 Both can coexist without conflict.
 

@@ -42,8 +42,8 @@
 #include "config.h"
 #include <fcntl.h>
 #include <errno.h>
-#include "hexchat.h"
-#include "hexchatc.h"
+#include "poxchat.h"
+#include "poxchatc.h"
 #include <ctype.h>
 #include "util.h"
 

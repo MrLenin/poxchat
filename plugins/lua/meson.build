@@ -5,7 +5,7 @@ else
 endif
 
 shared_module('lua', 'lua.c',
-  dependencies: [libgio_dep, hexchat_plugin_dep, lua_dep],
+  dependencies: [libgio_dep, poxchat_plugin_dep, lua_dep],
   install: true,
   install_dir: plugindir,
   name_prefix: '',

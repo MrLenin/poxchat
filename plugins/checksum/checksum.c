@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (c) 2010-2012 Berke Viktor.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -24,9 +24,9 @@
 
 #include <gio/gio.h>
 
-#include "hexchat-plugin.h"
+#include "poxchat-plugin.h"
 
-static hexchat_plugin *ph;									/* plugin handle */
+static poxchat_plugin *ph;									/* plugin handle */
 static char name[] = "Checksum";
 static char desc[] = "Calculate checksum for DCC file transfers";
 static char version[] = "4.0";
@@ -43,7 +43,7 @@ static void
 print_sha256_result (ChecksumCallbackInfo *info, const char *checksum, const char *filename, GError *error)
 {
 	// So then we get the next best available channel, since we always want to print at least somewhere, it's fine
-	hexchat_context *ctx = hexchat_find_context(ph, info->servername, info->channel);
+	poxchat_context *ctx = poxchat_find_context(ph, info->servername, info->channel);
 	if (!ctx) {
 		// before we print a private message to the wrong channel, we exit early
 		if (info->send_message) {
@@ -51,21 +51,21 @@ print_sha256_result (ChecksumCallbackInfo *info, const char *checksum, const cha
 		}
 
 		// if the context isn't found the first time, we search in the server
-		ctx = hexchat_find_context(ph, info->servername, NULL);
+		ctx = poxchat_find_context(ph, info->servername, NULL);
 		if (!ctx) {
 			// The second time we exit early, since printing in another server isn't desireable
 			return;
 		}
 	}
 
-	hexchat_set_context(ph, ctx);
+	poxchat_set_context(ph, ctx);
 
 	if (error) {
-		hexchat_printf (ph, "Failed to create checksum for %s: %s\n", filename, error->message);
+		poxchat_printf (ph, "Failed to create checksum for %s: %s\n", filename, error->message);
 	} else if (info->send_message) {
-		hexchat_commandf (ph, "quote PRIVMSG %s :SHA-256 checksum for %s (remote): %s", hexchat_get_info (ph, "channel"), filename, checksum);
+		poxchat_commandf (ph, "quote PRIVMSG %s :SHA-256 checksum for %s (remote): %s", poxchat_get_info (ph, "channel"), filename, checksum);
 	} else {
-		hexchat_printf (ph, "SHA-256 checksum for %s (local): %s\n", filename, checksum);
+		poxchat_printf (ph, "SHA-256 checksum for %s (local): %s\n", filename, checksum);
 	}
 }
 
@@ -126,21 +126,21 @@ dccrecv_cb (char *word[], void *userdata)
 	const char *dcc_completed_dir;
 	char *filename;
 
-	if (hexchat_get_prefs (ph, "dcc_completed_dir", &dcc_completed_dir, NULL) == 1 && dcc_completed_dir[0] != '\0')
+	if (poxchat_get_prefs (ph, "dcc_completed_dir", &dcc_completed_dir, NULL) == 1 && dcc_completed_dir[0] != '\0')
 		filename = g_build_filename (dcc_completed_dir, word[1], NULL);
 	else
 		filename = g_strdup (word[2]);
 
 	filename_fs = g_filename_from_utf8 (filename, -1, NULL, NULL, NULL);
 	if (!filename_fs) {
-		hexchat_printf (ph, "Checksum: Invalid filename (%s)\n", filename);
+		poxchat_printf (ph, "Checksum: Invalid filename (%s)\n", filename);
 		g_free (filename);
-		return HEXCHAT_EAT_NONE;
+		return POXCHAT_EAT_NONE;
 	}
 
 	ChecksumCallbackInfo *callback_data = g_new (ChecksumCallbackInfo, 1);
-	callback_data->servername = g_strdup(hexchat_get_info(ph, "server"));
-	callback_data->channel = g_strdup(hexchat_get_info(ph, "channel"));
+	callback_data->servername = g_strdup(poxchat_get_info(ph, "server"));
+	callback_data->channel = g_strdup(poxchat_get_info(ph, "channel"));
 	callback_data->send_message = FALSE;
 
 
@@ -153,7 +153,7 @@ dccrecv_cb (char *word[], void *userdata)
 	g_object_unref (file);
 	g_object_unref (task);
 
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 static int
@@ -164,8 +164,8 @@ dccoffer_cb (char *word[], void *userdata)
 	char *filename;
 
 	ChecksumCallbackInfo *callback_data = g_new (ChecksumCallbackInfo, 1);
-	callback_data->servername = g_strdup(hexchat_get_info(ph, "server"));
-	callback_data->channel = g_strdup(hexchat_get_info(ph, "channel"));
+	callback_data->servername = g_strdup(poxchat_get_info(ph, "server"));
+	callback_data->channel = g_strdup(poxchat_get_info(ph, "channel"));
 	callback_data->send_message = TRUE;
 
 	filename = g_strdup (word[3]);
@@ -177,11 +177,11 @@ dccoffer_cb (char *word[], void *userdata)
 	g_object_unref (file);
 	g_object_unref (task);
 
-	return HEXCHAT_EAT_NONE;
+	return POXCHAT_EAT_NONE;
 }
 
 int
-hexchat_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name, char **plugin_desc, char **plugin_version, char *arg)
+poxchat_plugin_init (poxchat_plugin *plugin_handle, char **plugin_name, char **plugin_desc, char **plugin_version, char *arg)
 {
 	ph = plugin_handle;
 
@@ -189,16 +189,16 @@ hexchat_plugin_init (hexchat_plugin *plugin_handle, char **plugin_name, char **p
 	*plugin_desc = desc;
 	*plugin_version = version;
 
-	hexchat_hook_print (ph, "DCC RECV Complete", HEXCHAT_PRI_NORM, dccrecv_cb, NULL);
-	hexchat_hook_print (ph, "DCC Offer", HEXCHAT_PRI_NORM, dccoffer_cb, NULL);
+	poxchat_hook_print (ph, "DCC RECV Complete", POXCHAT_PRI_NORM, dccrecv_cb, NULL);
+	poxchat_hook_print (ph, "DCC Offer", POXCHAT_PRI_NORM, dccoffer_cb, NULL);
 
-	hexchat_toastf (ph, HEXCHAT_TOAST_INFO, "%s plugin loaded", name);
+	poxchat_toastf (ph, POXCHAT_TOAST_INFO, "%s plugin loaded", name);
 	return 1;
 }
 
 int
-hexchat_plugin_deinit (void)
+poxchat_plugin_deinit (void)
 {
-	hexchat_toastf (ph, HEXCHAT_TOAST_INFO, "%s plugin unloaded", name);
+	poxchat_toastf (ph, POXCHAT_TOAST_INFO, "%s plugin unloaded", name);
 	return 1;
 }

@@ -30,7 +30,7 @@
 #include <unistd.h>
 #endif
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "notify.h"
 #include "cfgfiles.h"
 #include "fe.h"
@@ -39,7 +39,7 @@
 #include "tree.h"
 #include "userlist.h"
 #include "util.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 
 
 GSList *notify_list = 0;
@@ -131,7 +131,7 @@ notify_save (void)
         GSList *list = g_slist_copy(notify_list);
         list = g_slist_reverse(list);
 
-	fh = hexchat_open_file ("notify.conf", O_TRUNC | O_WRONLY | O_CREAT, 0600, XOF_DOMODE);
+	fh = poxchat_open_file ("notify.conf", O_TRUNC | O_WRONLY | O_CREAT, 0600, XOF_DOMODE);
 	if (fh != -1)
 	{
 		while (list)
@@ -143,7 +143,7 @@ notify_save (void)
 			 *   nick account=X [networks=Y]   (nick + account, new)
 			 *   account=X [networks=Y]        (account-only, new)
 			 * Legacy nick-only / nick+networks lines remain untouched to
-			 * preserve forward-compat with older hexchat reading the file. */
+			 * preserve forward-compat with older poxchat reading the file. */
 			if (notify->name)
 				HC_IGNORE_RESULT (write (fh, notify->name, strlen (notify->name)));
 
@@ -193,7 +193,7 @@ rstrip_cr (char *s)
  *   name account=X [networks=Y]       (new: nick + account)
  *   account=X [networks=Y]            (new: account-only)
  *
- * Backward compat note: old hexchat writes bare `name` or `name net_list`,
+ * Backward compat note: old poxchat writes bare `name` or `name net_list`,
  * so we only split on key=value when we see `account=` or `networks=` as
  * a token; otherwise we treat the line as the legacy two-token form. */
 static void
@@ -264,7 +264,7 @@ notify_load (void)
 	char buf[256];
 	int len;
 
-	fh = hexchat_open_file ("notify.conf", O_RDONLY, 0, 0);
+	fh = poxchat_open_file ("notify.conf", O_RDONLY, 0, 0);
 	if (fh == -1)
 		return;
 
@@ -635,7 +635,7 @@ notify_markonline (server *serv, char *word[], const message_tags_data *tags_dat
 			   about 27 people */
 			if (i > PDIWORDS - 5)
 			{
-				/*fprintf (stderr, _("*** HEXCHAT WARNING: notify list too large.\n"));*/
+				/*fprintf (stderr, _("*** POXCHAT WARNING: notify list too large.\n"));*/
 				break;
 			}
 		}
@@ -672,7 +672,7 @@ notify_checklist_for_server (server *serv)
 				/* LAME: we can't send more than 512 bytes to the server, but     *
 				 * if we split it in two packets, our offline detection wouldn't  *
 				 work                                                           */
-				/*fprintf (stderr, _("*** HEXCHAT WARNING: notify list too large.\n"));*/
+				/*fprintf (stderr, _("*** POXCHAT WARNING: notify list too large.\n"));*/
 				break;
 			}
 		}

@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -22,8 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../common/hexchat.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchat.h"
+#include "../common/poxchatc.h"
 #include "fe-gtk.h"
 #include "maingui.h"
 #include "gtkutil.h"
@@ -777,9 +777,9 @@ gboolean
 chan_remove (chan *ch, gboolean force)
 {
 	chan *new_ch;
-	extern int hexchat_is_quitting;
+	extern int poxchat_is_quitting;
 
-	if (hexchat_is_quitting)	/* avoid lots of looping on exit */
+	if (poxchat_is_quitting)	/* avoid lots of looping on exit */
 		return TRUE;
 
 	/* is this ch allowed to be closed while still having children? */

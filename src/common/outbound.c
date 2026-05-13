@@ -38,18 +38,18 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "plugin.h"
 #include "ignore.h"
 #include "util.h"
 #include "fe.h"
-#include "cfgfiles.h"			  /* hexchat_fopen_file() */
+#include "cfgfiles.h"			  /* poxchat_fopen_file() */
 #include "network.h"				/* net_ip() */
 #include "modes.h"
 #include "notify.h"
 #include "inbound.h"
 #include "text.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 #include "servlist.h"
 #include "server.h"
 #include "tree.h"
@@ -115,7 +115,7 @@ random_line (char *file_name)
 	if (!file_name[0])
 		goto nofile;
 
-	fh = hexchat_fopen_file (file_name, "r", 0);
+	fh = poxchat_fopen_file (file_name, "r", 0);
 	if (!fh)
 	{
 	 nofile:
@@ -2919,7 +2919,7 @@ cmd_kickban (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 static int
 cmd_killall (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 {
-	hexchat_exit();
+	poxchat_exit();
 	return 2;
 }
 
@@ -3004,7 +3004,7 @@ load_perform_file (session *sess, char *file)
 	char *nl;
 	FILE *fp;
 
-	fp = hexchat_fopen_file (file, "r", 0);		/* load files from config dir */
+	fp = poxchat_fopen_file (file, "r", 0);		/* load files from config dir */
 	if (!fp)
 		return FALSE;
 
@@ -4438,7 +4438,7 @@ cmd_tray (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 
 	if (!word[3][0])
 	{
-		fe_tray_set_file (NULL);	/* default HexChat icon */
+		fe_tray_set_file (NULL);	/* default PoxChat icon */
 		return TRUE;
 	}
 
@@ -4877,7 +4877,7 @@ const struct commands xc_cmds[] = {
 	{"ME", cmd_me, 0, 0, 1,
 	 N_("ME <action>, sends the action to the current channel (actions are written in the 3rd person, like /me jumps)")},
 	{"MENU", cmd_menu, 0, 0, 1, "MENU [-eX] [-i<ICONFILE>] [-k<mod>,<key>] [-m] [-pX] [-r<X,group>] [-tX] {ADD|DEL} <path> [command] [unselect command]\n"
-										 "       See http://hexchat.readthedocs.org/en/latest/plugins.html#controlling-the-gui for more details."},
+										 "       See https://github.com/evilnet/poxchat for more details."},
 	{"METADATA", cmd_metadata, 1, 0, 1, N_("METADATA <target> <GET|LIST|SET|CLEAR|SUB|UNSUB|SUBS|SYNC> [...], manage user/channel metadata")},
 	{"MHOP", cmd_mhop, 1, 1, 1,
 	 N_("MHOP, Mass hop's all users in the current channel (needs chanop)")},
@@ -4923,7 +4923,7 @@ const struct commands xc_cmds[] = {
 	{"RECONNECT", cmd_reconnect, 0, 0, 1,
 	 N_("RECONNECT [<host>] [<port>] [<password>], Can be called just as /RECONNECT to reconnect to the current server or with /RECONNECT ALL to reconnect to all the open servers")},
 #endif
-	{"RECV", cmd_recv, 1, 0, 1, N_("RECV <text>, send raw data to HexChat, as if it was received from the IRC server")},
+	{"RECV", cmd_recv, 1, 0, 1, N_("RECV <text>, send raw data to PoxChat, as if it was received from the IRC server")},
 	{"REDACT", cmd_redact, 1, 0, 1,
 	 N_("REDACT [target] [msgid] [reason], redacts/deletes a message (IRCv3)")},
 	{"REGISTER", cmd_register, 1, 0, 1, N_("REGISTER <account> [<email>|*] <password>, register a new account on the server (requires draft/account-registration)")},

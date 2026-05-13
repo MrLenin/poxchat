@@ -22,15 +22,15 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  <Import Project="..\..\win32\hexchat.props" />
+  <Import Project="..\..\win32\poxchat.props" />
   <PropertyGroup>
     <TargetName>$(Python3Output)</TargetName>
-    <OutDir>$(HexChatRel)plugins\</OutDir>
+    <OutDir>$(PoxChatRel)plugins\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;PYTHON_EXPORTS;$(OwnFlags);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(Glib);$(Python3Path)\include;..\..\src\common;$(HexChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Glib);$(Python3Path)\include;..\..\src\common;$(PoxChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <ModuleDefinitionFile>python.def</ModuleDefinitionFile>
@@ -38,13 +38,13 @@
       <AdditionalLibraryDirectories>$(DepsRoot)\lib;$(Python3Path)\libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PreBuildEvent>
-      <Command>"$(Python3Path)\python.exe" generate_plugin.py ..\..\src\common\hexchat-plugin.h python.py "$(IntDir)python.c"</Command>
+      <Command>"$(Python3Path)\python.exe" generate_plugin.py ..\..\src\common\poxchat-plugin.h python.py "$(IntDir)python.c"</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <PreprocessorDefinitions>WIN32;_WIN64;_AMD64_;NDEBUG;_WINDOWS;_USRDLL;PYTHON_EXPORTS;$(OwnFlags);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(Glib);$(Python3Path)\include;..\..\src\common;$(HexChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Glib);$(Python3Path)\include;..\..\src\common;$(PoxChatLib);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <ModuleDefinitionFile>python.def</ModuleDefinitionFile>
@@ -52,16 +52,16 @@
       <AdditionalLibraryDirectories>$(DepsRoot)\lib;$(Python3Path)\libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PreBuildEvent>
-      <Command>"$(Python3Path)\python.exe" generate_plugin.py ..\..\src\common\hexchat-plugin.h python.py "$(IntDir)python.c"</Command>
+      <Command>"$(Python3Path)\python.exe" generate_plugin.py ..\..\src\common\poxchat-plugin.h python.py "$(IntDir)python.c"</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="generate_plugin.py" />
-    <None Include="hexchat.py" />
+    <None Include="poxchat.py" />
     <None Include="python.def" />
     <None Include="python.py" />
     <None Include="xchat.py" />
-    <None Include="_hexchat.py" />
+    <None Include="_poxchat.py" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)python.c" />

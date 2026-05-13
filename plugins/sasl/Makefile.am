@@ -1,4 +1,4 @@
-libdir = $(hexchatlibdir)/plugins
+libdir = $(poxchatlibdir)/plugins
 
 lib_LTLIBRARIES = sasl.la
 sasl_la_SOURCES = sasl.c

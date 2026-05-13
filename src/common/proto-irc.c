@@ -28,7 +28,7 @@
 #include <unistd.h>
 #endif
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "proto-irc.h"
 #include "chathistory.h"
 #include "ctcp.h"
@@ -42,7 +42,7 @@
 #include "text.h"
 #include "outbound.h"
 #include "util.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 #include "url.h"
 #include "servlist.h"
 
@@ -2441,7 +2441,7 @@ irc_inline (server *serv, char *buf, int len)
 			goto xit;
 
 		word[1]++;
-		word_eol[1] = buf + 1;	/* but not for HexChat internally */
+		word_eol[1] = buf + 1;	/* but not for PoxChat internally */
 
 	} else
 	{

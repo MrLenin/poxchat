@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -28,7 +28,7 @@
 #include <math.h>
 
 #include "../common/cfgfiles.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/url.h"
 #include "../common/fe.h"
 

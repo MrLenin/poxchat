@@ -1,7 +1,7 @@
 # System Tray Integration Plan: LizardByte/tray Library
 
 ## Overview
-Restore system tray functionality to HexChat GTK4 by integrating the [LizardByte/tray](https://github.com/LizardByte/tray) library. This replaces the deprecated GtkStatusIcon that was removed in GTK4.
+Restore system tray functionality to PoxChat GTK4 by integrating the [LizardByte/tray](https://github.com/LizardByte/tray) library. This replaces the deprecated GtkStatusIcon that was removed in GTK4.
 
 **Current Status:** ✅ Windows implementation complete
 **Integration Method:** Git submodule
@@ -77,7 +77,7 @@ Icon specifications:
 - Updated all workflows to use `actions/checkout@v4` with `submodules: recursive`
 - Affected: `windows-build.yml`, `msys-build.yml`, `ubuntu-build.yml`, `flatpak-build.yml`
 
-#### Installer (`win32/installer/hexchat.iss.tt`)
+#### Installer (`win32/installer/poxchat.iss.tt`)
 - Added tray icon files to installer
 
 ### ✅ Phase 4: Implement Tray Functionality - COMPLETE
@@ -144,8 +144,8 @@ Added GTK4-compatible minimize-to-tray in `src/fe-gtk/maingui.c`:
 | `src/fe-gtk/fe-gtk.vcxproj` | Modified - tray sources, TRAY_EXPORTS |
 | `src/fe-gtk/meson.build` | Modified - conditional Windows tray |
 | `win32/copy/copy.vcxproj` | Modified - icon copying, removed GTK3 logic |
-| `win32/hexchat.props` | Modified - removed HC_GTK4 flag |
-| `win32/installer/hexchat.iss.tt` | Modified - tray icons in installer |
+| `win32/poxchat.props` | Modified - removed HC_GTK4 flag |
+| `win32/installer/poxchat.iss.tt` | Modified - tray icons in installer |
 | `.github/workflows/*.yml` | Modified - submodule checkout |
 
 ---
@@ -196,5 +196,5 @@ Key patterns from commit `b544ac3350e85d4cc41fe3414cbdb82d75ce5d7a`:
 - Used `GtkStatusIcon` with signals: `popup-menu`, `activate`, `notify::embedded`
 - Flash timeout: 500ms
 - Message count tracking for tooltip: `tray_priv_count`, `tray_pub_count`, etc.
-- Window status via `hexchat_get_info(ph, "win_status")` returning "active", "normal", "hidden"
+- Window status via `poxchat_get_info(ph, "win_status")` returning "active", "normal", "hidden"
 - Away status check via `tray_find_away_status()` iterating `serv_list`

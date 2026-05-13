@@ -1,4 +1,4 @@
-/* HexChat - IRCv3 draft/ICON Network Icon Support
+/* PoxChat - IRCv3 draft/ICON Network Icon Support
  * Copyright (C) 2026
  *
  * This program is free software; you can redistribute it and/or modify
@@ -31,9 +31,9 @@
 #endif
 
 #include "network-icon.h"
-#include "hexchat.h"
+#include "poxchat.h"
 #include "servlist.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 #include "cfgfiles.h"
 #include "fe.h"
 #include "util.h"

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=PoxChat Theme Manager
+Comment=A simple theme manager for PoxChat
+Exec=thememan %f
+Icon=poxchat
+Terminal=false
+Type=Application
+MimeType=application/x-hct;

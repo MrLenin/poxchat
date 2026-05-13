@@ -15,20 +15,20 @@ dbus_includes = [
 dbus_service_dir = join_paths(get_option('datadir'), 'dbus-1/services')
 
 if get_option('dbus-service-use-appid')
-  dbus_service_name = 'io.github.Hexchat'
-  dbus_output_file = 'io.github.Hexchat.service'
-  dbus_cargs = '-DDBUS_SERVICE="io.github.Hexchat"'
+  dbus_service_name = 'io.github.evilnet.PoxChat'
+  dbus_output_file = 'io.github.evilnet.PoxChat.service'
+  dbus_cargs = '-DDBUS_SERVICE="io.github.evilnet.PoxChat"'
 else
-  dbus_service_name = 'org.hexchat.service'
-  dbus_output_file = 'org.hexchat.service.service'
-  dbus_cargs = '-DDBUS_SERVICE="org.hexchat.service"'
+  dbus_service_name = 'org.poxchat.service'
+  dbus_output_file = 'org.poxchat.service.service'
+  dbus_cargs = '-DDBUS_SERVICE="org.poxchat.service"'
 endif
 
 dbus_conf = configuration_data()
 dbus_conf.set('bindir', join_paths(get_option('prefix'), get_option('bindir')))
 dbus_conf.set('service_name', dbus_service_name)
 configure_file(
-  input: 'org.hexchat.service.service.in',
+  input: 'org.poxchat.service.service.in',
   output: dbus_output_file,
   configuration: dbus_conf,
   install: true,
@@ -43,7 +43,7 @@ dbus_remote_object = custom_target('remote-object-glue',
             '--output=@OUTPUT@', '@INPUT@']
 )
 
-hexchat_dbus = static_library('hexchatdbus',
+poxchat_dbus = static_library('poxchatdbus',
   sources: [dbus_remote_object, marshal] + dbus_sources,
   c_args: dbus_cargs,
   dependencies: common_deps + dbus_deps,
@@ -51,6 +51,6 @@ hexchat_dbus = static_library('hexchatdbus',
   pic: true
 )
 
-hexchat_dbus_dep = declare_dependency(
-  link_with: hexchat_dbus
+poxchat_dbus_dep = declare_dependency(
+  link_with: poxchat_dbus
 )

@@ -22,13 +22,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "../common/hexchat.h"
+#include "../common/poxchat.h"
 #include "../common/cfgfiles.h"
 #include "../common/fe.h"
 #include "../common/text.h"
 #include "../common/userlist.h"
 #include "../common/util.h"
-#include "../common/hexchatc.h"
+#include "../common/poxchatc.h"
 #include "../common/outbound.h"
 #include "fe-gtk.h"
 #include "hex-input-edit.h"
@@ -58,7 +58,7 @@ static int last_selected_page = 0;
 static int last_selected_row = 0; /* sound row */
 static gboolean color_change;
 static gboolean setup_applying = FALSE; /* Guard against callbacks during apply/destroy */
-static struct hexchatprefs setup_prefs;
+static struct poxchatprefs setup_prefs;
 static GtkWidget *cancel_button;
 static GCancellable *font_dialog_cancel = NULL;
 
@@ -1498,7 +1498,7 @@ setup_create_color_button (GtkWidget *table, int num, int row, int col)
 			gtk_label_set_markup (GTK_LABEL (label), buf);
 	}
 	/* win32 build uses this to turn off themeing */
-	g_object_set_data (G_OBJECT (but), "hexchat-color", (gpointer)1);
+	g_object_set_data (G_OBJECT (but), "poxchat-color", (gpointer)1);
 	gtk_grid_attach (GTK_GRID (table), but, col, row, 1, 1);
 	g_signal_connect (G_OBJECT (but), "clicked",
 							G_CALLBACK (setup_color_cb), GINT_TO_POINTER (num));
@@ -1775,7 +1775,7 @@ setup_snd_filereq_cb (GtkWidget *entry, char *file)
 			/* Use just the filename if the given sound file is in the default <config>/sounds directory.
 			 * We're comparing absolute paths so this won't work in portable mode which uses a relative path.
 			 */
-			if (!strcmp (g_path_get_dirname (file), g_build_filename (get_xdir (), HEXCHAT_SOUND_DIR, NULL)))
+			if (!strcmp (g_path_get_dirname (file), g_build_filename (get_xdir (), POXCHAT_SOUND_DIR, NULL)))
 			{
 				hc_entry_set_text (entry, g_path_get_basename (file));
 			}
@@ -1790,7 +1790,7 @@ setup_snd_filereq_cb (GtkWidget *entry, char *file)
 static void
 setup_snd_browse_cb (GtkWidget *button, GtkEntry *entry)
 {
-	char *sounds_dir = g_build_filename (get_xdir (), HEXCHAT_SOUND_DIR, NULL);
+	char *sounds_dir = g_build_filename (get_xdir (), POXCHAT_SOUND_DIR, NULL);
 	char *filter = NULL;
 	int filter_type;
 #ifdef WIN32 /* win32 only supports wav, others could support anything */
@@ -2233,7 +2233,7 @@ setup_create_tree (GtkWidget *box, GtkWidget *book)
 
 	/* Create list view */
 	view = gtk_list_view_new (GTK_SELECTION_MODEL (sel_model), factory);
-	gtk_widget_set_name (view, "hexchat-list");
+	gtk_widget_set_name (view, "poxchat-list");
 
 	g_signal_connect (sel_model, "selection-changed",
 	                  G_CALLBACK (setup_tree_sel_cb), book);
@@ -2358,7 +2358,7 @@ setup_apply_real (int new_pix, int do_ulist, int do_layout, int do_meters, int d
 	mg_apply_setup ();
 	menu_sync_toggle_states ();
 	tray_apply_setup ();
-	hexchat_reinit_timers ();
+	poxchat_reinit_timers ();
 
 	if (do_layout)
 		menu_change_layout ();
@@ -2368,7 +2368,7 @@ setup_apply_real (int new_pix, int do_ulist, int do_layout, int do_meters, int d
 }
 
 static void
-setup_apply (struct hexchatprefs *pr)
+setup_apply (struct poxchatprefs *pr)
 {
 	PangoFontDescription *old_desc;
 	PangoFontDescription *new_desc;

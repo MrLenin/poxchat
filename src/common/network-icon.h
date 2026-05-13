@@ -1,4 +1,4 @@
-/* HexChat - IRCv3 draft/ICON Network Icon Support
+/* PoxChat - IRCv3 draft/ICON Network Icon Support
  * Copyright (C) 2026
  *
  * This program is free software; you can redistribute it and/or modify
@@ -15,8 +15,8 @@
  * ISUPPORT token (https://ircv3.net/specs/extensions/network-icon).
  */
 
-#ifndef HEXCHAT_NETWORK_ICON_H
-#define HEXCHAT_NETWORK_ICON_H
+#ifndef POXCHAT_NETWORK_ICON_H
+#define POXCHAT_NETWORK_ICON_H
 
 #include <glib.h>
 
@@ -46,4 +46,4 @@ void network_icon_clear_cache (struct server *serv);
 /* Maximum download size in bytes (512 KB) */
 #define NETWORK_ICON_MAX_SIZE (512 * 1024)
 
-#endif /* HEXCHAT_NETWORK_ICON_H */
+#endif /* POXCHAT_NETWORK_ICON_H */

@@ -20,12 +20,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "hexchat.h"
+#include "poxchat.h"
 #include "modes.h"
 #include "fe.h"
 #include "notify.h"
 #include "tree.h"
-#include "hexchatc.h"
+#include "poxchatc.h"
 #include "util.h"
 
 

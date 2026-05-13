@@ -1,4 +1,4 @@
-/* HexChat
+/* PoxChat
  * Copyright (C) 1998-2010 Peter Zelezny.
  * Copyright (C) 2009-2013 Berke Viktor.
  *
@@ -610,7 +610,7 @@ cv_tree_init (chanview *cv)
 
 	/* Create list view */
 	view = gtk_list_view_new (GTK_SELECTION_MODEL (sel_model), factory);
-	gtk_widget_set_name (view, "hexchat-tree");
+	gtk_widget_set_name (view, "poxchat-tree");
 	gtk_widget_set_can_focus (view, FALSE);
 	gtk_widget_set_size_request (view, 1, -1);
 
