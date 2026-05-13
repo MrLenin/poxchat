@@ -1404,6 +1404,11 @@ hex_emoji_chooser_init (HexEmojiChooser *chooser)
 
 	gtk_widget_init_template (GTK_WIDGET (chooser));
 
+	/* GtkSearchEntry defaults `focusable` to FALSE in GTK4 — without this
+	 * grab_focus() and click-to-focus both no-op, leaving the input box
+	 * stuck with focus and the search field unusable. */
+	gtk_widget_set_focusable (chooser->search_entry, TRUE);
+
 	/* Get a reasonable maximum width for an emoji. We do this to
 	 * skip overly wide fallback rendering for certain emojis the
 	 * font does not contain and therefore end up being rendered
