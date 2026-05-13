@@ -1,0 +1,173 @@
+Source: poxchat
+Section: net
+Priority: optional
+Maintainer: Alex Schumann <rubin@afternet.org>
+Build-Depends:
+ debhelper-compat (= 13),
+ meson (>= 0.56.0),
+ pkgconf,
+ desktop-file-utils,
+ appstream-util <!nocheck>,
+ gettext,
+ libglib2.0-dev (>= 2.80.0),
+ libgtk-4-dev (>= 4.14.0),
+ libssl-dev (>= 3.0.0),
+ libsqlite3-dev (>= 3.7.0),
+ libcanberra-dev,
+ libdbus-glib-1-dev,
+ libwebsockets-dev (>= 4.0),
+ libsoup-3.0-dev,
+ libjansson-dev (>= 2.10),
+ libsecret-1-dev,
+ libpci-dev,
+ libluajit-5.1-dev,
+ libperl-dev,
+ perl,
+ python3-dev,
+ python3-cffi,
+ libx11-dev,
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/evilnet/poxchat
+Vcs-Browser: https://github.com/evilnet/poxchat
+Vcs-Git: https://github.com/evilnet/poxchat.git
+
+Package: poxchat
+Architecture: any
+Multi-Arch: foreign
+Depends:
+ poxchat-common (= ${source:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends},
+Recommends:
+ poxchat-plugin-fishlim,
+ poxchat-plugin-sysinfo,
+Suggests:
+ poxchat-lua,
+ poxchat-perl,
+ poxchat-python,
+ poxchat-plugin-checksum,
+Description: IRC client for the GNOME desktop (GTK4)
+ PoxChat is a GTK4 IRC (Internet Relay Chat) client. It is a fork of
+ HexChat, modernised on top of GTK4 with expanded IRCv3 support.
+ .
+ Features:
+  * Multiple servers/channels in one window
+  * SASL: PLAIN, EXTERNAL, SCRAM-SHA-1/256/512, OAUTHBEARER
+  * TLS via OpenSSL
+  * IRCv3 message-tags, batch, echo-message, labeled-response,
+    server-time, account-tag, chghost, setname and more
+  * SQLite-backed scrollback with zstd compression
+  * DCC file transfer, configurable themes, /command aliases
+  * Loadable plugins (Perl, Python, Lua) — install poxchat-perl,
+    poxchat-python or poxchat-lua to enable scripting
+
+Package: poxchat-common
+Architecture: all
+Multi-Arch: foreign
+Depends:
+ ${misc:Depends},
+Recommends:
+ poxchat,
+Description: IRC client for the GNOME desktop (GTK4) - common files
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This package contains the architecture-independent data files
+ (icons, desktop entry, AppStream metadata and translations) shared
+ by the poxchat binary.
+
+Package: poxchat-dev
+Architecture: any
+Multi-Arch: same
+Section: devel
+Depends:
+ libglib2.0-dev,
+ ${misc:Depends},
+Description: IRC client for the GNOME desktop (GTK4) - plugin development files
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This package contains the header and pkg-config file needed to
+ build third-party plugins against the PoxChat plugin API.
+
+Package: poxchat-perl
+Architecture: any
+Multi-Arch: same
+Depends:
+ poxchat (= ${binary:Version}),
+ ${perl:Depends},
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: Perl scripting plugin for PoxChat
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This plugin allows PoxChat to load Perl scripts from
+ ~/.config/poxchat/addons.
+
+Package: poxchat-python
+Architecture: any
+Multi-Arch: same
+Depends:
+ poxchat (= ${binary:Version}),
+ ${python3:Depends},
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: Python scripting plugin for PoxChat
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This plugin allows PoxChat to load Python 3 scripts from
+ ~/.config/poxchat/addons.
+
+Package: poxchat-lua
+Architecture: any
+Multi-Arch: same
+Depends:
+ poxchat (= ${binary:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: Lua scripting plugin for PoxChat
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This plugin allows PoxChat to load Lua scripts (LuaJIT) from
+ ~/.config/poxchat/addons.
+
+Package: poxchat-plugin-checksum
+Architecture: any
+Multi-Arch: same
+Depends:
+ poxchat (= ${binary:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: DCC file checksum plugin for PoxChat
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This plugin computes and verifies SHA-256 checksums for DCC file
+ transfers, allowing the recipient to confirm that the file arrived
+ intact.
+
+Package: poxchat-plugin-fishlim
+Architecture: any
+Multi-Arch: same
+Depends:
+ poxchat (= ${binary:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: FiSH end-to-end channel encryption plugin for PoxChat
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This plugin implements the FiSH encryption protocol (Blowfish in
+ ECB/CBC modes with DH1080 key exchange), allowing encrypted private
+ messages and channel conversations with other FiSH-capable clients.
+
+Package: poxchat-plugin-sysinfo
+Architecture: any
+Multi-Arch: same
+Depends:
+ poxchat (= ${binary:Version}),
+ pciutils,
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: System information plugin for PoxChat
+ PoxChat is a GTK4 IRC client, forked from HexChat.
+ .
+ This plugin adds a /sysinfo command that posts a summary of the
+ host system (CPU, RAM, OS, graphics adapter) to the active channel.

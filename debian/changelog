@@ -1,0 +1,7 @@
+poxchat (2.16.2-1) UNRELEASED; urgency=medium
+
+  * Initial Debian packaging. PoxChat is a GTK4 fork of HexChat with
+    expanded IRCv3 support. The Closes: line will be added once the
+    ITP bug against wnpp is filed.
+
+ -- Alex Schumann <rubin@afternet.org>  Tue, 12 May 2026 21:38:42 -0700

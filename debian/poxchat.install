@@ -1,0 +1,3 @@
+usr/bin/poxchat
+usr/share/applications/io.github.evilnet.PoxChat.desktop
+usr/share/dbus-1/services/org.poxchat.service.service

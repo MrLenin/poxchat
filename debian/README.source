@@ -1,0 +1,64 @@
+poxchat for Debian
+==================
+
+Known Debian-policy compliance gaps
+-----------------------------------
+
+The following items must be resolved before this package can be
+uploaded to the Debian archive. They are tracked here so that nothing
+slips through to ftpmaster review.
+
+1. Embedded zstd amalgamation
+   ---------------------------
+   src/common/zstd/ contains the single-file Zstandard amalgamation
+   shipped by upstream for Windows builds. Debian Policy §4.13 forbids
+   embedded copies of libraries; the build must instead link against
+   the system libzstd (libzstd-dev). The upstream build system needs a
+   meson option to switch between the bundled copy and dependency()
+   on `libzstd`.
+
+2. Repacked upstream tarball
+   -------------------------
+   Once (1) is implemented, the upstream tarball should be repacked
+   via Files-Excluded in debian/copyright to drop:
+     - src/common/zstd/
+     - flatpak/shared-modules/ (git submodule, not used on Debian)
+     - external/tray/         (git submodule, Windows-only at present)
+     - AppDir/                (AppImage staging tree, not source)
+     - *.AppImage              (binary artefact)
+
+3. File-by-file copyright audit
+   ----------------------------
+   debian/copyright lists the principal copyright holders found in
+   the source tree. A full file-by-file audit using `licensecheck -r`
+   (devscripts) is still required, particularly for:
+     - data/icons/* (some icons predate the public source tree)
+     - po/*.po headers
+     - any file inherited unchanged from the XChat era
+
+4. Fork justification (NEW queue)
+   ------------------------------
+   PoxChat is a fork of HexChat with a renamed source package. The
+   ITP bug must explain why this is a separate source package rather
+   than a Debian-side patch series against `hexchat`, citing the GTK4
+   migration scope and IRCv3 protocol work.
+
+5. Coexistence with `hexchat`
+   ---------------------------
+   The current binary, config directory (~/.config/poxchat) and
+   AppStream id (io.github.evilnet.PoxChat) are distinct from
+   HexChat's, so both packages can be installed side-by-side. No
+   Conflicts/Replaces is needed today, but this should be revisited
+   if PoxChat ever wants to take over HexChat's place in Debian.
+
+6. Reproducible build verification
+   -------------------------------
+   The build sets `reproducible=+all` and `SOURCE_DATE_EPOCH` is
+   honoured by meson, but this should be confirmed end-to-end via
+   reprotest before upload.
+
+Building locally
+----------------
+
+    sudo apt build-dep .
+    dpkg-buildpackage -us -uc -b

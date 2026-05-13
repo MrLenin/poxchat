@@ -1,0 +1,15 @@
+*.debhelper
+*.debhelper.log
+*.substvars
+debhelper-build-stamp
+files
+poxchat/
+poxchat-common/
+poxchat-dev/
+poxchat-lua/
+poxchat-perl/
+poxchat-plugin-checksum/
+poxchat-plugin-fishlim/
+poxchat-plugin-sysinfo/
+poxchat-python/
+tmp/

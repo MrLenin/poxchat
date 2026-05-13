@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all reproducible=+all
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+%:
+	dh $@ --buildsystem=meson
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-Dgtk-frontend=true \
+		-Dtext-frontend=false \
+		-Dtls=enabled \
+		-Dplugin=true \
+		-Ddbus=enabled \
+		-Dlibcanberra=enabled \
+		-Dwith-libwebsockets=enabled \
+		-Dinstall-appdata=true \
+		-Dinstall-plugin-metainfo=true \
+		-Dwith-checksum=true \
+		-Dwith-fishlim=true \
+		-Dwith-sysinfo=true \
+		-Dwith-lua=luajit \
+		-Dwith-perl=perl \
+		-Dwith-python=python3 \
+		-Dwith-perl-legacy-api=false \
+		-Dtheme-manager=false \
+		-Delectron-frontend=false
+
+override_dh_missing:
+	dh_missing --fail-missing

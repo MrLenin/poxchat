@@ -1,0 +1,12 @@
+# The vendored single-file zstd amalgamation in src/common/zstd/ is statically
+# linked into the binary. This is tracked in debian/README.source and is
+# expected to be unbundled in favour of the system libzstd before any upload
+# to the Debian archive.
+poxchat: embedded-library *zstd*
+
+# Spelling errors inherited from upstream XChat/HexChat translated strings.
+# Fixing these would diverge from upstream translations; they are tracked
+# upstream rather than papered over at packaging time.
+poxchat: spelling-error-in-binary Conection Connection
+poxchat: spelling-error-in-binary Hilight Highlight
+poxchat: spelling-error-in-binary teh the

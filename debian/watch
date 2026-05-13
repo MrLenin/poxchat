@@ -1,0 +1,4 @@
+version=4
+opts=filenamemangle=s/.+\/v?(\d\S+)\.tar\.gz/poxchat-$1\.tar\.gz/ \
+  https://github.com/evilnet/poxchat/tags \
+  (?:.*?/)?v?(\d[\d.]*)\.tar\.gz

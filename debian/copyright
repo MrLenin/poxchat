@@ -1,0 +1,165 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: PoxChat
+Upstream-Contact: Alex Schumann <rubin@afternet.org>
+Source: https://github.com/evilnet/poxchat
+Comment:
+ PoxChat is a GTK4 fork of HexChat <https://hexchat.github.io/>,
+ which is itself a fork of XChat. The bulk of the source tree
+ therefore carries copyright from the original XChat and HexChat
+ authors in addition to the PoxChat contributors.
+ .
+ This copyright file documents the licences known at the time of
+ packaging. A full file-by-file audit is still in progress; see
+ debian/README.source for the current status.
+
+Files: *
+Copyright: 1998-2010 Peter Zelezny
+           2009-2013 Berke Viktor
+           2015-2016 Patrick Griffis
+           2023-2024 HexChat Contributors
+           2024-2026 PoxChat Contributors
+License: GPL-2+
+
+Files: src/common/zstd/*
+Copyright: Meta Platforms, Inc. and affiliates
+License: BSD-3-clause or GPL-2
+Comment:
+ This is a single-file amalgamation of the upstream Zstandard
+ library (https://github.com/facebook/zstd). It is vendored for
+ Windows builds and should be unbundled in favour of the system
+ libzstd before this package is uploaded to the Debian archive;
+ see debian/README.source.
+
+Files: plugins/fishlim/dh1080.*
+       plugins/fishlim/fish.*
+       plugins/fishlim/keystore.*
+       plugins/fishlim/plugin_poxchat.c
+       plugins/fishlim/utils.*
+Copyright: 2010-2011 Samuel Lidén Borell <samuel@kodafritt.se>
+           2015      <the.cypher@gmail.com>
+           2019-2020 <bakasura@protonmail.ch>
+License: GPL-2+
+
+Files: plugins/fishlim/irc.*
+Copyright: 2010 <ygrek@autistici.org>
+License: GPL-2+
+
+Files: plugins/checksum/*
+Copyright: 2010-2012 Berke Viktor
+License: GPL-2+
+
+Files: plugins/sysinfo/*
+Copyright: 2003-2005 Michael Shoup
+           2005-2007 Tony Vroon
+           2011-2012 Berke Viktor
+License: GPL-2+
+
+Files: plugins/lua/*
+       plugins/perl/*
+       plugins/python/*
+Copyright: 1998-2010 Peter Zelezny
+           2009-2013 Berke Viktor
+           2015-2016 mniip
+License: GPL-2+
+
+Files: src/fe-gtk/notifications/notification-libnotify.c
+Copyright: 2017 Red Hat, Inc.
+License: LGPL-2.1+
+
+Files: data/icons/*
+Copyright: 2024-2026 PoxChat Contributors
+           1998-2010 Peter Zelezny
+License: GPL-2+
+Comment:
+ Application icons inherited from HexChat/XChat with PoxChat
+ redraws. A full audit of every icon (some predating the public
+ source tree) is still pending.
+
+Files: data/misc/io.github.evilnet.PoxChat.appdata.xml.in
+       data/misc/io.github.evilnet.PoxChat.Plugin.metainfo.xml.in
+Copyright: 2024-2026 PoxChat Contributors
+License: CC0-1.0
+Comment:
+ AppStream metadata is published under CC0-1.0 as declared in the
+ metadata_license element of the upstream files.
+
+Files: po/*
+Copyright: The PoxChat translators
+License: GPL-2+
+
+Files: debian/*
+Copyright: 2026 Alex Schumann <rubin@afternet.org>
+License: GPL-2+
+
+License: GPL-2+
+ This program is free software: you can redistribute it and/or
+ modify it under the terms of the GNU General Public License as
+ published by the Free Software Foundation; either version 2 of
+ the License, or (at your option) any later version.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <https://www.gnu.org/licenses/>.
+ .
+ On Debian systems, the complete text of the GNU General Public
+ License version 2 can be found in /usr/share/common-licenses/GPL-2.
+
+License: GPL-2
+ This program is free software; you can redistribute it and/or
+ modify it under the terms of the GNU General Public License as
+ published by the Free Software Foundation; version 2 of the
+ License.
+ .
+ On Debian systems, the complete text of the GNU General Public
+ License version 2 can be found in /usr/share/common-licenses/GPL-2.
+
+License: LGPL-2.1+
+ This library is free software; you can redistribute it and/or
+ modify it under the terms of the GNU Lesser General Public
+ License as published by the Free Software Foundation; either
+ version 2.1 of the License, or (at your option) any later version.
+ .
+ On Debian systems, the complete text of the GNU Lesser General
+ Public License version 2.1 can be found in
+ /usr/share/common-licenses/LGPL-2.1.
+
+License: BSD-3-clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ .
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above
+    copyright notice, this list of conditions and the following
+    disclaimer in the documentation and/or other materials provided
+    with the distribution.
+  * Neither the name Facebook, nor Meta, nor the names of its
+    contributors may be used to endorse or promote products derived
+    from this software without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ POSSIBILITY OF SUCH DAMAGE.
+
+License: CC0-1.0
+ To the extent possible under law, the author(s) have dedicated all
+ copyright and related and neighboring rights to this software to
+ the public domain worldwide. This software is distributed without
+ any warranty.
+ .
+ On Debian systems, the complete text of the CC0 1.0 Universal
+ license can be found in /usr/share/common-licenses/CC0-1.0.

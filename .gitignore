@@ -8,6 +8,8 @@ poxchat-build-gtk4/
 # AppImage build outputs
 AppDir/
 *.AppImage
+# Debian build outputs
+/dist/
 doxygen*.tmp
 html/
 *.patch

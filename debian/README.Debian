@@ -1,0 +1,33 @@
+poxchat for Debian
+==================
+
+Relationship to hexchat
+-----------------------
+
+PoxChat is a GTK4 fork of HexChat. The two packages are installable
+side-by-side: PoxChat ships its own binary (`/usr/bin/poxchat`),
+configuration directory (`~/.config/poxchat`) and AppStream identity
+(`io.github.evilnet.PoxChat`).
+
+Scripting plugins
+-----------------
+
+The Perl, Python and Lua scripting plugins are shipped as separate
+binary packages so that users who only want the IRC client are not
+forced to pull in language runtimes:
+
+  * `poxchat-perl`    - Perl scripting
+  * `poxchat-python`  - Python 3 scripting
+  * `poxchat-lua`     - Lua (LuaJIT) scripting
+
+Drop scripts into `~/.config/poxchat/addons/`.
+
+FiSH encryption
+---------------
+
+The FiSH plugin (Blowfish channel encryption with DH1080 key exchange)
+is provided by `poxchat-plugin-fishlim`. FiSH is a legacy protocol with
+known weaknesses; treat it as an obfuscation layer rather than a
+modern end-to-end encrypted messenger.
+
+ -- Alex Schumann <rubin@afternet.org>, Tue, 12 May 2026

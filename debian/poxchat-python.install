@@ -1,0 +1,3 @@
+usr/lib/*/poxchat/plugins/python.so
+usr/lib/*/poxchat/python/
+usr/share/metainfo/io.github.evilnet.PoxChat.Plugin.Python.metainfo.xml

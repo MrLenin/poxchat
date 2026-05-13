@@ -22,3 +22,18 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: PoxChat-x86_64.AppImage
+
+  deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build .deb in container
+        run: ./linux/deb/build-in-docker.sh
+
+      - name: Upload .deb files to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb

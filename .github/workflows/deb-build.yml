@@ -1,0 +1,24 @@
+name: Debian Build
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  deb_build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build .deb in container
+        run: ./linux/deb/build-in-docker.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PoxChat-Debian
+          path: dist/*.deb
