@@ -1455,7 +1455,7 @@ void poxchat_markread(poxchat_plugin *ph, const char *target, const char *msgid)
 
 ## Implementation Task List (Phased)
 
-This section breaks down implementation into concrete tasks organized by dependency order. Tasks reference UX decisions from [IRCV3_UX_AUDIT.md](docs/IRCV3_UX_AUDIT.md).
+This section breaks down implementation into concrete tasks organized by dependency order. Tasks reference UX decisions from [IRCV3_UX_AUDIT.md](IRCV3_UX_AUDIT.md).
 
 ### Legend
 - ✅ Complete
@@ -1838,7 +1838,7 @@ While the echo-message capability is negotiated and basic self-echo detection ex
 
 ### xtext Modernization Status
 
-See [XTEXT_MODERNIZATION_PLAN.md](docs/XTEXT_MODERNIZATION_PLAN.md) for detailed xtext buffer modernization status.
+See [XTEXT_MODERNIZATION_PLAN.md](XTEXT_MODERNIZATION_PLAN.md) for detailed xtext buffer modernization status.
 
 | Phase | Status |
 |-------|--------|
