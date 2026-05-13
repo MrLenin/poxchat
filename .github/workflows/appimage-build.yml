@@ -1,0 +1,26 @@
+# Disabled during PoxChat rename / GTK4 migration. Re-enable once builds work.
+#
+# name: AppImage Build
+# on:
+#   push:
+#     branches:
+#       - master
+#   pull_request:
+#     branches:
+#       - master
+#
+# jobs:
+#   appimage_build:
+#     runs-on: ubuntu-24.04
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           submodules: recursive
+#
+#       - name: Build AppImage in container
+#         run: ./linux/appimage/build-in-docker.sh
+#
+#       - uses: actions/upload-artifact@v4
+#         with:
+#           name: PoxChat-AppImage
+#           path: PoxChat-x86_64.AppImage

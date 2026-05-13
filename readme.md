@@ -50,7 +50,7 @@ sudo apt install build-essential meson ninja-build gettext libgtk-4-dev libssl-d
 <sub>
 X-Chat ("xchat") Copyright (c) 1998-2010 By Peter Zelezny.  
 HexChat ("hexchat") Copyright (c) 2009-2014 By Berke Viktor.  
-PoxChat fork Copyright (c) 2024- contributors.
+PoxChat fork Copyright (c) 2026- Evilnet contributors.
 </sub>
 
 <sub>

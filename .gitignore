@@ -3,7 +3,11 @@
 src/htm/.vs/*
 /build
 builddir/
+builddir-*/
 poxchat-build-gtk4/
+# AppImage build outputs
+AppDir/
+*.AppImage
 doxygen*.tmp
 html/
 *.patch
