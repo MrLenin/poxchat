@@ -10699,6 +10699,32 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	if (buf->entry_tree)
 		add234 (buf->entry_tree, ent);
 
+	/* Reattach reply context from DB if this entry was a reply.  Initial
+	 * scrollback load attaches replies once via text.c after all entries
+	 * are materialized, but a subsequent evict + ensure_range cycle loses
+	 * that state on the rebuilt entry.  Look it up per-msgid here so
+	 * re-materialized replies still show their quote line.  Done after
+	 * add234 so set_reply's update_weight234 can find this entry. */
+	if (msg->msgid && msg->msgid[0] && buf->virt_db)
+	{
+		scrollback_reply *r = scrollback_load_reply_by_msgid (
+			(scrollback_db *)buf->virt_db, msg->msgid);
+		if (r)
+		{
+			guint64 target_id = 0;
+			if (r->target_msgid && r->target_msgid[0])
+			{
+				textentry *orig = gtk_xtext_find_by_msgid (buf, r->target_msgid);
+				if (orig)
+					target_id = orig->entry_id;
+			}
+			gtk_xtext_entry_set_reply (buf, ent, r->target_msgid,
+			                            r->target_nick, r->target_preview,
+			                            target_id);
+			scrollback_reply_free (r);
+		}
+	}
+
 	return ent;
 }
 

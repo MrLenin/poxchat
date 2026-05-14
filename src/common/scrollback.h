@@ -224,6 +224,14 @@ GSList *scrollback_load_replies (scrollback_db *db, const char *channel);
 void scrollback_reply_free (scrollback_reply *r);
 void scrollback_reply_list_free (GSList *list);
 
+/**
+ * Load the reply context for a single message by its msgid.
+ * Used by virtual-scrollback re-materialization to reattach reply info
+ * to entries that were evicted and reloaded from the DB.
+ * @return scrollback_reply* (caller frees with scrollback_reply_free) or NULL if no reply.
+ */
+scrollback_reply *scrollback_load_reply_by_msgid (scrollback_db *db, const char *msgid);
+
 /* --- Virtual scrollback query functions --- */
 
 /**

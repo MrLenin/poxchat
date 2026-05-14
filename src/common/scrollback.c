@@ -55,6 +55,7 @@ struct scrollback_db {
 	sqlite3_stmt *stmt_load_reactions;
 	sqlite3_stmt *stmt_save_reply;
 	sqlite3_stmt *stmt_load_reply;
+	sqlite3_stmt *stmt_load_reply_by_msgid;
 	sqlite3_stmt *stmt_update_pending;
 	sqlite3_stmt *stmt_redact;
 
@@ -375,6 +376,13 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_load_reply, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
+	/* IRCv3 replies: load one by msgid (for re-materialization) */
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT target_msgid, target_nick, target_preview "
+		"FROM replies WHERE msgid = ?",
+		-1, &sdb->stmt_load_reply_by_msgid, NULL);
+	if (rc != SQLITE_OK) goto fail;
+
 	/* Echo-message: update pending placeholder msgid to real msgid */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"UPDATE messages SET msgid = ?1 WHERE channel_id = ?2 AND msgid = ?3",
@@ -449,6 +457,7 @@ finalize_statements (scrollback_db *sdb)
 	if (sdb->stmt_load_reactions) sqlite3_finalize (sdb->stmt_load_reactions);
 	if (sdb->stmt_save_reply) sqlite3_finalize (sdb->stmt_save_reply);
 	if (sdb->stmt_load_reply) sqlite3_finalize (sdb->stmt_load_reply);
+	if (sdb->stmt_load_reply_by_msgid) sqlite3_finalize (sdb->stmt_load_reply_by_msgid);
 	if (sdb->stmt_update_pending) sqlite3_finalize (sdb->stmt_update_pending);
 	if (sdb->stmt_redact) sqlite3_finalize (sdb->stmt_redact);
 	if (sdb->stmt_count) sqlite3_finalize (sdb->stmt_count);
@@ -1265,6 +1274,33 @@ scrollback_load_replies (scrollback_db *db, const char *channel)
 	}
 
 	return g_slist_reverse (list);
+}
+
+/* IRCv3 replies: load one reply by msgid.  Used by virtual-scrollback
+ * re-materialization to reattach reply context when an entry that was
+ * evicted gets reloaded from the DB. */
+scrollback_reply *
+scrollback_load_reply_by_msgid (scrollback_db *db, const char *msgid)
+{
+	scrollback_reply *r;
+	int rc;
+
+	if (!db || !db->stmt_load_reply_by_msgid || !msgid || !msgid[0])
+		return NULL;
+
+	sqlite3_reset (db->stmt_load_reply_by_msgid);
+	sqlite3_bind_text (db->stmt_load_reply_by_msgid, 1, msgid, -1, SQLITE_TRANSIENT);
+
+	rc = sqlite3_step (db->stmt_load_reply_by_msgid);
+	if (rc != SQLITE_ROW)
+		return NULL;
+
+	r = g_new0 (scrollback_reply, 1);
+	r->msgid = g_strdup (msgid);
+	r->target_msgid = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reply_by_msgid, 0));
+	r->target_nick = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reply_by_msgid, 1));
+	r->target_preview = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reply_by_msgid, 2));
+	return r;
 }
 
 void
