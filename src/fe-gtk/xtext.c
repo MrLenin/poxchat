@@ -11259,6 +11259,7 @@ gtk_xtext_entry_set_text (xtext_buffer *buf, textentry *ent,
                           const unsigned char *new_text, int new_len)
 {
 	int old_sublines, new_sublines;
+	int old_display_lines;
 
 	if (!buf || !ent || !new_text)
 		return FALSE;
@@ -11309,8 +11310,35 @@ gtk_xtext_entry_set_text (xtext_buffer *buf, textentry *ent,
 	/* Recalculate derived data */
 	ent->str_width = gtk_xtext_text_width_ent (buf->xtext, ent);
 	old_sublines = g_slist_length (ent->sublines);
+	old_display_lines = ent->display_lines;
+
+	/* Drop the stale per-entry layout state before reflowing.  Two pieces
+	 * of cached state would otherwise survive a text replacement:
+	 *
+	 *   1. ent->sublines — lines_taken's fast path returns early when
+	 *      the entry already had a singleton subline, leaving the node
+	 *      pointing at the OLD str_len.  The render loop then reads
+	 *      that offset as the first subline's length, truncates Pango's
+	 *      shaping range to it, and (when the new text is longer) walks
+	 *      past end-of-list collecting bogus zero/negative lengths until
+	 *      lines_max clamps it — inflating `taken` and the hover band.
+	 *
+	 *   2. display_cache entry — holds a PangoLayout shaped against the
+	 *      previous text.  The render path skips it for the first subline
+	 *      of nick entries, but a hit on a continuation subline (or a
+	 *      no-nick entry) would render stale glyphs. */
+	g_slist_free (ent->sublines);
+	ent->sublines = NULL;
+	display_cache_remove (buf->display_cache, ent->entry_id);
+
 	new_sublines = gtk_xtext_lines_taken (buf, ent);
 	buf->num_lines += (new_sublines - old_sublines);
+
+	/* Keep the entry_tree weight in sync with display_lines so
+	 * line→entry lookups (and scrollbar math) reflect the new height. */
+	if (buf->entry_tree && ent->display_lines != old_display_lines)
+		update_weight234 (buf->entry_tree, ent,
+		                  ent->display_lines - old_display_lines);
 
 	/* Invalidate search marks */
 	if (ent->marks)
