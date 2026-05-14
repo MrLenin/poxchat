@@ -2,17 +2,14 @@
   <img src="data/icons/poxchat-256.png" width="160" alt="PoxChat">
 </p>
 
-# PoxChat (GTK4 fork)
+# PoxChat
 
-PoxChat is a fork of [HexChat](https://hexchat.github.io/) modernized around GTK4 with expanded IRCv3 support. **This is not release-ready** — expect bugs, rough edges, and the occasional crash. If you want a stable IRC client today, use [upstream HexChat](https://hexchat.github.io/).
+PoxChat is an Internet Relay Chat (IRC) app for Linux, Windows, Mac & more.  It is based around GTK4 and supports the  expanded IRCv3 features including replies, history, reactions, etc. **This is not release-ready** — expect bugs, rough edges, and the occasional crash. It was originally forked from the now archived/unmaintained app [HexChat](https://hexchat.github.io/)
 
 Upstream HexChat [documentation](https://hexchat.readthedocs.org/en/latest/index.html) still applies for most basics ([FAQ](https://hexchat.readthedocs.org/en/latest/faq.html), [Python API](https://hexchat.readthedocs.org/en/latest/script_python.html), [Perl API](https://hexchat.readthedocs.org/en/latest/script_perl.html)).
 
 ## What's new in this fork
-
-- **GTK4 port** (replacing the GTK+ frontend), with an overhauled xtext renderer (mark-based scroll anchoring, display-line cache), unified main-GUI margins, magnetic pane detents, and progressive column/tree collapse when space is tight.
-- **Tray icon** rewritten on top of [LizardByte/tray](https://github.com/LizardByte/tray), replacing the old bespoke tray code. Currently wired up on Windows only; the library itself is cross-platform, so Linux/macOS backends can be enabled without swapping out the integration.
-- **SQLite-backed scrollback** with a zstd-compressed VFS, replacing the old flat text-file scrollback. Also stores reaction and reply metadata alongside messages for IRCv3 draft features.
+- **gtk4** many UI/UX improvements
 - **IRCv3 3.1/3.2 core:** multi-prefix, away-notify, account-notify, extended-join, server-time, userhost-in-names, cap-notify, chghost, setname, invite-notify, account-tag.
 - **IRCv3 message framework:** `message-tags`, `batch`, `echo-message`, `labeled-response`.
 - **SASL:** PLAIN, EXTERNAL, SCRAM-SHA-1/256/512, OAUTHBEARER.
