@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="data/icons/poxchat-256.png" width="160" alt="PoxChat">
+</p>
+
 # PoxChat (GTK4 fork)
 
 PoxChat is a fork of [HexChat](https://hexchat.github.io/) modernized around GTK4 with expanded IRCv3 support. **This is not release-ready** — expect bugs, rough edges, and the occasional crash. If you want a stable IRC client today, use [upstream HexChat](https://hexchat.github.io/).
