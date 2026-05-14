@@ -7880,6 +7880,15 @@ gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
 		buffer->xtext->hover_reply_target = NULL;
 	if (ent == buffer->xtext->flash_ent)
 		buffer->xtext->flash_ent = NULL;
+	if (ent == buffer->xtext->hilight_ent)
+		buffer->xtext->hilight_ent = NULL;
+	/* pagetop_ent is a raw cached pointer to "what's at adj->value".  If
+	 * the entry it points at is being killed (eviction during
+	 * virt_ensure_range can take down the head), null it so the next
+	 * render path (find_char_ex / check_ent_visibility) recomputes from
+	 * adj->value instead of walking ent->next on freed memory. */
+	if (ent == buffer->pagetop_ent)
+		buffer->pagetop_ent = NULL;
 
 	/* last_ent_start_id / last_ent_end_id: stale IDs self-heal (resolve to NULL) */
 
