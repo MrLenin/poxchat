@@ -490,6 +490,10 @@ typedef struct session
 	gint64 typing_last_sent;		/* monotonic time of last +typing=active we sent */
 	int typing_send_timer;			/* timer for periodic re-sends (fires every 3s) */
 	gint64 typing_last_keystroke;	/* monotonic time of last keystroke in input box */
+	gint64 typing_self_echo_until;	/* deadline (monotonic) within which an inbound is_self
+									   +typing is treated as this client's own echo; outside
+									   this window an is_self +typing means another client of
+									   ours (same nick) is typing */
 
 	/* IRCv3 reply and react compose state */
 	char *reply_msgid;				/* msgid we're replying to (NULL = not replying) */

@@ -5758,14 +5758,25 @@ xit:
 
 #define TYPING_SEND_INTERVAL_MS  3000
 #define TYPING_SEND_EXPIRE_US    (6 * G_USEC_PER_SEC)
+/* How long after we send a typing TAGMSG to treat an inbound is_self +typing as
+ * our own echo (echo-message / bouncer round-trip).  Beyond this window an
+ * is_self +typing is attributed to another connected client of ours. */
+#define TYPING_SELF_ECHO_WINDOW_US  (5 * G_USEC_PER_SEC)
 
 static int typing_send_timer_cb (void *userdata);
+
+static void
+typing_mark_self_echo_window (session *sess)
+{
+	sess->typing_self_echo_until = g_get_monotonic_time () + TYPING_SELF_ECHO_WINDOW_US;
+}
 
 static void
 typing_send_active (session *sess)
 {
 	tcp_sendf (sess->server, "@+typing=active TAGMSG %s\r\n", sess->channel);
 	sess->typing_last_sent = g_get_monotonic_time ();
+	typing_mark_self_echo_window (sess);
 
 	/* Restart the 3s re-send timer */
 	if (sess->typing_send_timer)
@@ -5788,6 +5799,7 @@ typing_send_timer_cb (void *userdata)
 
 	/* User stopped typing but input still has text — send paused */
 	tcp_sendf (sess->server, "@+typing=paused TAGMSG %s\r\n", sess->channel);
+	typing_mark_self_echo_window (sess);
 	sess->typing_last_sent = 0;
 	sess->typing_send_timer = 0;
 	return 0;
@@ -5806,6 +5818,7 @@ typing_indicator_cancel (session *sess)
 	    && sess->server->have_message_tags && sess->channel[0])
 	{
 		tcp_sendf (sess->server, "@+typing=done TAGMSG %s\r\n", sess->channel);
+		typing_mark_self_echo_window (sess);
 	}
 	sess->typing_last_sent = 0;
 }

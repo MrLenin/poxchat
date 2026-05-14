@@ -2633,16 +2633,25 @@ inbound_tagmsg (server *serv, char *to, char *nick, char *ip,
 	/* Handle +typing tag for typing indicators
 	 * Values: "active" (typing), "paused" (stopped briefly), "done" (finished/sent)
 	 *
-	 * Self-echo: with echo-message or a bouncer, the server echoes our own
-	 * TAGMSGs back.  This can indicate activity on another connected client.
-	 * Controlled by hex_irc_typing_self (default: ON).
-	 * Only suppress self-echo for typing, not for reactions.
+	 * Self-attributed TAGMSGs come from two sources:
+	 *   1. THIS client's own echo (echo-message / bouncer round-trip).
+	 *      Always suppressed — the input box already tells you that you're
+	 *      typing.  Detected by the short echo window set when we sent.
+	 *   2. ANOTHER client of ours (same nick) — useful signal that you're
+	 *      composing on phone/another box.  Gated by hex_irc_typing_self.
+	 * Only this filtering applies to typing, not reactions.
 	 */
 	typing_value = g_hash_table_lookup (tags_data->all_tags, "+typing");
 	if (typing_value)
 	{
-		if (is_self && !prefs.hex_irc_typing_self)
-			goto skip_typing;
+		if (is_self)
+		{
+			gint64 now = g_get_monotonic_time ();
+			if (sess->typing_self_echo_until != 0 && now < sess->typing_self_echo_until)
+				goto skip_typing;  /* our own echo */
+			if (!prefs.hex_irc_typing_self)
+				goto skip_typing;  /* user opted out of other-client signal */
+		}
 
 		if (!strcmp (typing_value, "active") || !strcmp (typing_value, "paused"))
 		{
