@@ -1,5 +1,5 @@
 project('poxchat', 'c',
-  version: '3.0.0~alpha1',
+  version: '3.0.0~alpha2',
   meson_version: '>= 0.56.0',
   default_options: [
     'c_std=gnu11',

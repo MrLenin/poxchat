@@ -20,6 +20,18 @@
     <id>poxchat.desktop</id>
   </provides>
   <releases>
+    <release date="2026-05-13" version="3.0.0~alpha2" type="development">
+      <description>
+        <p>Bug-fix release on top of alpha1.</p>
+        <ul>
+          <li>Chat view rendering and scroll fixes</li>
+          <li>Input box polish and PRIMARY-selection paste</li>
+          <li>Emoji picker and keyboard shortcut dialog fixes</li>
+          <li>Improved typing indicator behavior</li>
+          <li>Refreshed app icon</li>
+        </ul>
+      </description>
+    </release>
     <release date="2026-05-12" version="3.0.0~alpha1" type="development">
       <description>
         <p>First alpha of the PoxChat fork, rebased on GTK4 and with
