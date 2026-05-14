@@ -5226,8 +5226,10 @@ gtk_xtext_render_stamp (GtkXText * xtext, textentry * ent,
 	return text_width > xtext->stamp_width ? text_width : xtext->stamp_width;
 }
 
-/* Render a reply context line above a message: "\xe2\x86\xa9 nick: preview text..."
- * Draws at reduced alpha to visually distinguish from message text. */
+/* Render a reply context line above a message: "> nick: preview text..."
+ * Draws at reduced alpha to visually distinguish from message text.
+ * The matching "\xe2\x86\xa9" arrow is prepended to the reply's message text
+ * itself at the inbound boundary (see inbound_chanmsg / inbound_privmsg). */
 static void
 gtk_xtext_render_reply_context (GtkXText *xtext, textentry *ent, int line, int win_width)
 {
@@ -5242,11 +5244,11 @@ gtk_xtext_render_reply_context (GtkXText *xtext, textentry *ent, int line, int w
 
 	/* Build display text */
 	if (reply->target_nick && reply->target_nick[0] && reply->target_preview && reply->target_preview[0])
-		text = g_strdup_printf ("\xe2\x86\xa9 %s: %s", reply->target_nick, reply->target_preview);
+		text = g_strdup_printf ("> %s: %s", reply->target_nick, reply->target_preview);
 	else if (reply->target_nick && reply->target_nick[0])
-		text = g_strdup_printf ("\xe2\x86\xa9 %s", reply->target_nick);
+		text = g_strdup_printf ("> %s", reply->target_nick);
 	else
-		text = g_strdup ("\xe2\x86\xa9 (unknown message)");
+		text = g_strdup ("> (unknown message)");
 
 	y = (xtext->fontsize * line) + xtext->font->ascent - xtext->pixel_offset;
 	x = xtext->buffer->indent;

@@ -3138,14 +3138,32 @@ cmd_me (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 	int cmd_length = 22; /* " PRIVMSG ", " ", :, \001ACTION, " ", \001, \r, \n */
 	int offset = 0;
 	message_tags_data no_tags = MESSAGE_TAGS_DATA_INIT;
+	/* See matching block in handle_say. */
+	char *captured_reply_msgid = (sess->reply_msgid ? g_strdup (sess->reply_msgid) : NULL);
+	GHashTable *self_reply_tags = NULL;
+	message_tags_data reply_tags = MESSAGE_TAGS_DATA_INIT;
+	message_tags_data *self_tags = &no_tags;
+	int ret = TRUE;
+
+	if (captured_reply_msgid)
+	{
+		self_reply_tags = g_hash_table_new (g_str_hash, g_str_equal);
+		g_hash_table_insert (self_reply_tags, (gpointer)"+draft/reply",
+		                     captured_reply_msgid);
+		reply_tags.all_tags = self_reply_tags;
+		self_tags = &reply_tags;
+	}
 
 	if (!(*act))
-		return FALSE;
+	{
+		ret = FALSE;
+		goto out;
+	}
 
 	if (sess->type == SESS_SERVER)
 	{
 		notj_msg (sess);
-		return TRUE;
+		goto out;
 	}
 
 	g_snprintf (tbuf, TBUFSIZE, "\001ACTION %s\001\r", act);
@@ -3154,7 +3172,7 @@ cmd_me (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 	{
 		/* print it to screen */
 		inbound_action (sess, sess->channel, sess->server->nick, "", act, TRUE, FALSE,
-							 &no_tags);
+							 self_tags);
 	} else
 	{
 		/* DCC CHAT failed, try through server */
@@ -3168,13 +3186,13 @@ cmd_me (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 					g_free (sess->current_msgid);
 					sess->current_msgid = g_strdup_printf ("pending:%s", sess->server->last_sent_label);
 					inbound_action (sess, sess->channel, sess->server->nick, "",
-										 split_text, TRUE, FALSE, &no_tags);
+										 split_text, TRUE, FALSE, self_tags);
 					mark_pending_echo (sess, sess->server);
 				}
 				else if (!sess->server->have_echo_message)
 				{
 					inbound_action (sess, sess->channel, sess->server->nick, "",
-										 split_text, TRUE, FALSE, &no_tags);
+										 split_text, TRUE, FALSE, self_tags);
 				}
 
 				if (*split_text)
@@ -3189,13 +3207,13 @@ cmd_me (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 				g_free (sess->current_msgid);
 				sess->current_msgid = g_strdup_printf ("pending:%s", sess->server->last_sent_label);
 				inbound_action (sess, sess->channel, sess->server->nick, "",
-									 act + offset, TRUE, FALSE, &no_tags);
+									 act + offset, TRUE, FALSE, self_tags);
 				mark_pending_echo (sess, sess->server);
 			}
 			else if (!sess->server->have_echo_message)
 			{
 				inbound_action (sess, sess->channel, sess->server->nick, "",
-									 act + offset, TRUE, FALSE, &no_tags);
+									 act + offset, TRUE, FALSE, self_tags);
 			}
 		} else
 		{
@@ -3203,7 +3221,11 @@ cmd_me (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 		}
 	}
 
-	return TRUE;
+out:
+	if (self_reply_tags)
+		g_hash_table_destroy (self_reply_tags);
+	g_free (captured_reply_msgid);
+	return ret;
 }
 
 static int
@@ -5408,6 +5430,22 @@ handle_say (session *sess, char *text, int check_spch)
 	int len;
 	int newcmdlen;
 	message_tags_data no_tags = MESSAGE_TAGS_DATA_INIT;
+	/* Synthesize +draft/reply tag for self-echo when sending a reply so
+	 * inbound_chanmsg prepends the "\xe2\x86\xa9" arrow on local display.
+	 * p_message (irc_message) consumes sess->reply_msgid, so capture it
+	 * up front and free at function exit. */
+	char *captured_reply_msgid = (sess->reply_msgid ? g_strdup (sess->reply_msgid) : NULL);
+	GHashTable *self_reply_tags = NULL;
+	message_tags_data reply_tags = MESSAGE_TAGS_DATA_INIT;
+	message_tags_data *self_tags = &no_tags;
+	if (captured_reply_msgid)
+	{
+		self_reply_tags = g_hash_table_new (g_str_hash, g_str_equal);
+		g_hash_table_insert (self_reply_tags, (gpointer)"+draft/reply",
+		                     captured_reply_msgid);
+		reply_tags.all_tags = self_reply_tags;
+		self_tags = &reply_tags;
+	}
 
 	if (strcmp (sess->channel, "(lastlog)") == 0)
 	{
@@ -5475,7 +5513,7 @@ handle_say (session *sess, char *text, int check_spch)
 		if (dcc)
 		{
 			inbound_chanmsg (sess->server, NULL, sess->channel,
-								  sess->server->nick, text, TRUE, FALSE, &no_tags);
+								  sess->server->nick, text, TRUE, FALSE, self_tags);
 			set_topic (sess, net_ip (dcc->addr), net_ip (dcc->addr));
 			goto xit;
 		}
@@ -5498,13 +5536,13 @@ handle_say (session *sess, char *text, int check_spch)
 				g_free (sess->current_msgid);
 				sess->current_msgid = g_strdup_printf ("pending:%s", sess->server->last_sent_label);
 				inbound_chanmsg (sess->server, sess, sess->channel, sess->server->nick,
-									  split_text, TRUE, FALSE, &no_tags);
+									  split_text, TRUE, FALSE, self_tags);
 				mark_pending_echo (sess, sess->server);
 			}
 			else if (!sess->server->have_echo_message)
 			{
 				inbound_chanmsg (sess->server, sess, sess->channel, sess->server->nick,
-									  split_text, TRUE, FALSE, &no_tags);
+									  split_text, TRUE, FALSE, self_tags);
 				sess->server->p_message (sess->server, sess->channel, split_text);
 			}
 			else
@@ -5525,13 +5563,13 @@ handle_say (session *sess, char *text, int check_spch)
 			g_free (sess->current_msgid);
 			sess->current_msgid = g_strdup_printf ("pending:%s", sess->server->last_sent_label);
 			inbound_chanmsg (sess->server, sess, sess->channel, sess->server->nick,
-								  text + offset, TRUE, FALSE, &no_tags);
+								  text + offset, TRUE, FALSE, self_tags);
 			mark_pending_echo (sess, sess->server);
 		}
 		else if (!sess->server->have_echo_message)
 		{
 			inbound_chanmsg (sess->server, sess, sess->channel, sess->server->nick,
-								  text + offset, TRUE, FALSE, &no_tags);
+								  text + offset, TRUE, FALSE, self_tags);
 			sess->server->p_message (sess->server, sess->channel, text + offset);
 		}
 		else
@@ -5547,6 +5585,10 @@ xit:
 	g_free (pdibuf);
 
 	g_free (newcmd);
+
+	if (self_reply_tags)
+		g_hash_table_destroy (self_reply_tags);
+	g_free (captured_reply_msgid);
 }
 
 char *

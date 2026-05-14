@@ -365,6 +365,16 @@ inbound_action (session *sess, char *chan, char *from, char *ip, char *text,
 	char nickchar[2] = "\000";
 	char idtext[64];
 	int privaction = FALSE;
+	char *reply_arrow_text = NULL;
+
+	/* If this action is a reply, prefix the visible text with the arrow.
+	 * See matching block in inbound_chanmsg. */
+	if (prefs.hex_irc_reply_show && tags_data->all_tags &&
+	    g_hash_table_lookup (tags_data->all_tags, "+draft/reply"))
+	{
+		reply_arrow_text = g_strconcat ("\xe2\x86\xa9 ", text, NULL);
+		text = reply_arrow_text;
+	}
 
 	if (!fromme)
 	{
@@ -473,6 +483,8 @@ check_action_reply:
 				fe_reply_context_set (sess, reply_msgid);
 		}
 	}
+
+	g_free (reply_arrow_text);
 }
 
 void
@@ -484,6 +496,7 @@ inbound_chanmsg (server *serv, session *sess, char *chan, char *from,
 	int hilight = FALSE;
 	char nickchar[2] = "\000";
 	char idtext[64];
+	char *reply_arrow_text = NULL;
 
 	if (!sess)
 	{
@@ -498,6 +511,17 @@ inbound_chanmsg (server *serv, session *sess, char *chan, char *from,
 		}
 		if (!sess)
 			return;
+	}
+
+	/* If this message is a reply, prefix the visible text with "\xe2\x86\xa9 "
+	 * so the arrow shows up immediately after the nick separator.  The reply
+	 * context line itself (rendered above the message) uses "> " for an
+	 * email-style quote.  Caller still owns the original `text`. */
+	if (prefs.hex_irc_reply_show && tags_data->all_tags &&
+	    g_hash_table_lookup (tags_data->all_tags, "+draft/reply"))
+	{
+		reply_arrow_text = g_strconcat ("\xe2\x86\xa9 ", text, NULL);
+		text = reply_arrow_text;
 	}
 
 	/* Set current msgid for scrollback_save to capture.
@@ -579,6 +603,8 @@ check_reply:
 				fe_reply_context_set (sess, reply_msgid);
 		}
 	}
+
+	g_free (reply_arrow_text);
 }
 
 void
