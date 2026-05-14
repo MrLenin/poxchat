@@ -112,8 +112,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "lua", "..\plugins\lua\lua.v
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Release|Win32 = Release|Win32
 		Release|x64 = Release|x64
+		Release|Win32 = Release|Win32
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{87554B59-006C-4D94-9714-897B27067BA3}.Release|Win32.ActiveCfg = Release|Win32

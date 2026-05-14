@@ -6,9 +6,9 @@
 #define ISO_CODES_PREFIX ".\\"
 #define ISO_CODES_LOCALEDIR LOCALEDIR
 #define PACKAGE_NAME "poxchat"
-#define PACKAGE_VERSION "<#= [string]::Join('.', $versionParts) #>"
+#define PACKAGE_VERSION "<#= $versionFull #>"
 #define POXCHATLIBDIR ".\\plugins"
 #define POXCHATSHAREDIR "."
 #define OLD_PERL
 #define GETTEXT_PACKAGE "poxchat"
-#define PACKAGE_TARNAME "poxchat-<#= [string]::Join('.', $versionParts) #>"
+#define PACKAGE_TARNAME "poxchat-<#= $versionFull #>"
