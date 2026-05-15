@@ -438,6 +438,7 @@ inbound_action (session *sess, char *chan, char *from, char *ip, char *text,
 	{
 		g_free (sess->current_msgid);
 		sess->current_msgid = g_strdup (tags_data->msgid);
+		sess->current_msgid_is_user_msg = TRUE;
 		chathistory_track_msgid_ts (sess, tags_data->msgid, tags_data->timestamp, FALSE);
 	}
 
@@ -531,6 +532,7 @@ inbound_chanmsg (server *serv, session *sess, char *chan, char *from,
 	{
 		g_free (sess->current_msgid);
 		sess->current_msgid = g_strdup (tags_data->msgid);
+		sess->current_msgid_is_user_msg = TRUE;
 	}
 
 	/* Track msgid for deduplication - live messages use is_history=FALSE.
@@ -1296,6 +1298,7 @@ inbound_notice (server *serv, char *to, char *nick, char *msg, char *ip, int id,
 	{
 		g_free (sess->current_msgid);
 		sess->current_msgid = g_strdup (tags_data->msgid);
+		sess->current_msgid_is_user_msg = TRUE;
 		chathistory_track_msgid_ts (sess, tags_data->msgid, tags_data->timestamp, FALSE);
 	}
 

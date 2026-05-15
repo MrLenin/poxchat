@@ -871,6 +871,10 @@ fe_cleanup (void)
 {
 	/* it's saved when pressing OK in setup.c */
 	/*palette_save ();*/
+
+	/* Capture WM state (sticky etc.) before the window is destroyed,
+	 * so quit-via-menu persists state alongside quit-via-close. */
+	mg_capture_window_state ();
 }
 
 void
@@ -1270,6 +1274,7 @@ fe_print_text (struct session *sess, char *text, time_t stamp,
 		if (sess->current_msgid && new_entry && new_entry != first_new_entry)
 		{
 			gtk_xtext_set_msgid (sess->res->buffer, new_entry, sess->current_msgid);
+			gtk_xtext_set_is_user_msg (new_entry, sess->current_msgid_is_user_msg);
 		}
 
 		/* Don't update tab colors for historical messages */
@@ -1303,6 +1308,7 @@ fe_print_text (struct session *sess, char *text, time_t stamp,
 				if (!gtk_xtext_get_msgid (ent))
 				{
 					gtk_xtext_set_msgid (sess->res->buffer, ent, sess->current_msgid);
+					gtk_xtext_set_is_user_msg (ent, sess->current_msgid_is_user_msg);
 					break;
 				}
 			}
@@ -1344,6 +1350,7 @@ fe_print_text (struct session *sess, char *text, time_t stamp,
 	{
 		gtk_xtext_set_msgid (sess->res->buffer, first_new_entry,
 		                     sess->current_msgid);
+		gtk_xtext_set_is_user_msg (first_new_entry, sess->current_msgid_is_user_msg);
 	}
 
 skip_materialize:
@@ -1382,6 +1389,7 @@ fe_print_text_prepend (struct session *sess, char *text, time_t stamp)
 	if (sess->current_msgid && new_first && new_first != first_new_entry)
 	{
 		gtk_xtext_set_msgid (sess->res->buffer, new_first, sess->current_msgid);
+		gtk_xtext_set_is_user_msg (new_first, sess->current_msgid_is_user_msg);
 	}
 
 	/* Don't update tab colors for historical messages - they're not "new" activity */
@@ -1538,7 +1546,12 @@ fe_set_entry_pending (session *sess, guint64 entry_id)
 {
 	textentry *ent = gtk_xtext_find_by_id (sess->res->buffer, entry_id);
 	if (ent)
+	{
 		gtk_xtext_entry_set_state (sess->res->buffer, ent, XTEXT_STATE_PENDING);
+		/* Pending entries are by definition outbound user messages awaiting
+		 * server echo — mark for hover-button visibility. */
+		gtk_xtext_set_is_user_msg (ent, TRUE);
+	}
 }
 
 void
@@ -1551,7 +1564,12 @@ fe_confirm_entry (session *sess, guint64 entry_id, const char *msgid)
 
 		gtk_xtext_entry_set_state (sess->res->buffer, ent, XTEXT_STATE_NORMAL);
 		if (msgid)
+		{
 			gtk_xtext_set_msgid (sess->res->buffer, ent, msgid);
+			/* Echo-confirm always lands on an entry we previously created
+			 * for an outbound /msg, /me, or /notice — all user speech. */
+			gtk_xtext_set_is_user_msg (ent, TRUE);
+		}
 
 		/* User clicked the redact button while the entry was still
 		 * pending; we deferred the REDACT until the real msgid was

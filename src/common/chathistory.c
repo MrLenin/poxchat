@@ -909,14 +909,18 @@ process_batch_message (server *serv, session *sess, batch_message *msg)
 		chathistory_track_msgid_ts (sess, msg->msgid, msg->timestamp, TRUE);
 		/* Set current_msgid directly for ALL message types including events.
 		 * Only inbound_chanmsg/inbound_action set this from tags_data,
-		 * but events (JOIN/PART/etc) also need their msgids captured. */
+		 * but events (JOIN/PART/etc) also need their msgids captured.
+		 * Default to non-speech; the inbound_{chanmsg,action,notice} path
+		 * below will flip is_user_msg back to TRUE when appropriate. */
 		g_free (sess->current_msgid);
 		sess->current_msgid = g_strdup (msg->msgid);
+		sess->current_msgid_is_user_msg = FALSE;
 	}
 	else
 	{
 		g_free (sess->current_msgid);
 		sess->current_msgid = NULL;
+		sess->current_msgid_is_user_msg = FALSE;
 	}
 
 	/* Extract nick from prefix */

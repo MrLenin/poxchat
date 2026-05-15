@@ -527,6 +527,7 @@ void gtk_xtext_buffer_set_virtual (xtext_buffer *buf, void *db, const char *chan
 textentry *gtk_xtext_find_by_msgid (xtext_buffer *buf, const char *msgid);
 textentry *gtk_xtext_find_by_id (xtext_buffer *buf, guint64 entry_id);
 textentry *gtk_xtext_set_msgid (xtext_buffer *buf, textentry *ent, const char *msgid);
+void gtk_xtext_set_is_user_msg (textentry *ent, gboolean is_user_msg);
 
 /* Multiline grouping: entries created while group_id is set share the same value */
 void gtk_xtext_begin_group (xtext_buffer *buf);

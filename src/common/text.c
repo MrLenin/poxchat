@@ -279,13 +279,20 @@ scrollback_load (session *sess)
 		{
 			/* Set current_msgid so fe_print_text attaches it to the xtext entry.
 			 * Must clear between messages so system messages (Disconnected etc.)
-			 * don't inherit the previous message's msgid. */
+			 * don't inherit the previous message's msgid.
+			 *
+			 * Loaded scrollback has no stored "kind" column, so we can't tell
+			 * speech apart from events here.  Default to FALSE: replies on
+			 * day-old DB entries are rare and /REPLY <msgid> still works.
+			 * Recent backlog comes in via chathistory replay (the inbound_*
+			 * handlers set is_user_msg correctly there). */
 			g_free (sess->current_msgid);
 			if (msg->msgid && msg->msgid[0] &&
 			    strncmp (msg->msgid, "pending:", 8) != 0)
 				sess->current_msgid = g_strdup (msg->msgid);
 			else
 				sess->current_msgid = NULL;
+			sess->current_msgid_is_user_msg = FALSE;
 
 			/* Multiline messages (from draft/multiline batches) have embedded
 			 * \n in the saved text.  Wrap with multiline group so fe_print_text
@@ -913,6 +920,7 @@ PrintTextTimeStamp (session *sess, char *text, time_t timestamp)
 	/* Clear current_msgid after fe_print_text so the GUI can attach it to the entry. */
 	g_free (sess->current_msgid);
 	sess->current_msgid = NULL;
+	sess->current_msgid_is_user_msg = FALSE;
 	g_free (text);
 }
 

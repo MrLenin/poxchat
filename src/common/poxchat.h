@@ -286,6 +286,7 @@ struct poxchatprefs
 	int hex_gui_win_fullscreen;
 	int hex_gui_win_left;
 	int hex_gui_win_state;
+	int hex_gui_win_sticky;
 	int hex_gui_win_top;
 	int hex_gui_win_width;
 	int hex_identd_port;
@@ -482,6 +483,9 @@ typedef struct session
 	char *scrollback_oldest_msgid;	/* oldest msgid from loaded scrollback (for BEFORE) */
 	char *scrollback_newest_msgid;	/* newest msgid from loaded scrollback (for AFTER) */
 	char *current_msgid;	/* temporary: msgid of message being processed (owned copy) */
+	gboolean current_msgid_is_user_msg;	/* true when current_msgid belongs to a PRIVMSG/NOTICE/ACTION,
+								 * false for JOIN/PART/QUIT/TOPIC/etc.  Drives whether the
+								 * entry gets reply/react hover buttons. */
 	GHashTable *known_msgids;	/* hash set of msgids already displayed (for deduplication) */
 
 	/* Typing indicators (IRCv3 +typing) */

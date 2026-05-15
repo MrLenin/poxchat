@@ -214,6 +214,10 @@ struct textentry
 	unsigned int collapsible:1;		/* multiline entry can be collapsed/expanded */
 	unsigned int has_db_row:1;		/* entry was saved to DB (has valid DB rowid) */
 	unsigned int pending_redact:1;	/* user clicked redact while pending; fire on echo */
+	unsigned int is_user_msg:1;		/* true for PRIVMSG/NOTICE/ACTION — gates the hover
+								 * reply/react/redact buttons.  Server events (JOIN,
+								 * QUIT, TOPIC, etc.) leave this 0 even if they carry
+								 * a msgid for redaction/dedup purposes. */
 
 	int display_lines;				/* cached display line count (replaces g_slist_length in hot paths) */
 	int sublines_width;				/* window_width when sublines were computed (0 = needs recompute) */
@@ -4078,6 +4082,7 @@ gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double event_x, d
 
 	/* Check if click lands on any hover button (reply, react-text, react-emoji) */
 	if (n_press == 1 && xtext->hover_ent && xtext->hover_ent->msgid &&
+	    xtext->hover_ent->is_user_msg &&
 	    xtext->hover_btn_size > 0 &&
 	    y >= xtext->hover_btn_y - 4 && y < xtext->hover_btn_y + xtext->hover_btn_size + 4)
 	{
@@ -6194,7 +6199,8 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 	gtk_xtext_draw_marker (xtext, ent, y - xtext->fontsize * (taken + start_subline));
 
 	/* --- Hover buttons: reply, react-text, react-emoji, [redact] --- */
-	if (ent == xtext->hover_ent && ent->msgid && first_subline_y && xtext->cr)
+	if (ent == xtext->hover_ent && ent->msgid && ent->is_user_msg &&
+	    first_subline_y && xtext->cr)
 	{
 		int btn_size = xtext->fontsize + 2;
 		int gap = 2;
@@ -11521,6 +11527,16 @@ gtk_xtext_set_msgid (xtext_buffer *buf, textentry *ent, const char *msgid)
 		g_hash_table_insert (buf->entries_by_msgid, g_strdup (msgid), ent);
 
 	return ent;
+}
+
+/* Mark this entry as user speech (PRIVMSG/NOTICE/ACTION).  Drives whether the
+ * reply/react hover buttons appear on the entry; server events (JOIN, etc.)
+ * leave this false even when they carry a msgid for other purposes. */
+void
+gtk_xtext_set_is_user_msg (textentry *ent, gboolean is_user_msg)
+{
+	if (ent)
+		ent->is_user_msg = is_user_msg ? 1 : 0;
 }
 
 void
