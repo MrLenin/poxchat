@@ -55,6 +55,7 @@
 #include "pixmaps.h"
 #include "plugin-tray.h"
 #include "servlistgui.h"
+#include "wm-hints.h"
 #include "xtext.h"
 
 #ifdef G_OS_WIN32
@@ -4808,11 +4809,40 @@ mg_create_topwindow (session *sess)
 	gtk_window_present (GTK_WINDOW (win));
 }
 
+/* Capture WM state (sticky + outer geometry) into prefs. Called from
+ * close-request and from fe_cleanup so quit-via-menu also persists state.
+ * Skipped while maximized/fullscreen so we don't overwrite the un-maximized
+ * geometry the user actually wants restored. */
+void
+mg_capture_window_state (void)
+{
+	GtkWindow *win;
+	int x, y, w, h;
+
+	if (!mg_gui || !mg_gui->window)
+		return;
+
+	win = GTK_WINDOW (mg_gui->window);
+	if (wm_hints_supports_sticky (win))
+		prefs.hex_gui_win_sticky = wm_hints_get_sticky (win) ? 1 : 0;
+
+	if (!prefs.hex_gui_win_state && !prefs.hex_gui_win_fullscreen
+	    && wm_hints_get_geometry (win, &x, &y, &w, &h))
+	{
+		prefs.hex_gui_win_left = x;
+		prefs.hex_gui_win_top = y;
+		prefs.hex_gui_win_width = w;
+		prefs.hex_gui_win_height = h;
+	}
+}
+
 static gboolean
 mg_tabwindow_de_cb (GtkWindow *win)
 {
 	GSList *list;
 	session *sess;
+
+	mg_capture_window_state ();
 
 	if (prefs.hex_gui_tray_close && gtkutil_tray_icon_supported (win) && tray_toggle_visibility (FALSE))
 		return TRUE;
@@ -4861,6 +4891,24 @@ mg_create_tabwindow (session *sess)
 		gtk_window_maximize (GTK_WINDOW (win));
 	if (prefs.hex_gui_win_fullscreen)
 		gtk_window_fullscreen (GTK_WINDOW (win));
+	if (prefs.hex_gui_win_sticky)
+		wm_hints_set_sticky (GTK_WINDOW (win), TRUE);
+
+	/* Restore last-known outer position if it still lands on a connected
+	 * monitor (e.g. don't strand the window off-screen after a second
+	 * display has been unplugged). Only meaningful on X11 — GTK4 itself
+	 * doesn't expose window positioning. */
+	if (prefs.hex_gui_win_save
+	    && !prefs.hex_gui_win_state && !prefs.hex_gui_win_fullscreen
+	    && (prefs.hex_gui_win_left || prefs.hex_gui_win_top)
+	    && wm_hints_position_on_screen (GTK_WINDOW (win),
+	                                    prefs.hex_gui_win_left,
+	                                    prefs.hex_gui_win_top))
+	{
+		wm_hints_set_position (GTK_WINDOW (win),
+		                       prefs.hex_gui_win_left,
+		                       prefs.hex_gui_win_top);
+	}
 	/* GTK4: gtk_window_set_opacity removed; use CSS opacity if needed */
 	hc_widget_set_margin_all (win, GUI_BORDER);
 

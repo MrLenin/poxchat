@@ -24,6 +24,7 @@ poxchat_gtk_sources = [
   'textgui.c',
   'urlgrab.c',
   'userlistgui.c',
+  'wm-hints.c',
   'xtext.c',
   'tree234.c',
   'xtext-render.c',

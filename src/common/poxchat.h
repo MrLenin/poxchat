@@ -165,6 +165,7 @@ struct poxchatprefs
 	unsigned int hex_gui_win_modes;
 	unsigned int hex_gui_win_nick;
 	unsigned int hex_gui_win_save;
+	unsigned int hex_gui_win_sticky;
 	unsigned int hex_gui_win_swap;
 	unsigned int hex_gui_win_ucount;
 	unsigned int hex_identd_server;
@@ -286,7 +287,6 @@ struct poxchatprefs
 	int hex_gui_win_fullscreen;
 	int hex_gui_win_left;
 	int hex_gui_win_state;
-	int hex_gui_win_sticky;
 	int hex_gui_win_top;
 	int hex_gui_win_width;
 	int hex_identd_port;
