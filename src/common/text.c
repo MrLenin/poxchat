@@ -157,7 +157,11 @@ scrollback_confirm_pending (session *sess, const char *label, const char *real_m
 	g_free (pending_key);
 }
 
-/* IRCv3 redaction: mark message as redacted in scrollback */
+/* IRCv3 redaction: mark message as redacted in scrollback.
+ * If the target msgid isn't in scrollback (we never saw the original),
+ * persist a standalone notice line so the redaction event survives a
+ * restart — matching the in-memory notice fe_redact_message inserts
+ * when gtk_xtext_find_by_msgid returns NULL. */
 void
 scrollback_redact_for_session (session *sess, const char *msgid,
                                const char *redacted_by, const char *reason,
@@ -169,8 +173,26 @@ scrollback_redact_for_session (session *sess, const char *msgid,
 		return;
 
 	db = get_scrollback_db (sess);
-	if (db)
-		scrollback_redact_message (db, msgid, redacted_by, reason, redact_time);
+	if (!db)
+		return;
+
+	if (scrollback_redact_message (db, msgid, redacted_by, reason, redact_time))
+		return;
+
+	/* Original wasn't in the DB — save a notice keyed by NULL msgid so it
+	 * never collides with a later chathistory-fetched original. */
+	if (sess->channel[0] && redacted_by && *redacted_by)
+	{
+		char *notice;
+		if (reason && *reason)
+			notice = g_strdup_printf ("\017[Message redacted by %s: %s]",
+			                          redacted_by, reason);
+		else
+			notice = g_strdup_printf ("\017[Message redacted by %s]",
+			                          redacted_by);
+		scrollback_db_save (db, sess->channel, redact_time, NULL, notice);
+		g_free (notice);
+	}
 }
 
 /* IRCv3 reactions: persist to scrollback */

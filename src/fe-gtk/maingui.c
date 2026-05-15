@@ -2846,9 +2846,22 @@ mg_redact_button_cb (GtkXText *xtext, const char *msgid, const char *nick, gpoin
 	if (xtext->redact_confirm_ent == xtext->hover_ent &&
 	    (g_get_monotonic_time () - xtext->redact_confirm_time) < 3 * G_USEC_PER_SEC)
 	{
-		char *cmd = g_strdup_printf ("REDACT %s %s", sess->channel, msgid);
-		handle_command (sess, cmd, FALSE);
-		g_free (cmd);
+		/* Entry still awaiting echo/labeled-response — msgid is a
+		 * "pending:<label>" placeholder the server doesn't know.  Mark
+		 * the entry and let fe_confirm_entry fire REDACT once the real
+		 * msgid binds. */
+		if (gtk_xtext_entry_get_state (xtext->hover_ent) == XTEXT_STATE_PENDING)
+		{
+			gtk_xtext_entry_set_pending_redact (xtext->hover_ent, TRUE);
+			fe_toast_show (sess, _("Will delete once the message is confirmed by the server"),
+			               3000, TOAST_TYPE_INFO, 0);
+		}
+		else
+		{
+			char *cmd = g_strdup_printf ("REDACT %s %s", sess->channel, msgid);
+			handle_command (sess, cmd, FALSE);
+			g_free (cmd);
+		}
 		xtext->redact_confirm_ent = NULL;
 	}
 	else

@@ -212,6 +212,7 @@ struct textentry
 	unsigned int collapsed:1;		/* multiline entry is currently collapsed */
 	unsigned int collapsible:1;		/* multiline entry can be collapsed/expanded */
 	unsigned int has_db_row:1;		/* entry was saved to DB (has valid DB rowid) */
+	unsigned int pending_redact:1;	/* user clicked redact while pending; fire on echo */
 
 	int display_lines;				/* cached display line count (replaces g_slist_length in hot paths) */
 	int sublines_width;				/* window_width when sublines were computed (0 = needs recompute) */
@@ -4534,6 +4535,18 @@ gtk_xtext_render_subline (GtkXText *xtext, int y, textentry *ent,
 			fg_alpha->start_index = 0;
 			fg_alpha->end_index = sub_len;
 			pango_attr_list_insert (attrs, fg_alpha);
+		}
+
+		/* Queued-redact strike-through: the user clicked delete while we were
+		 * still awaiting echo confirmation.  Strike the whole subline so the
+		 * intent is visible until the echo arrives and the real REDACT goes
+		 * out.  Combines with the pending dim above. */
+		if (ent->pending_redact)
+		{
+			PangoAttribute *strike = pango_attr_strikethrough_new (TRUE);
+			strike->start_index = 0;
+			strike->end_index = sub_len;
+			pango_attr_list_insert (attrs, strike);
 		}
 
 		pango_layout_set_text (xtext->layout,
@@ -11295,8 +11308,7 @@ gboolean
 gtk_xtext_entry_set_text (xtext_buffer *buf, textentry *ent,
                           const unsigned char *new_text, int new_len)
 {
-	int old_sublines, new_sublines;
-	int old_display_lines;
+	int old_display_lines, delta;
 
 	if (!buf || !ent || !new_text)
 		return FALSE;
@@ -11344,10 +11356,7 @@ gtk_xtext_entry_set_text (xtext_buffer *buf, textentry *ent,
 		ent->raw_to_stripped_map = r2s;
 	}
 
-	/* Recalculate derived data */
 	ent->str_width = gtk_xtext_text_width_ent (buf->xtext, ent);
-	old_sublines = g_slist_length (ent->sublines);
-	old_display_lines = ent->display_lines;
 
 	/* Drop the stale per-entry layout state before reflowing.  Two pieces
 	 * of cached state would otherwise survive a text replacement:
@@ -11368,14 +11377,20 @@ gtk_xtext_entry_set_text (xtext_buffer *buf, textentry *ent,
 	ent->sublines = NULL;
 	display_cache_remove (buf->display_cache, ent->entry_id);
 
-	new_sublines = gtk_xtext_lines_taken (buf, ent);
-	buf->num_lines += (new_sublines - old_sublines);
-
-	/* Keep the entry_tree weight in sync with display_lines so
-	 * line→entry lookups (and scrollbar math) reflect the new height. */
-	if (buf->entry_tree && ent->display_lines != old_display_lines)
-		update_weight234 (buf->entry_tree, ent,
-		                  ent->display_lines - old_display_lines);
+	/* lines_taken mutates ent->display_lines; bracket the call so we
+	 * can fold the delta into both buf->num_lines AND the order-statistic
+	 * tree.  Skipping the tree update leaves index234_by_weight out of
+	 * sync with display_lines and breaks every path that resolves a
+	 * scroll line back to an entry (gtk_xtext_nth, hit-testing). */
+	old_display_lines = ent->display_lines;
+	gtk_xtext_lines_taken (buf, ent);
+	delta = ent->display_lines - old_display_lines;
+	if (delta)
+	{
+		buf->num_lines += delta;
+		if (buf->entry_tree)
+			update_weight234 (buf->entry_tree, ent, delta);
+	}
 
 	/* Invalidate search marks */
 	if (ent->marks)
@@ -11447,15 +11462,58 @@ gtk_xtext_entry_set_redaction_info (xtext_buffer *buf, textentry *ent,
                                     const char *redacted_by, const char *reason,
                                     time_t redact_time)
 {
-	if (!ent || ent->redaction)
-		return;  /* already has redaction info — don't overwrite */
+	if (!ent)
+		return;
 
-	ent->redaction = g_new0 (xtext_redaction_info, 1);
-	ent->redaction->original_content = g_strndup (original_str, original_len);
-	ent->redaction->original_len = original_len;
+	if (!ent->redaction)
+	{
+		/* First redaction: snapshot the original content for reveal. */
+		ent->redaction = g_new0 (xtext_redaction_info, 1);
+		ent->redaction->original_content = g_strndup (original_str, original_len);
+		ent->redaction->original_len = original_len;
+	}
+	/* Re-redaction: keep the first-call original_content (ent->str may be
+	 * the prompt or placeholder at this point) and only refresh the
+	 * redactor identity so the latest REDACT wins. */
+
+	g_free (ent->redaction->redacted_by);
 	ent->redaction->redacted_by = g_strdup (redacted_by);
+
+	g_free (ent->redaction->redaction_reason);
 	ent->redaction->redaction_reason = (reason && *reason) ? g_strdup (reason) : NULL;
+
 	ent->redaction->redaction_time = redact_time;
+}
+
+gboolean
+gtk_xtext_entry_redaction_matches (textentry *ent,
+                                   const char *redacted_by,
+                                   const char *reason,
+                                   time_t redact_time)
+{
+	const char *normalized;
+
+	if (!ent || !ent->redaction)
+		return FALSE;
+
+	normalized = (reason && *reason) ? reason : NULL;
+
+	return g_strcmp0 (ent->redaction->redacted_by, redacted_by) == 0
+	    && g_strcmp0 (ent->redaction->redaction_reason, normalized) == 0
+	    && ent->redaction->redaction_time == redact_time;
+}
+
+void
+gtk_xtext_entry_set_pending_redact (textentry *ent, gboolean pending)
+{
+	if (ent)
+		ent->pending_redact = pending ? 1 : 0;
+}
+
+gboolean
+gtk_xtext_entry_get_pending_redact (textentry *ent)
+{
+	return ent ? (gboolean) ent->pending_redact : FALSE;
 }
 
 /* Lookup the textentry at a given y pixel coordinate.

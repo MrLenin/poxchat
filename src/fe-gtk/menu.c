@@ -1465,11 +1465,29 @@ static void
 middle_action_redact (GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
 	session *sess = middle_menu_sess;
+	textentry *ent;
 	(void)action; (void)parameter; (void)user_data;
 
 	if (!sess || !sess->server || !sess->server->have_redact ||
 	    !sess->server->connected || !middle_menu_clicked_msgid)
 		return;
+
+	/* Same pending-echo gate as the hover-X path (maingui.c): if the
+	 * entry is still awaiting its real msgid, queue the redact and let
+	 * fe_confirm_entry fire it once the echo lands. */
+	ent = sess->res && sess->res->buffer
+		? gtk_xtext_find_by_msgid (sess->res->buffer, middle_menu_clicked_msgid)
+		: NULL;
+	if (ent && gtk_xtext_entry_get_state (ent) == XTEXT_STATE_PENDING)
+	{
+		gtk_xtext_entry_set_pending_redact (ent, TRUE);
+		fe_toast_show (sess,
+			_("Will delete once the message is confirmed by the server"),
+			3000, TOAST_TYPE_INFO, 0);
+		if (sess->gui && sess->gui->xtext)
+			gtk_widget_queue_draw (sess->gui->xtext);
+		return;
+	}
 
 	{
 		char *cmd = g_strdup_printf ("REDACT %s %s", sess->channel, middle_menu_clicked_msgid);

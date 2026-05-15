@@ -576,6 +576,21 @@ void gtk_xtext_entry_set_redaction_info (xtext_buffer *buf, textentry *ent,
                                          const char *redacted_by, const char *reason,
                                          time_t redact_time);
 
+/* TRUE if ent already carries redaction info that matches the given
+ * (redacted_by, reason, redact_time).  An empty/NULL reason is treated
+ * equivalently.  Used to suppress duplicate REDACT events. */
+gboolean gtk_xtext_entry_redaction_matches (textentry *ent,
+                                            const char *redacted_by,
+                                            const char *reason,
+                                            time_t redact_time);
+
+/* Mark ent as "redact-on-confirm": user clicked the redact button while
+ * the entry was still PENDING.  The flag is read and cleared by
+ * fe_confirm_entry once the echo/labeled-response arrives and a real
+ * msgid is bound to the entry. */
+void gtk_xtext_entry_set_pending_redact (textentry *ent, gboolean pending);
+gboolean gtk_xtext_entry_get_pending_redact (textentry *ent);
+
 /* IRCv3 reactions and reply context */
 struct xtext_reactions_info;
 struct xtext_reply_info;

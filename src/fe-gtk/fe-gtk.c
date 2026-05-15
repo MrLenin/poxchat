@@ -1418,7 +1418,13 @@ fe_redact_message (session *sess, const char *msgid,
 			gtk_xtext_entry_set_reply (buf, notice_ent, msgid, NULL, NULL, 0);
 		return;
 	}
-	if (gtk_xtext_entry_get_state (ent) == XTEXT_STATE_REDACTED)
+
+	/* Duplicate suppression: skip if existing redaction matches the new
+	 * one exactly.  Without this, a server retransmit (chathistory replay,
+	 * rejoin) would kick the user out of REVEALED state back to REDACTED.
+	 * A truly-changed redaction (different reason, different op) falls
+	 * through and refreshes the placeholder + redaction info. */
+	if (gtk_xtext_entry_redaction_matches (ent, redacted_by, reason, redact_time))
 		return;
 
 	/* Preserve original content for accountability */
@@ -1541,9 +1547,24 @@ fe_confirm_entry (session *sess, guint64 entry_id, const char *msgid)
 	textentry *ent = gtk_xtext_find_by_id (sess->res->buffer, entry_id);
 	if (ent && gtk_xtext_entry_get_state (ent) == XTEXT_STATE_PENDING)
 	{
+		gboolean wants_redact = gtk_xtext_entry_get_pending_redact (ent);
+
 		gtk_xtext_entry_set_state (sess->res->buffer, ent, XTEXT_STATE_NORMAL);
 		if (msgid)
 			gtk_xtext_set_msgid (sess->res->buffer, ent, msgid);
+
+		/* User clicked the redact button while the entry was still
+		 * pending; we deferred the REDACT until the real msgid was
+		 * known.  Fire it now. */
+		if (wants_redact && msgid && sess->channel[0] &&
+		    sess->server && sess->server->have_redact &&
+		    sess->server->connected)
+		{
+			char *cmd = g_strdup_printf ("REDACT %s %s", sess->channel, msgid);
+			handle_command (sess, cmd, FALSE);
+			g_free (cmd);
+		}
+		gtk_xtext_entry_set_pending_redact (ent, FALSE);
 	}
 	/* Virtual scrollback: if the entry was evicted (find_by_id returns NULL),
 	 * the DB-side msgid update is already handled by scrollback_confirm_pending
