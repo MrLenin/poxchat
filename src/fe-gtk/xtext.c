@@ -7564,12 +7564,11 @@ gtk_xtext_draw_status_strip (GtkXText *xtext, int width, int height)
 				g_string_append (lstr, sep);
 			g_string_append (lstr, left_items[i]->display_text);
 		}
-		/* Align with the message-text column so left-zone status items
-		 * (reply pill, typing indicator) sit just right of the indent
-		 * separator instead of at the absolute left edge. */
-		left_x = xtext->buffer ? xtext->buffer->indent + 4 : 6;
-		if (left_x < 6)
-			left_x = 6;
+		/* Anchor flush-left under the nick column.  The strip sits below
+		 * where the indent separator bar stops, so left-zone items have
+		 * the full width to themselves — handy when the reply pill and
+		 * typing indicator share the zone. */
+		left_x = 6;
 		pango_layout_set_text (layout, lstr->str, -1);
 		/* Ellipsize if it would overlap the right zone (minus dismiss button space) */
 		pango_layout_set_width (layout, (right_zone_left - left_x - 12 - dismiss_pad) * PANGO_SCALE);
