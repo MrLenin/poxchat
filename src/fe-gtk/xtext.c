@@ -71,6 +71,7 @@
 #include "xtext-emoji.h"
 #include "fkeys.h"
 #include "gtk-helpers.h"
+#include "hex-emoji-chooser.h"	/* hex_emoji_lookup_name for reaction hover tooltip */
 #include "../common/scrollback.h"	/* Virtual scrollback (Phase 3): scrollback_msg, scrollback_load_range */
 
 #define charlen(str) g_utf8_skip[*(guchar *)(str)]
@@ -301,6 +302,9 @@ static void gtk_xtext_scroll_adjustments (GtkXText *xtext, GtkAdjustment *hadj,
 static int gtk_xtext_render_ents (GtkXText * xtext, textentry *, textentry *);
 static textentry *xtext_resolve_marker (xtext_buffer *buf);
 static void gtk_xtext_recalc_widths (xtext_buffer *buf, int);
+static void gtk_xtext_react_popover_hide (GtkXText *xtext);
+static void gtk_xtext_react_hover_update (GtkXText *xtext, textentry *ent,
+                                          int pixel_x, int pixel_y);
 static void gtk_xtext_fix_indent (xtext_buffer *buf);
 static int gtk_xtext_width_indent_cap (xtext_buffer *buf);
 static int gtk_xtext_auto_indent_cap (xtext_buffer *buf);
@@ -1047,6 +1051,10 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 	if (!gtk_widget_get_realized (GTK_WIDGET (xtext)))
 		return;
 
+	/* Scrolling invalidates badge geometry — popover would float over the
+	 * wrong row.  Cheap to dismiss; user can re-hover. */
+	gtk_xtext_react_popover_hide (xtext);
+
 	value = gtk_adjustment_get_value (xtext->adj);
 	upper = gtk_adjustment_get_upper (xtext->adj);
 	page_size = gtk_adjustment_get_page_size (xtext->adj);
@@ -1406,6 +1414,16 @@ gtk_xtext_dispose (GObject * object)
 		backend_font_close (xtext);
 		xtext->font = NULL;
 	}
+
+	if (xtext->hover_react_tag)
+	{
+		g_source_remove (xtext->hover_react_tag);
+		xtext->hover_react_tag = 0;
+	}
+	xtext->hover_react_ent = NULL;
+	xtext->hover_react_target = NULL;
+	xtext->hover_react_label = NULL;
+	g_clear_pointer (&xtext->hover_react_popover, gtk_widget_unparent);
 
 	g_clear_pointer (&xtext->scrollbar, gtk_widget_unparent);
 
@@ -2939,6 +2957,8 @@ xtext_hover_stamp_linger_timeout (gpointer data)
 static void
 gtk_xtext_leave_hover (GtkXText *xtext)
 {
+	gtk_xtext_react_popover_hide (xtext);
+
 	if (xtext->hover_ent || xtext->hover_reply_target)
 	{
 		xtext->hover_ent = NULL;
@@ -3195,6 +3215,19 @@ gtk_xtext_motion_notify (GtkEventControllerMotion *controller, double event_x, d
 				}
 				xtext->hover_stamp_alt = FALSE;
 			}
+		}
+
+		/* Reaction badge hover: arm popover timer when over a badge,
+		 * dismiss it when not.  Re-classify zone by current y so we
+		 * don't flicker when the cursor briefly drifts off the row. */
+		{
+			textentry *zone_ent = NULL;
+			xtext_click_zone zone = gtk_xtext_get_click_zone (xtext, y, &zone_ent);
+
+			if (zone == XTEXT_ZONE_REACT && zone_ent)
+				gtk_xtext_react_hover_update (xtext, zone_ent, x, y);
+			else
+				gtk_xtext_react_popover_hide (xtext);
 		}
 	}
 
@@ -3640,22 +3673,23 @@ gtk_xtext_click_reply_context (GtkXText *xtext, textentry *ent)
 	gtk_widget_queue_draw (GTK_WIDGET (xtext));
 }
 
-/* Handle a click on a reaction badge: determine which badge was hit by x-coord.
- * If self-reaction: send unreact. If not: send react with same text. */
-static void
-gtk_xtext_click_reaction_badge (GtkXText *xtext, textentry *ent, int click_x)
+/* Identify the reaction badge at click_x within ent's badge row.
+ * Optionally returns the badge's x-range in *badge_x_out / *badge_w_out.
+ * Returns NULL when click_x is outside every badge or ent has no badges. */
+static struct xtext_reaction *
+gtk_xtext_reaction_at_x (GtkXText *xtext, textentry *ent, int click_x,
+                         int *badge_x_out, int *badge_w_out)
 {
 	struct xtext_reactions_info *ri;
 	int badge_x, pad_x;
 	guint i;
 
 	if (!ent || !ent->reactions)
-		return;
+		return NULL;
 
 	ri = ent->reactions;
 	pad_x = 6;
 
-	/* Right-align: compute starting x from total badge width */
 	{
 		int win_width = xtext->buffer->window_width - MARGIN;
 		int total_width = gtk_xtext_measure_reaction_badges (xtext, ri, win_width);
@@ -3685,26 +3719,282 @@ gtk_xtext_click_reaction_badge (GtkXText *xtext, textentry *ent, int click_x)
 
 		if (click_x >= badge_x && click_x < badge_x + badge_width)
 		{
-			/* Found the clicked badge — store info and invoke callback */
-			const char *msgid = ent->msgid;
-			if (msgid)
-			{
-				g_free (xtext->reaction_click_msgid);
-				xtext->reaction_click_msgid = g_strdup (msgid);
-				g_free (xtext->reaction_click_text);
-				xtext->reaction_click_text = g_strdup (react->text);
-				xtext->reaction_click_is_self = gtk_xtext_entry_has_self_reaction (ent, react->text);
-
-				if (xtext->reaction_click_cb)
-					xtext->reaction_click_cb (xtext, msgid, react->text,
-					                          xtext->reaction_click_is_self,
-					                          xtext->reaction_click_userdata);
-			}
-			return;
+			if (badge_x_out)
+				*badge_x_out = badge_x;
+			if (badge_w_out)
+				*badge_w_out = badge_width;
+			return react;
 		}
 
 		badge_x += badge_width + 4;
 	}
+
+	return NULL;
+}
+
+/* Handle a click on a reaction badge: determine which badge was hit by x-coord.
+ * If self-reaction: send unreact. If not: send react with same text. */
+static void
+gtk_xtext_click_reaction_badge (GtkXText *xtext, textentry *ent, int click_x)
+{
+	struct xtext_reaction *react;
+	const char *msgid;
+
+	react = gtk_xtext_reaction_at_x (xtext, ent, click_x, NULL, NULL);
+	if (!react)
+		return;
+
+	msgid = ent->msgid;
+	if (!msgid)
+		return;
+
+	g_free (xtext->reaction_click_msgid);
+	xtext->reaction_click_msgid = g_strdup (msgid);
+	g_free (xtext->reaction_click_text);
+	xtext->reaction_click_text = g_strdup (react->text);
+	xtext->reaction_click_is_self = gtk_xtext_entry_has_self_reaction (ent, react->text);
+
+	if (xtext->reaction_click_cb)
+		xtext->reaction_click_cb (xtext, msgid, react->text,
+		                          xtext->reaction_click_is_self,
+		                          xtext->reaction_click_userdata);
+}
+
+/* ---- Reaction hover popover: show "who reacted" on hover ---- */
+
+/* Sort reactor nicks for display: real nicks first (alphabetic, case-insensitive),
+ * self pushed to the end so the "you" label reads naturally last. */
+static gint
+gtk_xtext_react_nick_sort (gconstpointer a, gconstpointer b, gpointer userdata)
+{
+	GHashTable *nicks = userdata;
+	gboolean self_a = GPOINTER_TO_INT (g_hash_table_lookup (nicks, a));
+	gboolean self_b = GPOINTER_TO_INT (g_hash_table_lookup (nicks, b));
+
+	if (self_a != self_b)
+		return self_a ? 1 : -1;
+	return g_ascii_strcasecmp (a, b);
+}
+
+/* Build the "rdrake, rubin, you + 3 more reacted with :heart:" markup string. */
+static char *
+gtk_xtext_build_react_popover_markup (struct xtext_reaction *react)
+{
+	GString *s;
+	GList *keys, *l;
+	int total, shown, idx;
+	const char *name;
+
+	if (!react || react->count <= 0 || !react->nicks)
+		return NULL;
+
+	keys = g_hash_table_get_keys (react->nicks);
+	keys = g_list_sort_with_data (keys, gtk_xtext_react_nick_sort,
+	                              react->nicks);
+
+	total = react->count;
+	shown = MIN (3, total);
+
+	s = g_string_new (NULL);
+	g_string_append (s, "<b>");
+	for (l = keys, idx = 0; idx < shown && l; l = l->next, idx++)
+	{
+		const char *nick = l->data;
+		gboolean is_self = GPOINTER_TO_INT (
+			g_hash_table_lookup (react->nicks, nick));
+		char *esc;
+
+		if (idx > 0)
+			g_string_append (s, ", ");
+
+		if (is_self)
+		{
+			g_string_append (s, "you");
+		}
+		else
+		{
+			esc = g_markup_escape_text (nick, -1);
+			g_string_append (s, esc);
+			g_free (esc);
+		}
+	}
+	g_list_free (keys);
+
+	if (total > shown)
+		g_string_append_printf (s, " + %d more", total - shown);
+	g_string_append (s, "</b>");
+
+	name = hex_emoji_lookup_name (react->text);
+	if (name)
+	{
+		char *esc = g_markup_escape_text (name, -1);
+		g_string_append_printf (s, " reacted with <tt>:%s:</tt>", esc);
+		g_free (esc);
+	}
+	else
+	{
+		char *esc = g_markup_escape_text (react->text, -1);
+		g_string_append_printf (s, " reacted with %s", esc);
+		g_free (esc);
+	}
+
+	return g_string_free (s, FALSE);
+}
+
+/* Lazy-create the popover and its label on first use. */
+static void
+gtk_xtext_ensure_react_popover (GtkXText *xtext)
+{
+	GtkWidget *pop, *label;
+
+	if (xtext->hover_react_popover)
+		return;
+
+	pop = gtk_popover_new ();
+	gtk_popover_set_autohide (GTK_POPOVER (pop), FALSE);
+	gtk_popover_set_has_arrow (GTK_POPOVER (pop), TRUE);
+	gtk_popover_set_position (GTK_POPOVER (pop), GTK_POS_TOP);
+	gtk_widget_set_can_focus (pop, FALSE);
+	gtk_widget_set_focus_on_click (pop, FALSE);
+	/* Tooltip-style: never intercept events — let the mouse fall through to
+	 * the xtext widget so motion-notify keeps tracking which badge is under
+	 * the cursor even when the popover overlaps it. */
+	gtk_widget_set_can_target (pop, FALSE);
+	gtk_widget_set_parent (pop, GTK_WIDGET (xtext));
+
+	label = gtk_label_new (NULL);
+	gtk_label_set_use_markup (GTK_LABEL (label), TRUE);
+	gtk_label_set_wrap (GTK_LABEL (label), FALSE);
+	gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+	gtk_widget_set_margin_start (label, 8);
+	gtk_widget_set_margin_end (label, 8);
+	gtk_widget_set_margin_top (label, 4);
+	gtk_widget_set_margin_bottom (label, 4);
+	gtk_popover_set_child (GTK_POPOVER (pop), label);
+
+	xtext->hover_react_popover = pop;
+	xtext->hover_react_label = label;
+}
+
+static void
+gtk_xtext_react_popover_hide (GtkXText *xtext)
+{
+	if (xtext->hover_react_tag)
+	{
+		g_source_remove (xtext->hover_react_tag);
+		xtext->hover_react_tag = 0;
+	}
+	xtext->hover_react_ent = NULL;
+	xtext->hover_react_target = NULL;
+	if (xtext->hover_react_popover &&
+	    gtk_widget_get_visible (xtext->hover_react_popover))
+		gtk_popover_popdown (GTK_POPOVER (xtext->hover_react_popover));
+}
+
+/* Timer fires: re-verify the badge still exists, then show the popover. */
+static gboolean
+gtk_xtext_react_popover_timeout (gpointer data)
+{
+	GtkXText *xtext = data;
+	textentry *ent = xtext->hover_react_ent;
+	struct xtext_reaction *target = xtext->hover_react_target;
+	struct xtext_reactions_info *ri;
+	gboolean still_present = FALSE;
+	char *markup;
+
+	xtext->hover_react_tag = 0;
+
+	if (!ent || !target)
+		return G_SOURCE_REMOVE;
+
+	/* Confirm the target reaction still lives on this entry (it could have
+	 * been removed by an unreact between arming and firing). */
+	ri = ent->reactions;
+	if (ri && ri->reactions)
+	{
+		guint i;
+		for (i = 0; i < ri->reactions->len; i++)
+		{
+			if (g_ptr_array_index (ri->reactions, i) == target)
+			{
+				still_present = (target->count > 0);
+				break;
+			}
+		}
+	}
+	if (!still_present)
+	{
+		xtext->hover_react_ent = NULL;
+		xtext->hover_react_target = NULL;
+		return G_SOURCE_REMOVE;
+	}
+
+	markup = gtk_xtext_build_react_popover_markup (target);
+	if (!markup)
+		return G_SOURCE_REMOVE;
+
+	gtk_xtext_ensure_react_popover (xtext);
+	gtk_label_set_markup (GTK_LABEL (xtext->hover_react_label), markup);
+	g_free (markup);
+
+	gtk_popover_set_pointing_to (GTK_POPOVER (xtext->hover_react_popover),
+	                             &xtext->hover_react_rect);
+	gtk_popover_popup (GTK_POPOVER (xtext->hover_react_popover));
+	return G_SOURCE_REMOVE;
+}
+
+/* Called from motion_notify when the mouse is in XTEXT_ZONE_REACT.
+ * Decides whether to arm/disarm the show timer based on which badge (if any)
+ * is under the cursor.  pixel_y is the current mouse y in widget coords. */
+static void
+gtk_xtext_react_hover_update (GtkXText *xtext, textentry *ent,
+                              int pixel_x, int pixel_y)
+{
+	struct xtext_reaction *react;
+	int badge_x = 0, badge_w = 0;
+
+	if (!ent || !ent->reactions)
+	{
+		gtk_xtext_react_popover_hide (xtext);
+		return;
+	}
+
+	react = gtk_xtext_reaction_at_x (xtext, ent, pixel_x,
+	                                 &badge_x, &badge_w);
+	if (!react)
+	{
+		gtk_xtext_react_popover_hide (xtext);
+		return;
+	}
+
+	/* Same badge already armed/shown — nothing to do. */
+	if (xtext->hover_react_ent == ent && xtext->hover_react_target == react)
+		return;
+
+	/* Different badge: cancel any prior timer/popover, arm a fresh one. */
+	if (xtext->hover_react_tag)
+	{
+		g_source_remove (xtext->hover_react_tag);
+		xtext->hover_react_tag = 0;
+	}
+	if (xtext->hover_react_popover &&
+	    gtk_widget_get_visible (xtext->hover_react_popover))
+		gtk_popover_popdown (GTK_POPOVER (xtext->hover_react_popover));
+
+	xtext->hover_react_ent = ent;
+	xtext->hover_react_target = react;
+
+	{
+		int row_top = ((pixel_y + xtext->pixel_offset) / xtext->fontsize)
+			* xtext->fontsize - xtext->pixel_offset;
+		xtext->hover_react_rect.x = badge_x;
+		xtext->hover_react_rect.y = row_top;
+		xtext->hover_react_rect.width = badge_w;
+		xtext->hover_react_rect.height = xtext->fontsize;
+	}
+
+	xtext->hover_react_tag = g_timeout_add (500,
+		gtk_xtext_react_popover_timeout, xtext);
 }
 
 /*
@@ -10337,6 +10627,10 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 
 	if (xtext->buffer == buf)
 		return;
+
+	/* Switching channels: any popover floating over the previous buffer
+	 * is pointing at the wrong row.  Dismiss it before the swap. */
+	gtk_xtext_react_popover_hide (xtext);
 
 /*printf("text_buffer_show: xtext=%p buffer=%p\n", xtext, buf);*/
 

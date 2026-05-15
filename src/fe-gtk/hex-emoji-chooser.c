@@ -1104,6 +1104,105 @@ get_emoji_data (void)
 	return bytes;
 }
 
+/* --- Public: emoji literal -> English short-name lookup ---
+ *
+ * Builds a process-wide GHashTable<gchar* utf8, gchar* name> on first call by
+ * walking the "en" emoji GVariant.  Both a FE0F-substituted form and a stripped
+ * form are inserted as separate keys so reactions arriving with or without the
+ * variation selector both hit.  Skin-tone variants are not enumerated — the
+ * base sequence is what users normally react with, and that's what we resolve. */
+
+static GHashTable *emoji_name_cache = NULL;
+
+static void
+emoji_name_cache_init (void)
+{
+	GBytes *bytes;
+	GVariant *data;
+	GVariantIter iter;
+	GVariant *item;
+
+	if (emoji_name_cache)
+		return;
+
+	emoji_name_cache = g_hash_table_new_full (g_str_hash, g_str_equal,
+	                                          g_free, g_free);
+
+	bytes = get_emoji_data_by_language ("en");
+	if (!bytes)
+		return;
+
+	data = g_variant_new_from_bytes (G_VARIANT_TYPE ("a(aussasasu)"),
+	                                 bytes, TRUE);
+	g_variant_ref_sink (data);
+	g_bytes_unref (bytes);
+
+	g_variant_iter_init (&iter, data);
+	while ((item = g_variant_iter_next_value (&iter)))
+	{
+		GVariant *codes;
+		const char *name_en;
+		char with_fe0f[64];
+		char without_fe0f[64];
+		char *p_with = with_fe0f;
+		char *p_without = without_fe0f;
+		guint i, n;
+
+		codes = g_variant_get_child_value (item, 0);
+		n = g_variant_n_children (codes);
+		for (i = 0; i < n; i++)
+		{
+			gunichar code;
+
+			g_variant_get_child (codes, i, "u", &code);
+			if (code == 0)
+				code = 0xfe0f;
+			if (code == 0x1f3fb)
+			{
+				/* skip skin-tone placeholders for the base form */
+				continue;
+			}
+			if ((p_with - with_fe0f) < (gssize)(sizeof (with_fe0f) - 6))
+				p_with += g_unichar_to_utf8 (code, p_with);
+			if (code != 0xfe0f &&
+			    (p_without - without_fe0f) < (gssize)(sizeof (without_fe0f) - 6))
+				p_without += g_unichar_to_utf8 (code, p_without);
+		}
+		*p_with = 0;
+		*p_without = 0;
+		g_variant_unref (codes);
+
+		g_variant_get_child (item, 1, "&s", &name_en);
+		if (name_en && with_fe0f[0] &&
+		    !g_hash_table_contains (emoji_name_cache, with_fe0f))
+			g_hash_table_insert (emoji_name_cache,
+			                     g_strdup (with_fe0f),
+			                     g_strdup (name_en));
+		if (name_en && without_fe0f[0] &&
+		    !g_hash_table_contains (emoji_name_cache, without_fe0f))
+			g_hash_table_insert (emoji_name_cache,
+			                     g_strdup (without_fe0f),
+			                     g_strdup (name_en));
+
+		g_variant_unref (item);
+	}
+
+	g_variant_unref (data);
+}
+
+const char *
+hex_emoji_lookup_name (const char *utf8)
+{
+	if (!utf8 || !utf8[0])
+		return NULL;
+
+	emoji_name_cache_init ();
+	if (!emoji_name_cache)
+		return NULL;
+
+	return g_hash_table_lookup (emoji_name_cache, utf8);
+}
+
 /* --- Idle population of emoji grid --- */
 
 static gboolean

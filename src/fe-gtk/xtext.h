@@ -386,6 +386,14 @@ struct _GtkXText
 	                           gboolean is_self, gpointer userdata);
 	gpointer reaction_click_userdata;
 
+	/* Hover popover for reaction badges: shows who reacted */
+	GtkWidget *hover_react_popover;	/* lazy-created GtkPopover, owned by widget */
+	GtkWidget *hover_react_label;	/* GtkLabel inside the popover */
+	guint hover_react_tag;			/* timer for delayed show */
+	textentry *hover_react_ent;		/* entry whose badge we're currently timing */
+	void *hover_react_target;		/* xtext_reaction* the timer is for (opaque here) */
+	GdkRectangle hover_react_rect;	/* badge rect at the moment the timer was armed */
+
 	/* Hover buttons: reply, react-text, react-emoji, redact */
 	textentry *hover_ent;			/* entry the mouse is currently over (NULL = none) */
 	textentry *hover_reply_target;	/* entry referenced by hovered reply context (NULL = none) */

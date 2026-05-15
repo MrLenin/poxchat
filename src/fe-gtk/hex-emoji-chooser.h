@@ -28,6 +28,10 @@ GtkWidget *hex_emoji_chooser_new            (void);
 void       hex_emoji_chooser_set_emoji_cache (HexEmojiChooser   *chooser,
                                                xtext_emoji_cache *cache);
 
+/* Look up the English short-name for an emoji literal (UTF-8).  Returns a
+ * pointer into a process-wide cache; do not free.  Returns NULL if unknown. */
+const char *hex_emoji_lookup_name           (const char *utf8);
+
 /* Signal: "emoji-picked" (HexEmojiChooser *chooser, const char *text, gpointer user_data) */
 
 G_END_DECLS
