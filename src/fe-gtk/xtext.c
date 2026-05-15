@@ -3690,11 +3690,8 @@ gtk_xtext_reaction_at_x (GtkXText *xtext, textentry *ent, int click_x,
 	ri = ent->reactions;
 	pad_x = 6;
 
-	{
-		int win_width = xtext->buffer->window_width - MARGIN;
-		int total_width = gtk_xtext_measure_reaction_badges (xtext, ri, win_width);
-		badge_x = win_width - total_width;
-	}
+	/* Left-align under the message text — mirror gtk_xtext_render_reaction_badges. */
+	badge_x = xtext->buffer->indent + 4;
 
 	for (i = 0; i < ri->reactions->len; i++)
 	{
@@ -5729,16 +5726,16 @@ gtk_xtext_render_reaction_badges (GtkXText *xtext, textentry *ent, int line, int
 	int y, badge_x;
 	double saved_alpha;
 	guint i;
-	int total_width;
 
 	if (!ri || ri->total_count == 0 || !xtext->cr)
 		return;
 
 	y = (xtext->fontsize * line) + xtext->font->ascent - xtext->pixel_offset;
 
-	/* Right-align: measure total width, then start from right edge */
-	total_width = gtk_xtext_measure_reaction_badges (xtext, ri, win_width);
-	badge_x = win_width - total_width;
+	/* Left-align under the message text.  The per-badge loop below self-clips
+	 * any badge whose right edge would exceed win_width, so we don't need a
+	 * separate measure pass. */
+	badge_x = xtext->buffer->indent + 4;
 
 	/* Clear background for full line */
 	xtext_draw_bg (xtext, 0, y - xtext->font->ascent, win_width + MARGIN, xtext->fontsize);
@@ -7567,7 +7564,12 @@ gtk_xtext_draw_status_strip (GtkXText *xtext, int width, int height)
 				g_string_append (lstr, sep);
 			g_string_append (lstr, left_items[i]->display_text);
 		}
-		left_x = 6;
+		/* Align with the message-text column so left-zone status items
+		 * (reply pill, typing indicator) sit just right of the indent
+		 * separator instead of at the absolute left edge. */
+		left_x = xtext->buffer ? xtext->buffer->indent + 4 : 6;
+		if (left_x < 6)
+			left_x = 6;
 		pango_layout_set_text (layout, lstr->str, -1);
 		/* Ellipsize if it would overlap the right zone (minus dismiss button space) */
 		pango_layout_set_width (layout, (right_zone_left - left_x - 12 - dismiss_pad) * PANGO_SCALE);

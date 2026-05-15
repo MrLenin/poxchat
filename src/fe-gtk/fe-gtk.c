@@ -1712,7 +1712,9 @@ fe_typing_update (session *sess)
 			first = 0;
 		}
 
-		gtk_xtext_status_set (xtext, "typing", str->str, 100, 0);
+		/* Priority 20 keeps typing in the LEFT zone, ordered after the
+		 * reply pill (priority 10) which it joins with " · ". */
+		gtk_xtext_status_set (xtext, "typing", str->str, 20, 0);
 		g_string_free (str, TRUE);
 	}
 }
