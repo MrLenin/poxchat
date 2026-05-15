@@ -53,6 +53,7 @@ struct scrollback_db {
 	sqlite3_stmt *stmt_save_reaction;
 	sqlite3_stmt *stmt_remove_reaction;
 	sqlite3_stmt *stmt_load_reactions;
+	sqlite3_stmt *stmt_load_reactions_by_msgid;
 	sqlite3_stmt *stmt_save_reply;
 	sqlite3_stmt *stmt_load_reply;
 	sqlite3_stmt *stmt_load_reply_by_msgid;
@@ -227,6 +228,14 @@ init_database (scrollback_db *sdb)
 		"ALTER TABLE messages ADD COLUMN channel_id INTEGER REFERENCES channels(id);",
 		NULL, NULL, NULL);
 
+	/* is_user_msg: 1 for PRIVMSG/NOTICE/ACTION, 0 for events (JOIN/QUIT/etc.).
+	 * Drives whether re-materialized chathistory entries get hover reply/react
+	 * buttons.  Legacy rows default to 0 — old user-speech entries won't get
+	 * the buttons until they're re-saved, which is fine. */
+	sqlite3_exec (sdb->db,
+		"ALTER TABLE messages ADD COLUMN is_user_msg INTEGER NOT NULL DEFAULT 0;",
+		NULL, NULL, NULL);
+
 	/* Add channel_id column to reactions */
 	sqlite3_exec (sdb->db,
 		"ALTER TABLE reactions ADD COLUMN channel_id INTEGER REFERENCES channels(id);",
@@ -296,15 +305,15 @@ prepare_statements (scrollback_db *sdb)
 
 	/* Insert statement (channel kept for NOT NULL compat with original schema) */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"INSERT OR IGNORE INTO messages (channel, channel_id, timestamp, msgid, text) "
-		"VALUES (?, ?, ?, ?, ?)",
+		"INSERT OR IGNORE INTO messages (channel, channel_id, timestamp, msgid, text, is_user_msg) "
+		"VALUES (?, ?, ?, ?, ?, ?)",
 		-1, &sdb->stmt_insert, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
 	/* Load statement - get newest N messages in chronological order */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT id, channel_id, timestamp, msgid, text, redacted_by, redact_reason, "
-		"redact_time "
+		"redact_time, is_user_msg "
 		"FROM messages WHERE channel_id = ? ORDER BY timestamp DESC LIMIT ?",
 		-1, &sdb->stmt_load, NULL);
 	if (rc != SQLITE_OK) goto fail;
@@ -361,6 +370,14 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_load_reactions, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
+	/* IRCv3 reactions: load for a single target msgid (used on virt re-materialize
+	 * so re-built historical entries regain their badges) */
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT target_msgid, reaction_text, nick, is_self FROM reactions "
+		"WHERE target_msgid = ? ORDER BY reaction_text",
+		-1, &sdb->stmt_load_reactions_by_msgid, NULL);
+	if (rc != SQLITE_OK) goto fail;
+
 	/* IRCv3 replies: save */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"INSERT OR REPLACE INTO replies (msgid, target_msgid, target_nick, target_preview) "
@@ -405,7 +422,8 @@ prepare_statements (scrollback_db *sdb)
 	/* Virtual scrollback: load a window of entries by position.
 	 * ORDER BY (timestamp, id) for deterministic, chronological ordering. */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"SELECT id, timestamp, msgid, text, redacted_by, redact_reason, redact_time "
+		"SELECT id, timestamp, msgid, text, redacted_by, redact_reason, redact_time, "
+		"is_user_msg "
 		"FROM messages WHERE channel_id = ? ORDER BY timestamp ASC, id ASC LIMIT ? OFFSET ?",
 		-1, &sdb->stmt_load_range, NULL);
 	if (rc != SQLITE_OK) goto fail;
@@ -455,6 +473,7 @@ finalize_statements (scrollback_db *sdb)
 	if (sdb->stmt_save_reaction) sqlite3_finalize (sdb->stmt_save_reaction);
 	if (sdb->stmt_remove_reaction) sqlite3_finalize (sdb->stmt_remove_reaction);
 	if (sdb->stmt_load_reactions) sqlite3_finalize (sdb->stmt_load_reactions);
+	if (sdb->stmt_load_reactions_by_msgid) sqlite3_finalize (sdb->stmt_load_reactions_by_msgid);
 	if (sdb->stmt_save_reply) sqlite3_finalize (sdb->stmt_save_reply);
 	if (sdb->stmt_load_reply) sqlite3_finalize (sdb->stmt_load_reply);
 	if (sdb->stmt_load_reply_by_msgid) sqlite3_finalize (sdb->stmt_load_reply_by_msgid);
@@ -635,7 +654,8 @@ scrollback_db_close (scrollback_db *db)
 
 gint64
 scrollback_db_save (scrollback_db *db, const char *channel,
-                 time_t timestamp, const char *msgid, const char *text)
+                 time_t timestamp, const char *msgid, const char *text,
+                 gboolean is_user_msg)
 {
 	int rc;
 
@@ -657,6 +677,7 @@ scrollback_db_save (scrollback_db *db, const char *channel,
 		sqlite3_bind_null (db->stmt_insert, 4);
 
 	sqlite3_bind_text (db->stmt_insert, 5, text, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int (db->stmt_insert, 6, is_user_msg ? 1 : 0);
 
 	rc = sqlite3_step (db->stmt_insert);
 
@@ -737,6 +758,7 @@ scrollback_db_load (scrollback_db *db, const char *channel, int limit)
 			msg->redact_reason = rreason ? g_strdup (rreason) : NULL;
 			msg->redact_time = (time_t)sqlite3_column_int64 (db->stmt_load, 7);
 		}
+		msg->is_user_msg = sqlite3_column_int (db->stmt_load, 8) ? TRUE : FALSE;
 
 		/* Prepend to get correct order (query returns DESC, we want ASC) */
 		list = g_slist_prepend (list, msg);
@@ -1017,8 +1039,9 @@ scrollback_migrate (scrollback_db *db, const char *network, const char *channel)
 
 		if (timestamp > 0 && text && text[0])
 		{
-			/* Insert without msgid (old format doesn't have them) */
-			if (scrollback_db_save (db, channel, timestamp, NULL, text) >= 0)
+			/* Insert without msgid (old format doesn't have them);
+			 * is_user_msg unknown for legacy imports — default to FALSE. */
+			if (scrollback_db_save (db, channel, timestamp, NULL, text, FALSE) >= 0)
 				count++;
 		}
 
@@ -1192,6 +1215,32 @@ scrollback_load_reactions (scrollback_db *db, const char *channel)
 		r->reaction_text = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reactions, 1));
 		r->nick = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reactions, 2));
 		r->is_self = sqlite3_column_int (db->stmt_load_reactions, 3) != 0;
+		list = g_slist_prepend (list, r);
+	}
+
+	return g_slist_reverse (list);
+}
+
+GSList *
+scrollback_load_reactions_by_msgid (scrollback_db *db, const char *target_msgid)
+{
+	GSList *list = NULL;
+	int rc;
+
+	if (!db || !db->stmt_load_reactions_by_msgid || !target_msgid || !target_msgid[0])
+		return NULL;
+
+	sqlite3_reset (db->stmt_load_reactions_by_msgid);
+	sqlite3_bind_text (db->stmt_load_reactions_by_msgid, 1, target_msgid,
+	                   -1, SQLITE_TRANSIENT);
+
+	while ((rc = sqlite3_step (db->stmt_load_reactions_by_msgid)) == SQLITE_ROW)
+	{
+		scrollback_reaction *r = g_new0 (scrollback_reaction, 1);
+		r->target_msgid = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reactions_by_msgid, 0));
+		r->reaction_text = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reactions_by_msgid, 1));
+		r->nick = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_reactions_by_msgid, 2));
+		r->is_self = sqlite3_column_int (db->stmt_load_reactions_by_msgid, 3) != 0;
 		list = g_slist_prepend (list, r);
 	}
 
@@ -1385,6 +1434,7 @@ scrollback_load_range (scrollback_db *db, const char *channel, int offset, int l
 			msg->redact_reason = rreason ? g_strdup (rreason) : NULL;
 			msg->redact_time = (time_t)sqlite3_column_int64 (db->stmt_load_range, 6);
 		}
+		msg->is_user_msg = sqlite3_column_int (db->stmt_load_range, 7) ? TRUE : FALSE;
 
 		/* ASC order — append to maintain chronological order */
 		list = g_slist_prepend (list, msg);

@@ -96,7 +96,8 @@ get_scrollback_db (session *sess)
 }
 
 static void
-scrollback_save_msg (session *sess, char *text, time_t stamp, const char *msgid)
+scrollback_save_msg (session *sess, char *text, time_t stamp, const char *msgid,
+                      gboolean is_user_msg)
 {
 	scrollback_db *db;
 	gint64 rowid;
@@ -125,7 +126,7 @@ scrollback_save_msg (session *sess, char *text, time_t stamp, const char *msgid)
 	if (!stamp)
 		stamp = time (0);
 
-	rowid = scrollback_db_save (db, sess->channel, stamp, msgid, text);
+	rowid = scrollback_db_save (db, sess->channel, stamp, msgid, text, is_user_msg);
 
 	/* Phase 4: tell xtext to use this DB rowid as the entry_id so that
 	 * eviction + rematerialization preserves the same stable ID */
@@ -190,7 +191,8 @@ scrollback_redact_for_session (session *sess, const char *msgid,
 		else
 			notice = g_strdup_printf ("\017[Message redacted by %s]",
 			                          redacted_by);
-		scrollback_db_save (db, sess->channel, redact_time, NULL, notice);
+		/* Redaction notice is system-generated, not user speech. */
+		scrollback_db_save (db, sess->channel, redact_time, NULL, notice, FALSE);
 		g_free (notice);
 	}
 }
@@ -279,20 +281,15 @@ scrollback_load (session *sess)
 		{
 			/* Set current_msgid so fe_print_text attaches it to the xtext entry.
 			 * Must clear between messages so system messages (Disconnected etc.)
-			 * don't inherit the previous message's msgid.
-			 *
-			 * Loaded scrollback has no stored "kind" column, so we can't tell
-			 * speech apart from events here.  Default to FALSE: replies on
-			 * day-old DB entries are rare and /REPLY <msgid> still works.
-			 * Recent backlog comes in via chathistory replay (the inbound_*
-			 * handlers set is_user_msg correctly there). */
+			 * don't inherit the previous message's msgid. */
 			g_free (sess->current_msgid);
 			if (msg->msgid && msg->msgid[0] &&
 			    strncmp (msg->msgid, "pending:", 8) != 0)
 				sess->current_msgid = g_strdup (msg->msgid);
 			else
 				sess->current_msgid = NULL;
-			sess->current_msgid_is_user_msg = FALSE;
+			/* is_user_msg comes from the DB column, populated at save time. */
+			sess->current_msgid_is_user_msg = msg->is_user_msg;
 
 			/* Multiline messages (from draft/multiline batches) have embedded
 			 * \n in the saved text.  Wrap with multiline group so fe_print_text
@@ -914,7 +911,8 @@ PrintTextTimeStamp (session *sess, char *text, time_t timestamp)
 	else
 	{
 		log_write (sess, text, timestamp);
-		scrollback_save_msg (sess, text, timestamp, sess->current_msgid);
+		scrollback_save_msg (sess, text, timestamp, sess->current_msgid,
+		                     sess->current_msgid_is_user_msg);
 	}
 	fe_print_text (sess, text, timestamp, FALSE);
 	/* Clear current_msgid after fe_print_text so the GUI can attach it to the entry. */

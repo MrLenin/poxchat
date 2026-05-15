@@ -37,6 +37,8 @@ typedef struct {
 	char *redacted_by;   /* Who redacted this message (NULL = not redacted) */
 	char *redact_reason; /* Redaction reason (may be NULL) */
 	time_t redact_time;  /* When redaction occurred */
+	gboolean is_user_msg;/* True for PRIVMSG/NOTICE/ACTION; false for events.
+	                      * Gates hover reply/react buttons on re-materialized entries. */
 } scrollback_msg;
 
 /**
@@ -67,7 +69,8 @@ void scrollback_db_close (scrollback_db *db);
  * @return Inserted rowid on success, -1 on failure
  */
 gint64 scrollback_db_save (scrollback_db *db, const char *channel,
-                          time_t timestamp, const char *msgid, const char *text);
+                          time_t timestamp, const char *msgid, const char *text,
+                          gboolean is_user_msg);
 
 /**
  * Load the most recent messages for a channel.
@@ -206,6 +209,14 @@ gboolean scrollback_remove_reaction (scrollback_db *db, const char *target_msgid
  * @return GSList of scrollback_reaction* (caller frees with scrollback_reaction_list_free)
  */
 GSList *scrollback_load_reactions (scrollback_db *db, const char *channel);
+
+/**
+ * Load reactions for a single target msgid.  Used to re-hydrate badges on
+ * virt-materialized historical entries after eviction + ensure_range.
+ *
+ * @return GSList of scrollback_reaction* (caller frees via scrollback_reaction_list_free)
+ */
+GSList *scrollback_load_reactions_by_msgid (scrollback_db *db, const char *target_msgid);
 void scrollback_reaction_free (scrollback_reaction *r);
 void scrollback_reaction_list_free (GSList *list);
 

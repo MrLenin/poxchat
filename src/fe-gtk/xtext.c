@@ -11002,6 +11002,10 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	if (msg->msgid && msg->msgid[0])
 		gtk_xtext_set_msgid (buf, ent, msg->msgid);
 
+	/* Carry the speech designation from the DB so re-materialized entries
+	 * regain their reply/react hover buttons. */
+	ent->is_user_msg = msg->is_user_msg ? 1 : 0;
+
 	/* Compute sublines */
 	ent->sublines = NULL;
 	if (buf->window_width > 0)
@@ -11037,6 +11041,24 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 			                            target_id);
 			scrollback_reply_free (r);
 		}
+	}
+
+	/* Re-hydrate reactions from the DB so historical entries that get
+	 * evicted-then-rematerialized regain their badges.  Initial scrollback
+	 * load attaches reactions in bulk via text.c, but a subsequent ensure_range
+	 * rebuild loses them on the new entry. */
+	if (msg->msgid && msg->msgid[0] && buf->virt_db)
+	{
+		GSList *reactions = scrollback_load_reactions_by_msgid (
+			(scrollback_db *)buf->virt_db, msg->msgid);
+		GSList *it;
+		for (it = reactions; it; it = it->next)
+		{
+			scrollback_reaction *r = it->data;
+			gtk_xtext_entry_add_reaction (buf, ent, r->reaction_text,
+			                              r->nick, r->is_self);
+		}
+		scrollback_reaction_list_free (reactions);
 	}
 
 	return ent;
