@@ -372,7 +372,7 @@ inbound_action (session *sess, char *chan, char *from, char *ip, char *text,
 	if (prefs.hex_irc_reply_show && tags_data->all_tags &&
 	    g_hash_table_lookup (tags_data->all_tags, "+draft/reply"))
 	{
-		reply_arrow_text = g_strconcat ("\xe2\x86\xa9 ", text, NULL);
+		reply_arrow_text = g_strconcat ("\xe2\xa4\xb7 ", text, NULL);
 		text = reply_arrow_text;
 	}
 
@@ -514,14 +514,14 @@ inbound_chanmsg (server *serv, session *sess, char *chan, char *from,
 			return;
 	}
 
-	/* If this message is a reply, prefix the visible text with "\xe2\x86\xa9 "
+	/* If this message is a reply, prefix the visible text with "\xe2\xa4\xb7 "
 	 * so the arrow shows up immediately after the nick separator.  The reply
 	 * context line itself (rendered above the message) uses "> " for an
 	 * email-style quote.  Caller still owns the original `text`. */
 	if (prefs.hex_irc_reply_show && tags_data->all_tags &&
 	    g_hash_table_lookup (tags_data->all_tags, "+draft/reply"))
 	{
-		reply_arrow_text = g_strconcat ("\xe2\x86\xa9 ", text, NULL);
+		reply_arrow_text = g_strconcat ("\xe2\xa4\xb7 ", text, NULL);
 		text = reply_arrow_text;
 	}
 

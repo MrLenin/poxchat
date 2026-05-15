@@ -2586,7 +2586,7 @@ fe_reply_state_changed (session *sess)
 		}
 		else if (sess->reply_msgid && sess->reply_nick)
 		{
-			char *text = g_strdup_printf (_("\xe2\x86\xa9 Replying to %s"), sess->reply_nick);
+			char *text = g_strdup_printf (_("\xe2\xa4\xb7 Replying to %s"), sess->reply_nick);
 			gtk_xtext_status_set (xtext, "reply", text, 10, 0);
 			gtk_xtext_status_set_dismiss (xtext, "reply", fe_reply_dismiss_cb, NULL);
 			g_free (text);

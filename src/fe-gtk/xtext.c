@@ -5533,7 +5533,7 @@ gtk_xtext_render_stamp (GtkXText * xtext, textentry * ent,
 
 /* Render a reply context line above a message: "> nick: preview text..."
  * Draws at reduced alpha to visually distinguish from message text.
- * The matching "\xe2\x86\xa9" arrow is prepended to the reply's message text
+ * The matching "\xe2\xa4\xb7" arrow is prepended to the reply's message text
  * itself at the inbound boundary (see inbound_chanmsg / inbound_privmsg). */
 static void
 gtk_xtext_render_reply_context (GtkXText *xtext, textentry *ent, int line, int win_width)
@@ -6212,7 +6212,7 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 		GdkRGBA btn_bg, fg;
 		PangoLayoutLine *pango_line;
 		PangoRectangle glyph_rect;
-		static const char *labels[] = { "\xe2\x86\xa9", "Aa", "\xf0\x9f\x98\x80", "\xc3\x97" };
+		static const char *labels[] = { "\xe2\xa4\xb7", "Aa", "\xf0\x9f\x98\x80", "\xc3\x97" };
 		int btn_xs[4];
 		int i;
 
@@ -6279,7 +6279,7 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 				}
 			}
 
-			/* Text label (reply ↩, react-text Aa, or emoji fallback) */
+			/* Text label (reply ⤷, react-text Aa, or emoji fallback) */
 			pango_layout_set_text (xtext->layout, labels[i], -1);
 			pango_layout_set_attributes (xtext->layout, NULL);
 			gdk_cairo_set_source_rgba (xtext->cr, &fg);
