@@ -4831,6 +4831,12 @@ mg_capture_window_state (void)
 	if (wm_hints_supports_sticky (win))
 		prefs.hex_gui_win_sticky = wm_hints_get_sticky (win) ? 1 : 0;
 
+	/* Capture virtual-desktop index only when the window isn't sticky —
+	 * a sticky window's _NET_WM_DESKTOP is the 0xFFFFFFFF "all" sentinel,
+	 * and we already restore that via sticky. */
+	if (!prefs.hex_gui_win_sticky)
+		prefs.hex_gui_win_desktop = wm_hints_get_desktop (win);
+
 	if (!prefs.hex_gui_win_state && !prefs.hex_gui_win_fullscreen
 	    && wm_hints_get_geometry (win, &x, &y, &w, &h))
 	{
@@ -4898,6 +4904,17 @@ mg_create_tabwindow (session *sess)
 		gtk_window_fullscreen (GTK_WINDOW (win));
 	if (prefs.hex_gui_win_sticky)
 		wm_hints_set_sticky (GTK_WINDOW (win), TRUE);
+
+	/* Restore the virtual desktop the window was last closed on (X11).
+	 * Skipped when sticky is desired (it'd just be "all"), and when the
+	 * saved index exceeds the WM's current desktop count (e.g. user
+	 * reduced their workspace count since last close). */
+	if (!prefs.hex_gui_win_sticky && prefs.hex_gui_win_desktop >= 0)
+	{
+		int n_desktops = wm_hints_get_num_desktops (GTK_WINDOW (win));
+		if (n_desktops < 0 || prefs.hex_gui_win_desktop < n_desktops)
+			wm_hints_set_desktop (GTK_WINDOW (win), prefs.hex_gui_win_desktop);
+	}
 
 	/* Restore last-known outer position if it still lands on a connected
 	 * monitor (e.g. don't strand the window off-screen after a second

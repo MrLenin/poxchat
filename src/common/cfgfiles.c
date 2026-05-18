@@ -490,6 +490,7 @@ const struct prefs vars[] =
 	{"gui_ulist_style", P_OFFINT (hex_gui_ulist_style), TYPE_BOOL},
 	{"gui_url_mod", P_OFFINT (hex_gui_url_mod), TYPE_INT},
 	{"gui_usermenu", P_OFFINT (hex_gui_usermenu), TYPE_BOOL},
+	{"gui_win_desktop", P_OFFINT (hex_gui_win_desktop), TYPE_INT},
 	{"gui_win_height", P_OFFINT (hex_gui_win_height), TYPE_INT},
 	{"gui_win_fullscreen", P_OFFINT (hex_gui_win_fullscreen), TYPE_INT},
 	{"gui_win_left", P_OFFINT (hex_gui_win_left), TYPE_INT},
@@ -885,6 +886,7 @@ load_default_config(void)
 	prefs.hex_gui_tab_trunc = 20;
 	prefs.hex_gui_throttlemeter = 1;
 	prefs.hex_gui_ulist_pos = 3;
+	prefs.hex_gui_win_desktop = -1;		/* no saved desktop yet */
 	prefs.hex_gui_win_height = 400;
 	prefs.hex_gui_win_width = 640;
 	prefs.hex_irc_ban_type = 1;

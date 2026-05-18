@@ -283,6 +283,7 @@ struct poxchatprefs
 	int hex_gui_ulist_pos;
 	int hex_gui_ulist_sort;
 	int hex_gui_url_mod;
+	int hex_gui_win_desktop;
 	int hex_gui_win_height;
 	int hex_gui_win_fullscreen;
 	int hex_gui_win_left;
