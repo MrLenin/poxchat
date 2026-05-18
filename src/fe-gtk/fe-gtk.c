@@ -28,6 +28,7 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <glib-unix.h>
 #endif
 
 #include "../common/poxchat.h"
@@ -858,6 +859,20 @@ gtkosx_application_terminate (GtkosxApplication *app, gpointer userdata)
 }
 #endif
 
+#ifndef WIN32
+/* SIGINT/SIGTERM handler — runs in main-loop context (not signal context)
+ * because g_unix_signal_add bridges through the main loop. Safe to call
+ * the full graceful shutdown so window position, config, etc. are saved. */
+static gboolean
+fe_unix_signal_quit (gpointer user_data)
+{
+	(void)user_data;
+	if (!poxchat_is_quitting)
+		poxchat_exit ();
+	return G_SOURCE_REMOVE;
+}
+#endif
+
 void
 fe_main (void)
 {
@@ -865,6 +880,10 @@ fe_main (void)
 	gtkosx_application_ready(osx_app);
 	g_signal_connect (G_OBJECT(osx_app), "NSApplicationWillTerminate",
 					G_CALLBACK(gtkosx_application_terminate), NULL);
+#endif
+#ifndef WIN32
+	g_unix_signal_add (SIGINT, fe_unix_signal_quit, NULL);
+	g_unix_signal_add (SIGTERM, fe_unix_signal_quit, NULL);
 #endif
 	g_application_run (G_APPLICATION (poxchat_app), 0, NULL);
 
