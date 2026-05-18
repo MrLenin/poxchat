@@ -95,6 +95,7 @@ powershell "Get-Content -Encoding UTF8 '$(PoxChatLib)poxchat.rc.utf8' | Out-File
     <ClInclude Include="textgui.h" />
     <ClInclude Include="urlgrab.h" />
     <ClInclude Include="userlistgui.h" />
+    <ClInclude Include="wm-hints.h" />
     <ClInclude Include="xtext.h" />
     <ClInclude Include="xtext-emoji.h" />
     <ClInclude Include="hex-emoji-chooser.h" />
@@ -129,6 +130,7 @@ powershell "Get-Content -Encoding UTF8 '$(PoxChatLib)poxchat.rc.utf8' | Out-File
     <ClCompile Include="textgui.c" />
     <ClCompile Include="urlgrab.c" />
     <ClCompile Include="userlistgui.c" />
+    <ClCompile Include="wm-hints.c" />
     <ClCompile Include="xtext.c" />
     <ClCompile Include="tree234.c" />
     <ClCompile Include="xtext-render.c" />

@@ -205,6 +205,14 @@ fe_args (int argc, char *argv[])
 	GOptionContext *context;
 	char *buffer;
 
+#ifdef WIN32
+	/* Force server-side decorations on Windows.  GTK's CSD title bar
+	 * confuses FancyZones, the built-in Snap tiling, and other window
+	 * managers that key off the real WM_NCHITTEST frame.  Set before
+	 * any gtk_init() call so GTK picks it up during init. */
+	g_setenv ("GTK_CSD", "0", TRUE);
+#endif
+
 #ifdef ENABLE_NLS
 	bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);
 	bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");

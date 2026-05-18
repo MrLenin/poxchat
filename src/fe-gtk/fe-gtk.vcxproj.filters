@@ -78,6 +78,9 @@
     <ClInclude Include="userlistgui.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="wm-hints.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="xtext.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -168,6 +171,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="userlistgui.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="wm-hints.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="xtext.c">
