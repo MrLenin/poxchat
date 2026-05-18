@@ -1,0 +1,49 @@
+name: macOS Build
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  macos_build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: |
+          brew update
+          brew install \
+            meson \
+            ninja \
+            pkg-config \
+            glib \
+            gtk4 \
+            gdk-pixbuf \
+            adwaita-icon-theme \
+            hicolor-icon-theme \
+            openssl@3 \
+            sqlite \
+            libsoup \
+            jansson \
+            libwebsockets \
+            dylibbundler
+
+      - name: Build app bundle and DMG
+        run: ./macos/build-app.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PoxChat-macOS-dmg
+          path: dist/PoxChat-*.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PoxChat-macOS-app
+          path: dist/PoxChat.app
