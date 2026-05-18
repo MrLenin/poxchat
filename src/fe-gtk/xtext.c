@@ -3432,9 +3432,20 @@ gtk_xtext_button_release (GtkGestureClick *gesture, int n_press, double x, doubl
 			 xtext->select_start_y == (int)y &&
 			 xtext->buffer->last_ent_start_id)
 		{
+			/* Probe BEFORE unselect — gtk_xtext_unselect can repaint and
+			 * invalidate word geometry, and we still want word_click to
+			 * fire if this click landed on a link. */
+			unsigned char *click_word = gtk_xtext_get_word (xtext, (int)x, (int)y, 0, 0, 0, 0);
+			int click_word_type = (click_word && xtext->urlcheck_function)
+				? xtext->urlcheck_function (widget, (char *)click_word) : 0;
 			gtk_xtext_unselect (xtext);
 			xtext->mark_stamp = FALSE;
-			return;
+			/* If the click landed on a URL/host, fall through so word_click
+			 * fires and the link opens on this click rather than the next. */
+			if (click_word_type != WORD_URL &&
+				 click_word_type != WORD_HOST &&
+				 click_word_type != WORD_HOST6)
+				return;
 		}
 
 		if (!gtk_xtext_is_selecting (xtext))
