@@ -26,4 +26,14 @@ void     wm_hints_set_position (GtkWindow *win, int x, int y);
  * (e.g. the second monitor was unplugged since last close). */
 gboolean wm_hints_position_on_screen (GtkWindow *win, int x, int y);
 
+/* Virtual-desktop index (_NET_WM_DESKTOP on X11). Returns -1 when no
+ * desktop info is available or the window is sticky (which uses the
+ * 0xFFFFFFFF "all desktops" sentinel and is restored via sticky instead). */
+int  wm_hints_get_desktop (GtkWindow *win);
+void wm_hints_set_desktop (GtkWindow *win, int desktop);
+
+/* Number of virtual desktops the WM is currently advertising
+ * (_NET_NUMBER_OF_DESKTOPS). Used to validate a saved desktop index. */
+int  wm_hints_get_num_desktops (GtkWindow *win);
+
 #endif /* POXCHAT_WM_HINTS_H */

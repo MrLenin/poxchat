@@ -258,6 +258,113 @@ wm_hints_set_position (GtkWindow *win, int x, int y)
 #endif
 }
 
+int
+wm_hints_get_desktop (GtkWindow *win)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *xdisplay;
+	Window xid;
+	Atom net_wm_desktop, type;
+	int format;
+	unsigned long nitems, bytes_after;
+	unsigned char *data = NULL;
+	int result = -1;
+
+	if (!wm_hints_x11_get_handles (win, &xdisplay, &xid))
+		return -1;
+
+	net_wm_desktop = XInternAtom (xdisplay, "_NET_WM_DESKTOP", False);
+	if (XGetWindowProperty (xdisplay, xid, net_wm_desktop, 0, 1, False,
+	                       XA_CARDINAL, &type, &format, &nitems, &bytes_after,
+	                       &data) == Success && data && type == XA_CARDINAL
+	    && format == 32 && nitems >= 1)
+	{
+		unsigned long desktop = *(unsigned long *) data;
+		/* 0xFFFFFFFF = "all desktops" sentinel; sticky covers that case. */
+		if (desktop != 0xFFFFFFFFUL)
+			result = (int) desktop;
+	}
+	if (data)
+		XFree (data);
+	return result;
+#else
+	(void) win;
+	return -1;
+#endif
+}
+
+void
+wm_hints_set_desktop (GtkWindow *win, int desktop)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *xdisplay;
+	Window xid, root;
+	Atom net_wm_desktop;
+	XEvent ev;
+	unsigned long value;
+
+	if (desktop < 0)
+		return;
+	if (!wm_hints_x11_get_handles (win, &xdisplay, &xid))
+		return;
+
+	net_wm_desktop = XInternAtom (xdisplay, "_NET_WM_DESKTOP", False);
+	root = DefaultRootWindow (xdisplay);
+	value = (unsigned long) desktop;
+
+	/* Set property directly so the WM picks it up if the window is still
+	 * unmapped; then send a ClientMessage for the mapped case. */
+	XChangeProperty (xdisplay, xid, net_wm_desktop, XA_CARDINAL, 32,
+	                PropModeReplace, (unsigned char *) &value, 1);
+
+	memset (&ev, 0, sizeof (ev));
+	ev.xclient.type = ClientMessage;
+	ev.xclient.window = xid;
+	ev.xclient.message_type = net_wm_desktop;
+	ev.xclient.format = 32;
+	ev.xclient.data.l[0] = (long) desktop;
+	ev.xclient.data.l[1] = 1; /* source indication: normal app */
+	XSendEvent (xdisplay, root, False,
+	            SubstructureNotifyMask | SubstructureRedirectMask, &ev);
+	XFlush (xdisplay);
+#else
+	(void) win; (void) desktop;
+#endif
+}
+
+int
+wm_hints_get_num_desktops (GtkWindow *win)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *xdisplay;
+	Window xid, root;
+	Atom net_num, type;
+	int format;
+	unsigned long nitems, bytes_after;
+	unsigned char *data = NULL;
+	int n = -1;
+
+	if (!wm_hints_x11_get_handles (win, &xdisplay, &xid))
+		return -1;
+
+	root = DefaultRootWindow (xdisplay);
+	net_num = XInternAtom (xdisplay, "_NET_NUMBER_OF_DESKTOPS", False);
+	if (XGetWindowProperty (xdisplay, root, net_num, 0, 1, False,
+	                       XA_CARDINAL, &type, &format, &nitems, &bytes_after,
+	                       &data) == Success && data && type == XA_CARDINAL
+	    && format == 32 && nitems >= 1)
+	{
+		n = (int) *(unsigned long *) data;
+	}
+	if (data)
+		XFree (data);
+	return n;
+#else
+	(void) win;
+	return -1;
+#endif
+}
+
 gboolean
 wm_hints_position_on_screen (GtkWindow *win, int x, int y)
 {
