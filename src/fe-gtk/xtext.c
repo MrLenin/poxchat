@@ -10670,6 +10670,12 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 	/* Dismiss toasts on buffer switch (widget-scoped) */
 	gtk_xtext_toast_clear (xtext);
 
+	/* Status strip is widget-scoped but its items (typing, reply pill) are
+	 * session-specific.  Drop them on switch so one channel's "+typing:" or
+	 * reply state can't bleed onto the next; mg_populate() re-applies the
+	 * incoming session's state immediately after this returns. */
+	gtk_xtext_status_clear (xtext);
+
 	if (!gtk_widget_get_realized (GTK_WIDGET (xtext)))
 		gtk_widget_realize (GTK_WIDGET (xtext));
 

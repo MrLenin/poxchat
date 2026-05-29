@@ -494,6 +494,14 @@ cv_tree_factory_bind_cb (GtkListItemFactory *factory, GtkListItem *list_item, ch
 	gtk_label_set_text (GTK_LABEL (label), chan_item->name ? chan_item->name : "");
 	gtk_label_set_attributes (GTK_LABEL (label), chan_item->attr);
 
+	/* Track this row's live label so the typing pulse can find it. The chan is
+	 * stashed on the label so unbind can clear the right one (see unbind cb). */
+	if (chan_item->ch)
+	{
+		chan_item->ch->live_label = label;
+		g_object_set_data (G_OBJECT (label), "cv-chan", chan_item->ch);
+	}
+
 	/* Set icon if we have one. While compact-icons is active, the picture's
 	 * paintable must stay NULL and size_request at 0 so the label can occupy
 	 * the slot; stash the real paintable under "cached-paintable" so the
@@ -541,6 +549,7 @@ static void
 cv_tree_factory_unbind_cb (GtkListItemFactory *factory, GtkListItem *list_item, chanview *cv)
 {
 	GtkWidget *expander;
+	GtkWidget *label;
 
 	if (!list_item)
 		return;
@@ -548,6 +557,17 @@ cv_tree_factory_unbind_cb (GtkListItemFactory *factory, GtkListItem *list_item, 
 	expander = g_object_get_data (G_OBJECT (list_item), "expander");
 	if (expander)
 		gtk_tree_expander_set_list_row (GTK_TREE_EXPANDER (expander), NULL);
+
+	/* This label is being recycled to another row — stop the pulse from
+	 * touching it on behalf of the chan it used to show. */
+	label = g_object_get_data (G_OBJECT (list_item), "label");
+	if (label)
+	{
+		chan *ch = g_object_get_data (G_OBJECT (label), "cv-chan");
+		if (ch && ch->live_label == label)
+			ch->live_label = NULL;
+		g_object_set_data (G_OBJECT (label), "cv-chan", NULL);
+	}
 }
 
 /*
@@ -1095,6 +1115,14 @@ cv_tree_set_color (chan *ch, PangoAttrList *list)
 	/* Trigger a rebind to pick up the new color from HcChanItem.
 	 * The rebind helper saves and restores selection to prevent it being cleared. */
 	cv_tree_rebind_chan (ch);
+}
+
+/* Rows are virtualized/recycled, so the live label is tracked via bind/unbind
+ * (see cv_tree_factory_*_cb). Returns NULL when this chan's row isn't realized. */
+static GtkWidget *
+cv_tree_get_label (chan *ch)
+{
+	return (ch->live_label && GTK_IS_LABEL (ch->live_label)) ? ch->live_label : NULL;
 }
 
 static void

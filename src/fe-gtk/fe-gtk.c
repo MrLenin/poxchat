@@ -44,6 +44,7 @@
 #include "../common/url.h"
 #include "gtkutil.h"
 #include "maingui.h"
+#include "chanview.h"
 #include "pixmaps.h"
 #include "chanlist.h"
 #include "joind.h"
@@ -1730,10 +1731,23 @@ fe_typing_update (session *sess)
 
 	if (!sess->gui || !sess->gui->xtext)
 		return;
-	if (sess->gui->is_tab && sess != current_tab)
-		return;
+
+	/* Pulse the tab's leading '#' whenever someone is typing here. Done before
+	 * the buffer guard below: each tab has its own label, so this must run for
+	 * background tabs too — that's the whole point, since the in-window strip
+	 * only ever shows the tab you're looking at. */
+	if (sess->res && sess->res->tab)
+		chan_set_typing (sess->res->tab, sess->typing_nicks != NULL);
 
 	xtext = GTK_XTEXT (sess->gui->xtext);
+
+	/* The status strip lives on the shared widget, so only touch it when
+	 * this session's buffer is the one actually on screen.  Testing the
+	 * shown buffer (rather than current_tab) stays correct mid-switch:
+	 * mg_populate() swaps the buffer before calling us but sets current_tab
+	 * afterwards, so a current_tab check would wrongly skip the new tab. */
+	if (sess->gui->is_tab && xtext->buffer != sess->res->buffer)
+		return;
 
 	if (!sess->typing_nicks)
 	{

@@ -123,6 +123,7 @@ struct _chanview
 	void (*func_move_family) (chan *, int delta);
 	void (*func_focus) (chan *);
 	void (*func_set_color) (chan *, PangoAttrList *);
+	GtkWidget *(*func_get_label) (chan *);	/* current GtkLabel for this chan, or NULL */
 	void (*func_rename) (chan *, char *);
 	gboolean (*func_is_collapsed) (chan *);
 	chan *(*func_get_parent) (chan *);
@@ -133,6 +134,12 @@ struct _chanview
 	unsigned int vertical:1;
 	unsigned int use_icons:1;
 	unsigned int context_menu_active:1; /* suppress focus during right-click selection */
+
+	/* attention pulse: chans currently breathing their leading glyph (typing or
+	 * recent activity), animated on a single frame-tick attached to cv->box
+	 * (which is stable across impl/orientation switches) */
+	GSList *pulse_chans;		/* (chan *) currently pulsing */
+	guint pulse_tick_id;		/* frame-tick callback id on cv->box, 0 = none */
 };
 
 struct _chan
@@ -145,11 +152,15 @@ struct _chan
 	GdkPixbuf *icon;
 	short allow_closure;	/* allow it to be closed when it still has children? */
 	short tag;
+	unsigned int typing:1;	/* someone is typing here — pulse the leading glyph */
+	gint64 pulse_until;	/* monotonic deadline for activity-driven pulse, 0 = none */
+	GtkWidget *live_label;	/* realized GtkLabel in tree mode (recycled), or NULL */
 };
 
 static chan *cv_find_chan_by_number (chanview *cv, int num);
 static int cv_find_number_of_chan (chanview *cv, chan *find_ch);
 static HcChanItem *chanview_find_parent_item (chanview *cv, void *family, chan *avoid);
+static void chanview_pulse_invalidate_labels (chanview *cv);
 
 
 /* ======= TABS ======= */
@@ -242,6 +253,11 @@ chanview_set_impl (chanview *cv, int type)
 	if (cv->func_cleanup)
 		cv->func_cleanup (cv);
 
+	/* the old impl's label widgets are about to be destroyed; drop any cached
+	 * pointers so the (cv->box-anchored) pulse tick doesn't touch freed labels
+	 * during the rebuild. The pulse re-attaches to the new widgets as they bind. */
+	chanview_pulse_invalidate_labels (cv);
+
 	switch (type)
 	{
 	case 0:
@@ -255,6 +271,7 @@ chanview_set_impl (chanview *cv, int type)
 		cv->func_move_family = cv_tabs_move_family;
 		cv->func_focus = cv_tabs_focus;
 		cv->func_set_color = cv_tabs_set_color;
+		cv->func_get_label = cv_tabs_get_label;
 		cv->func_rename = cv_tabs_rename;
 		cv->func_is_collapsed = cv_tabs_is_collapsed;
 		cv->func_get_parent = cv_tabs_get_parent;
@@ -273,6 +290,7 @@ chanview_set_impl (chanview *cv, int type)
 		cv->func_move_family = cv_tree_move_family;
 		cv->func_focus = cv_tree_focus;
 		cv->func_set_color = cv_tree_set_color;
+		cv->func_get_label = cv_tree_get_label;
 		cv->func_rename = cv_tree_rename;
 		cv->func_is_collapsed = cv_tree_is_collapsed;
 		cv->func_get_parent = cv_tree_get_parent;
@@ -316,6 +334,11 @@ chanview_destroy (chanview *cv)
 
 	if (cv->box)
 		hc_widget_destroy_impl (GTK_WIDGET (cv->box));
+
+	/* box is gone (its tick callback with it); just drop the bookkeeping */
+	g_slist_free (cv->pulse_chans);
+	cv->pulse_chans = NULL;
+	cv->pulse_tick_id = 0;
 
 	chanview_destroy_store (cv);
 	g_free (cv);
@@ -589,6 +612,166 @@ chan_set_color (chan *ch, PangoAttrList *list)
 	ch->cv->func_set_color (ch, list);
 }
 
+/* ---- attention pulse ----
+ * A single frame-tick on cv->box softly breathes the alpha of a tab's leading
+ * glyph ('#' for channels, '@' for queries) on top of whatever activity colour
+ * the tab already shows. Two things arm it: someone typing here (pulses while
+ * active), and fresh message activity (pulses for a few seconds after the last
+ * line, then settles). The pulse rides a separate visual axis from the tab
+ * colour, so it never clobbers the unread / highlight state. */
+
+#define CV_PULSE_PERIOD_US	1300000		/* one full breath, microseconds */
+#define CV_PULSE_MIN_ALPHA	0.30		/* dimmest the glyph fades to */
+#define CV_PULSE_ACTIVITY_US	4000000		/* keep breathing this long after a line */
+
+static gboolean
+chan_wants_pulse (chan *ch, gint64 now)
+{
+	return ch->typing || (ch->pulse_until != 0 && now < ch->pulse_until);
+}
+
+/* drop the pulsing alpha, leaving just the tab's base colour */
+static void
+chan_pulse_restore (chan *ch)
+{
+	GtkWidget *lbl = ch->cv->func_get_label ? ch->cv->func_get_label (ch) : NULL;
+	if (lbl && GTK_IS_LABEL (lbl))
+		gtk_label_set_attributes (GTK_LABEL (lbl), ch->item ? ch->item->attr : NULL);
+}
+
+static gboolean
+chanview_pulse_tick_cb (GtkWidget *widget, GdkFrameClock *clock, gpointer data)
+{
+	chanview *cv = data;
+	GSList *l;
+	gint64 now;
+	double phase, s;
+	guint16 alpha;
+	(void)widget;
+
+	now = gdk_frame_clock_get_frame_time (clock);
+	phase = (double)(now % CV_PULSE_PERIOD_US) / (double)CV_PULSE_PERIOD_US;	/* 0..1 */
+	/* smooth triangle breathe (no libm): fold 0..1 to a 0->1->0 ramp, then
+	 * smoothstep it so the brightness eases in and out at the extremes */
+	s = 2.0 * phase;
+	if (s > 1.0)
+		s = 2.0 - s;
+	s = s * s * (3.0 - 2.0 * s);
+	alpha = (guint16)((CV_PULSE_MIN_ALPHA + (1.0 - CV_PULSE_MIN_ALPHA) * s) * 65535.0);
+
+	l = cv->pulse_chans;
+	while (l)
+	{
+		GSList *next = l->next;
+		chan *ch = l->data;
+
+		if (!chan_wants_pulse (ch, now))
+		{
+			/* typing stopped and activity lapsed — settle to the base colour */
+			chan_pulse_restore (ch);
+			ch->pulse_until = 0;
+			cv->pulse_chans = g_slist_remove (cv->pulse_chans, ch);
+		}
+		else
+		{
+			GtkWidget *lbl = cv->func_get_label ? cv->func_get_label (ch) : NULL;
+			const char *txt;
+
+			if (lbl && GTK_IS_LABEL (lbl)
+				&& (txt = gtk_label_get_text (GTK_LABEL (lbl))) != NULL && *txt)
+			{
+				/* base colour + a fading alpha on just the first UTF-8 glyph */
+				PangoAttrList *comp = (ch->item && ch->item->attr)
+					? pango_attr_list_copy (ch->item->attr)
+					: pango_attr_list_new ();
+				PangoAttribute *a = pango_attr_foreground_alpha_new (alpha);
+				a->start_index = 0;
+				a->end_index = (guint)(g_utf8_next_char (txt) - txt);
+				pango_attr_list_insert (comp, a);
+				gtk_label_set_attributes (GTK_LABEL (lbl), comp);
+				pango_attr_list_unref (comp);
+			}
+		}
+		l = next;
+	}
+
+	if (!cv->pulse_chans)
+	{
+		cv->pulse_tick_id = 0;
+		return G_SOURCE_REMOVE;		/* nothing left to animate */
+	}
+	return G_SOURCE_CONTINUE;
+}
+
+/* arm the pulse for this chan and make sure the frame-tick is running */
+static void
+chanview_pulse_ensure (chan *ch)
+{
+	chanview *cv = ch->cv;
+	if (!g_slist_find (cv->pulse_chans, ch))
+		cv->pulse_chans = g_slist_prepend (cv->pulse_chans, ch);
+	if (cv->pulse_tick_id == 0 && cv->box)
+		cv->pulse_tick_id = gtk_widget_add_tick_callback (cv->box,
+							chanview_pulse_tick_cb, cv, NULL);
+}
+
+/* remove a chan from the pulse entirely (e.g. its tab is being destroyed) */
+static void
+chanview_pulse_forget (chan *ch)
+{
+	chanview *cv = ch->cv;
+	ch->typing = 0;
+	ch->pulse_until = 0;
+	cv->pulse_chans = g_slist_remove (cv->pulse_chans, ch);
+	if (!cv->pulse_chans && cv->pulse_tick_id != 0 && cv->box)
+	{
+		gtk_widget_remove_tick_callback (cv->box, cv->pulse_tick_id);
+		cv->pulse_tick_id = 0;
+	}
+}
+
+/* impl/orientation switch is about to destroy the label widgets — forget the
+ * cached pointers (tree mode); the pulse re-attaches as new rows bind */
+static void
+chanview_pulse_invalidate_labels (chanview *cv)
+{
+	GSList *l;
+	for (l = cv->pulse_chans; l; l = l->next)
+		((chan *)l->data)->live_label = NULL;
+}
+
+void
+chan_set_typing (chan *ch, gboolean typing)
+{
+	if (!ch)
+		return;
+	typing = !!typing;
+	if (ch->typing == (unsigned int)typing)
+		return;
+	ch->typing = typing;
+	if (typing)
+		chanview_pulse_ensure (ch);
+	/* when typing stops, the tick prunes it next frame and restores the base
+	 * colour — unless message activity is still keeping it alive */
+}
+
+void
+chan_pulse_activity (chan *ch, gboolean on)
+{
+	if (!ch)
+		return;
+	if (on)
+	{
+		ch->pulse_until = g_get_monotonic_time () + CV_PULSE_ACTIVITY_US;
+		chanview_pulse_ensure (ch);
+	}
+	else
+	{
+		/* tab was read — let the activity pulse lapse (tick prunes it) */
+		ch->pulse_until = 0;
+	}
+}
+
 void
 chan_rename (chan *ch, char *name, int trunc_len)
 {
@@ -787,6 +970,10 @@ chan_remove (chan *ch, gboolean force)
 		 g_list_model_get_n_items (G_LIST_MODEL (ch->item->children)) > 0 &&
 		 !ch->allow_closure)
 		return FALSE;
+
+	/* drop it from the pulse list before the chan is freed */
+	if (ch->typing || ch->pulse_until)
+		chanview_pulse_forget (ch);
 
 	chan_emancipate_children (ch);
 	ch->cv->func_remove (ch);

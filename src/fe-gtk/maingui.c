@@ -254,6 +254,14 @@ fe_set_tab_color (struct session *sess, tabcolor col)
 		}
 		lastact_update (sess);
 		sess->last_tab_state = sess->tab_state; /* For plugins handling future prints */
+
+		/* Breathe the tab's leading glyph on real activity: messages (case 2)
+		 * and your-nick highlights (case 3), but not join/part/mode noise
+		 * (case 1). Reading the tab (case 0) lets the pulse lapse. */
+		if (col_noflags == 0)
+			chan_pulse_activity (sess->res->tab, FALSE);
+		else if (col_noflags == 2 || col_noflags == 3)
+			chan_pulse_activity (sess->res->tab, TRUE);
 	}
 }
 
@@ -2088,14 +2096,24 @@ mg_dnd_drop_file (session *sess, char *target, char *uri)
 
 /* add a tabbed channel */
 
+/* Display label for a session's tab: queries (PMs) get an '@' prefix so user
+ * tabs read like "@bob" next to channel tabs like "#linux". The underlying
+ * sess->channel (the bare nick) is left untouched. Caller must g_free(). */
+static char *
+mg_tab_label (session *sess)
+{
+	if (!sess->channel[0])
+		return g_strdup (_("<none>"));
+	if (sess->type == SESS_DIALOG)
+		return g_strconcat ("@", sess->channel, NULL);
+	return g_strdup (sess->channel);
+}
+
 static void
 mg_add_chan (session *sess)
 {
 	GdkPixbuf *icon;
-	char *name = _("<none>");
-
-	if (sess->channel[0])
-		name = sess->channel;
+	char *name = mg_tab_label (sess);
 
 	switch (sess->type)
 	{
@@ -2113,6 +2131,7 @@ mg_add_chan (session *sess)
 	sess->res->tab = chanview_add (sess->gui->chanview, name, sess->server, sess,
 											 sess->type == SESS_SERVER ? FALSE : TRUE,
 											 TAG_IRC, icon);
+	g_free (name);
 	if (plain_list == NULL)
 		mg_create_tab_colors ();
 
@@ -5232,7 +5251,11 @@ void
 fe_set_channel (session *sess)
 {
 	if (sess->res->tab != NULL)
-		chan_rename (sess->res->tab, sess->channel, prefs.hex_gui_tab_trunc);
+	{
+		char *label = mg_tab_label (sess);
+		chan_rename (sess->res->tab, label, prefs.hex_gui_tab_trunc);
+		g_free (label);
+	}
 }
 
 void

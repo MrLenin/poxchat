@@ -158,18 +158,6 @@ cv_tabs_adj_changed (GtkAdjustment *adj, chanview *cv)
 }
 
 /*
- * size-allocate callback to show/hide scroll buttons based on overflow.
- * GTK4: void callback(GtkWidget*, int width, int height, int baseline, gpointer)
- */
-static void
-cv_tabs_sizealloc (GtkWidget *widget, int width, int height, int baseline, chanview *cv)
-{
-	(void)widget; (void)width; (void)height; (void)baseline;
-	cv_tabs_schedule_overflow_check (cv);
-	cv_tabs_schedule_reorient (cv);
-}
-
-/*
  * Re-orient the scroll-button box (vertical-tabs mode) based on available
  * horizontal space. When the pane is too narrow to fit both scroll arrows
  * side-by-side, stack them vertically so the scroll box's minimum width
@@ -507,10 +495,11 @@ cv_tabs_init (chanview *cv)
 		box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
 	((tabview *)cv)->inner = box;
 	gtk_viewport_set_child (GTK_VIEWPORT (viewport), box);
-	/* Connect to inner box size_allocate to detect when tabs are added/removed.
-	 * The adjustment "changed" signal may not fire immediately when content changes. */
-	g_signal_connect (G_OBJECT (box), "size_allocate",
-							G_CALLBACK (cv_tabs_sizealloc), cv);
+	/* GTK4 removed the "size-allocate" signal (it is now only a vfunc), so we
+	 * can't watch the inner box for tab add/remove that way. Instead the
+	 * viewport adjustment's "changed" signal (connected above) covers it:
+	 * tab_add_real() queues a resize on the viewport after every add/remove,
+	 * which updates the adjustment bounds and triggers the overflow check. */
 
 	/* if vertical, the buttons can be side by side; may re-orient
 	 * to vertical stacking when the pane is too narrow to fit both
@@ -546,8 +535,9 @@ cv_tabs_init (chanview *cv)
 		gtk_box_append (GTK_BOX (outer), ((tabview *)cv)->b1);
 	}
 
-	/* Start with scroll buttons hidden - cv_tabs_sizealloc will show them if needed.
-	 * In GTK4 widgets are visible by default, so we must explicitly hide them. */
+	/* Start with scroll buttons hidden - the overflow check will show them if
+	 * needed. In GTK4 widgets are visible by default, so we must explicitly
+	 * hide them. */
 	gtk_widget_set_visible (((tabview *)cv)->b1, FALSE);
 	gtk_widget_set_visible (((tabview *)cv)->b2, FALSE);
 
@@ -1425,6 +1415,19 @@ cv_tabs_set_color (chan *ch, PangoAttrList *list)
 	GtkWidget *child = gtk_button_get_child (GTK_BUTTON (ch->impl));
 	if (child && GTK_IS_LABEL (child))
 		gtk_label_set_attributes (GTK_LABEL (child), list);
+}
+
+/* The label is the togglebutton's child; fetched fresh each frame so a rename
+ * (which replaces the child) can't leave the pulse holding a dead pointer. */
+static GtkWidget *
+cv_tabs_get_label (chan *ch)
+{
+	GtkWidget *child;
+
+	if (!ch->impl)
+		return NULL;
+	child = gtk_button_get_child (GTK_BUTTON (ch->impl));
+	return (child && GTK_IS_LABEL (child)) ? child : NULL;
 }
 
 static void

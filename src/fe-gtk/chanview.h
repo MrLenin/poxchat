@@ -46,6 +46,8 @@ void chan_focus (chan *ch);
 void chan_move (chan *ch, int delta);
 void chan_move_family (chan *ch, int delta);
 void chan_set_color (chan *ch, PangoAttrList *list);
+void chan_set_typing (chan *ch, gboolean typing);
+void chan_pulse_activity (chan *ch, gboolean on);
 void chan_rename (chan *ch, char *new_name, int trunc_len);
 void chan_set_icon (chan *ch, GdkPixbuf *icon);
 gboolean chan_remove (chan *ch, gboolean force);
