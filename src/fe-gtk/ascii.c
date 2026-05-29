@@ -152,8 +152,14 @@ ascii_open (void)
 		gtk_widget_set_size_request (but, 28, -1);
 		g_signal_connect (G_OBJECT (but), "clicked",
 								G_CALLBACK (ascii_click), NULL);
-		g_signal_connect (G_OBJECT (but), "enter_notify_event",
-								G_CALLBACK (ascii_enter), label);
+		/* GTK4: the "enter-notify-event" signal was removed; pointer-enter is
+		 * delivered through a GtkEventControllerMotion's "enter" signal. */
+		{
+			GtkEventController *motion = gtk_event_controller_motion_new ();
+			g_signal_connect (motion, "enter",
+									G_CALLBACK (ascii_enter), label);
+			gtk_widget_add_controller (but, motion);
+		}
 		gtk_box_append (GTK_BOX (hbox), but);
 
 		table_pos += len;
