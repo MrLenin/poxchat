@@ -74,7 +74,10 @@ def read_outer(path, readonly=False):
         db.close()
     if not rows or rows[0][0] != 1 or rows[0][2] != RAW:
         raise ValueError("page 1 missing or not stored raw")
-    hdr = rows[0][1]
+    # A corrupted backup can store page 1 as a raw blob shorter than the
+    # 100-byte SQLite header (we read fields out to offset 96 below); pad
+    # so the unpacks below can't raise struct.error on a truncated blob.
+    hdr = bytes(rows[0][1]).ljust(100, b"\0")
     ps = (hdr[16] << 8) | hdr[17]
     page_size = 65536 if ps == 1 else ps
     header_count = struct.unpack(">I", hdr[28:32])[0]
@@ -402,7 +405,7 @@ def salvage_network(live_path, backups, apply_changes, workdir):
         for bk in sorted(backups, reverse=True):
             try:
                 count, verdict, dict_bytes, note = reconstruct(bk, live_img, readonly=True)
-            except (ValueError, sqlite3.Error) as e:
+            except (ValueError, sqlite3.Error, zstandard.ZstdError, struct.error) as e:
                 print(f"  !! seed {os.path.basename(bk)}: {e}")
                 continue
             if verdict == "ok":
@@ -420,7 +423,7 @@ def salvage_network(live_path, backups, apply_changes, workdir):
         bk_img = os.path.join(workdir, os.path.basename(bk) + ".img")
         try:
             count, verdict, _, note = reconstruct(bk, bk_img, readonly=True)
-        except (ValueError, sqlite3.Error) as e:
+        except (ValueError, sqlite3.Error, zstandard.ZstdError, struct.error) as e:
             print(f"  !! {os.path.basename(bk)}: reconstruction failed: {e}")
             continue
         if note:
