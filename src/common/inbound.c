@@ -736,6 +736,12 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 	if (found_unused)
 	{
 		chanopt_load (sess);
+		/* The reused "<none>" tab may already hold text (anything printed
+		 * to it before this join).  Clear it before replaying history:
+		 * virtual scrollback derives its window index from the buffer
+		 * contents, and foreign pre-join entries would misalign it (and
+		 * linger in the entry hashes). */
+		fe_text_clear (sess, 0);
 		scrollback_load (sess);
 		if (sess->scrollwritten && sess->scrollback_replay_marklast)
 			sess->scrollback_replay_marklast (sess);
