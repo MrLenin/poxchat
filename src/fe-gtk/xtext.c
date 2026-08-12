@@ -8460,12 +8460,45 @@ gtk_xtext_remove_top (xtext_buffer *buffer)
 	if (ent->flags & TEXTENTRY_FLAG_EPHEMERAL)
 		return;
 
-	/* DB-backed: advance mat_first_index (entry survives in DB) */
 	if (HAS_VIRT_DB (buffer))
 	{
-		buffer->mat_first_index++;
-	}
+		/* DB-backed eviction: the entry survives in the DB, so use the
+		 * absorptive accounting (same as ensure_range head eviction) —
+		 * its actual lines move into the lines_before_mat estimate.
+		 * num_lines composition (LINES_BEFORE_MAT + mat + after) and the
+		 * adjustment coordinate space are unchanged, so unlike the
+		 * non-virtual path there is no num_lines/value shift.  Without
+		 * this credit, every live-append prune made the lines above the
+		 * window vanish from the scrollbar: upper stagnated for the whole
+		 * session and later scroll-up hit the lines_before_mat=0 clamp
+		 * while mat_first_index was still huge (thumb pegged to top,
+		 * spurious chathistory fetches). */
+		int ent_lines = ENT_DISPLAY_LINES (ent);
 
+		buffer->mat_first_index++;
+		buffer->lines_before_mat += ent_lines;
+
+		buffer->text_first = ent->next;
+		if (buffer->text_first)
+		{
+			buffer->text_first->prev = NULL;
+			/* Remove stale day boundary - first entry has no predecessor.
+			 * Credit the lost boundary line to lines_before_mat too, so
+			 * the composition stays balanced (mirrors ensure_range). */
+			if (buffer->text_first->flags & TEXTENTRY_FLAG_DAY_BOUNDARY)
+			{
+				buffer->text_first->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
+				buffer->text_first->extra_lines_above--;
+				buffer->text_first->display_lines--;
+				if (buffer->entry_tree)
+					update_weight234 (buffer->entry_tree, buffer->text_first, -1);
+				buffer->lines_before_mat++;
+			}
+		}
+		else
+			buffer->text_last = NULL;
+	}
+	else
 	{
 		int ent_lines = ENT_DISPLAY_LINES (ent);
 		buffer->num_lines -= ent_lines;
@@ -9681,11 +9714,13 @@ gtk_xtext_prepend_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 	gtk_xtext_init_entry (buf, ent, stamp);
 	new_lines = gtk_xtext_link_entry (buf, ent, LINK_HEAD);
 
-	/* DB-backed bookkeeping — only entries with a real DB row count */
-	if (HAS_VIRT_DB (buf))
+	/* DB-backed bookkeeping — only entries with a real DB row count.
+	 * mat_first_index is the DB ordinal of the window head: an entry
+	 * without a DB row occupies no DB index, so shifting the window for
+	 * it would permanently misalign every later range load. */
+	if (HAS_VIRT_DB (buf) && ent->has_db_row)
 	{
-		if (ent->has_db_row)
-			buf->total_entries++;
+		buf->total_entries++;
 		if (buf->mat_first_index > 0)
 			buf->mat_first_index--;
 	}
@@ -9822,11 +9857,16 @@ gtk_xtext_insert_sorted_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 	if (HAS_VIRT_DB (buf))
 	{
 		if (ent->has_db_row)
+		{
 			buf->total_entries++;
 
-		/* If inserted at head, the materialized window shifted down */
-		if (ent == buf->text_first)
-			buf->mat_first_index = (buf->mat_first_index > 0) ? buf->mat_first_index - 1 : 0;
+			/* If inserted at head, the materialized window shifted down.
+			 * Gated on has_db_row: an entry with no DB row (ephemeral
+			 * notice, dup-rejected save) occupies no DB index, so
+			 * shifting the window for it misaligns later range loads. */
+			if (ent == buf->text_first)
+				buf->mat_first_index = (buf->mat_first_index > 0) ? buf->mat_first_index - 1 : 0;
+		}
 
 		/* Enforce materialization window for non-batch inserts.
 		 * During batch_mode, pruning is deferred to fe_set_batch_mode. */
@@ -11636,6 +11676,14 @@ gtk_xtext_virt_should_materialize (xtext_buffer *buf, time_t stamp,
 	}
 
 	/* --- Skip materialization — update bookkeeping --- */
+
+	/* Only messages that actually landed in the DB shift the index space.
+	 * pending_db_rowid == 0 means the save was rejected (duplicate msgid)
+	 * or never attempted — no DB ordinal exists for this message, so
+	 * counting it would permanently misalign mat_first_index and
+	 * total_entries (they have no re-derivation path). */
+	if (buf->pending_db_rowid <= 0)
+		return FALSE;
 
 	est = (int)(buf->avg_lines_per_entry + 0.5);
 	if (est < 1) est = 1;
