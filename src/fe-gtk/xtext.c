@@ -3641,51 +3641,90 @@ gtk_xtext_redaction_click (GtkXText *xtext, textentry *ent)
 	}
 }
 
+/* Scroll to a known entry and flash-highlight it briefly. */
 static void
-gtk_xtext_click_reply_context (GtkXText *xtext, textentry *ent)
+gtk_xtext_jump_to_entry (xtext_buffer *buf, textentry *target)
 {
-	textentry *target;
+	GtkXText *xtext = buf->xtext;
 
-	if (!ent || !ent->reply)
-		return;
-
-	/* Try to find the target by entry_id first, then by msgid */
-	if (ent->reply->target_entry_id)
-		target = gtk_xtext_find_by_id (xtext->buffer, ent->reply->target_entry_id);
-	else if (ent->reply->target_msgid)
-		target = gtk_xtext_find_by_msgid (xtext->buffer, ent->reply->target_msgid);
-	else
-		return;
-
-	/* Virtual scrollback: if target is evicted, try to materialize it from DB */
-	if (!target && HAS_VIRT_DB (xtext->buffer) &&
-	    ent->reply->target_msgid && xtext->buffer->virt_db)
-	{
-		scrollback_db *db = (scrollback_db *) xtext->buffer->virt_db;
-		gint64 rowid = scrollback_get_rowid_by_msgid (db,
-			xtext->buffer->virt_channel, ent->reply->target_msgid);
-		if (rowid > 0)
-		{
-			int idx = scrollback_get_index_of_rowid (db,
-				xtext->buffer->virt_channel, rowid);
-			gtk_xtext_virt_ensure_range (xtext->buffer, idx, VIRT_PAGE_SIZE);
-			/* Retry lookup after materialization */
-			target = gtk_xtext_find_by_msgid (xtext->buffer,
-				ent->reply->target_msgid);
-		}
-	}
-
-	if (!target)
-		return;
-
-	/* Scroll to target entry and flash-highlight it */
-	gtk_xtext_scroll_to_entry (xtext->buffer, target);
+	gtk_xtext_scroll_to_entry (buf, target);
 
 	if (xtext->flash_tag)
 		g_source_remove (xtext->flash_tag);
 	xtext->flash_ent = target;
 	xtext->flash_tag = g_timeout_add (1500, gtk_xtext_flash_timeout, xtext);
 	gtk_widget_queue_draw (GTK_WIDGET (xtext));
+}
+
+gboolean
+gtk_xtext_jump_to_msgid (xtext_buffer *buf, const char *msgid)
+{
+	textentry *target;
+
+	if (!buf || !msgid || !msgid[0])
+		return FALSE;
+
+	target = gtk_xtext_find_by_msgid (buf, msgid);
+
+	/* Virtual scrollback: if target is evicted, try to materialize it from DB */
+	if (!target && HAS_VIRT_DB (buf) && buf->virt_db)
+	{
+		scrollback_db *db = (scrollback_db *) buf->virt_db;
+		gint64 rowid = scrollback_get_rowid_by_msgid (db, buf->virt_channel, msgid);
+		if (rowid > 0)
+		{
+			int idx = scrollback_get_index_of_rowid (db, buf->virt_channel, rowid);
+			gtk_xtext_virt_ensure_range (buf, idx, VIRT_PAGE_SIZE);
+			target = gtk_xtext_find_by_msgid (buf, msgid);
+		}
+	}
+
+	if (!target)
+		return FALSE;
+
+	gtk_xtext_jump_to_entry (buf, target);
+	return TRUE;
+}
+
+static void
+gtk_xtext_click_reply_context (GtkXText *xtext, textentry *ent)
+{
+	xtext_buffer *buf = xtext->buffer;
+	textentry *target = NULL;
+
+	if (!ent || !ent->reply)
+		return;
+
+	if (ent->reply->target_entry_id)
+		target = gtk_xtext_find_by_id (buf, ent->reply->target_entry_id);
+
+	if (target)
+	{
+		gtk_xtext_jump_to_entry (buf, target);
+		return;
+	}
+
+	/* Target not materialized (evicted, or never had an entry_id).  Prefer
+	 * the msgid path — it validates against the DB before loading anything.
+	 * Fall back to the entry_id-as-rowid only when there is no msgid
+	 * (DB rowids live below LOCAL_ENTRY_ID_BASE; local-only IDs above it
+	 * can never be re-resolved once the entry is gone). */
+	if (ent->reply->target_msgid)
+	{
+		gtk_xtext_jump_to_msgid (buf, ent->reply->target_msgid);
+	}
+	else if (ent->reply->target_entry_id &&
+	         ent->reply->target_entry_id < LOCAL_ENTRY_ID_BASE &&
+	         HAS_VIRT_DB (buf))
+	{
+		scrollback_db *db = (scrollback_db *) buf->virt_db;
+		int idx = scrollback_get_index_of_rowid (db, buf->virt_channel,
+			(gint64) ent->reply->target_entry_id);
+		gtk_xtext_virt_ensure_range (buf, idx, VIRT_PAGE_SIZE);
+		target = gtk_xtext_find_by_id (buf, ent->reply->target_entry_id);
+		if (target)
+			gtk_xtext_jump_to_entry (buf, target);
+	}
 }
 
 /* Identify the reaction badge at click_x within ent's badge row.

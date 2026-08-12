@@ -168,6 +168,8 @@ typedef struct session_gui
 		*key_entry;		  /* +k */
 
 		GtkWidget *shbox, *shentry;	/* search bar hbox */
+		GtkWidget *shhighlight, *shmatchcase, *shregex; /* find bar text-search toggles (insensitive in msgid mode) */
+		gboolean search_msgid_mode; /* find bar: treat the entry as an IRCv3 msgid lookup */
 		gulong search_changed_signal; /* hook for search change event so blanking the box doesn't suck */
 
 	GtkWidget *reply_bar;	/* IRCv3: "Replying to <nick>" bar above input */
