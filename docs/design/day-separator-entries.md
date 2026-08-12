@@ -72,11 +72,23 @@ lands before it — **no flag migration, no successor fix-up**. The old
 bidirectional fix-up loop in `link_entry` and all four
 `ensure_range`/`recenter` sweep loops are deleted, not rewritten.
 
-**Edge case (accepted):** an entry stamped exactly 00:00:00 would tie
-with the separator's stamp and lose the id tiebreak (DB rowids <
-`LOCAL_ENTRY_ID_BASE`), putting the separator on the wrong side. When
-the successor's stamp equals midnight exactly we skip creating the
-separator: a one-second window per day, cosmetic-only.
+**Edge case (accepted for now, resolve eventually):** an entry stamped
+exactly 00:00:00 would tie with the separator's stamp and lose the id
+tiebreak (DB rowids < `LOCAL_ENTRY_ID_BASE`), putting the separator on
+the wrong side. When the successor's stamp equals midnight exactly we
+skip creating the separator: a one-second window per day, cosmetic-only
+(that day just shows no separator).
+
+*Eventual fix:* teach `entry_stamp_cmp` that on a stamp tie a
+`DAY_SEP` entry sorts before a non-separator entry (falling back to the
+id compare only when both or neither are separators). Both structures
+use the same comparator, so they stay in agreement; the ordering is
+in-memory only, so nothing persisted needs migrating. With that in
+place the `ent->stamp <= midnight` skip in
+`gtk_xtext_maybe_insert_day_sep` becomes `ent->stamp < midnight` and
+the window closes. Do it as its own change with an ordering-sanity
+pass, since the comparator underpins both the B-tree and every sorted
+insert.
 
 ### Creation
 
