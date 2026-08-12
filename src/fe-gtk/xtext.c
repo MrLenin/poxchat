@@ -9708,7 +9708,8 @@ gtk_xtext_append_entry (xtext_buffer *buf, textentry * ent, time_t stamp)
 	if (buf->xtext->max_lines > 2)
 	{
 		int limit = HAS_VIRT_DB (buf) ? VIRT_MAT_WINDOW : buf->xtext->max_lines;
-		if (BUF_MAT_COUNT (buf) > limit || (!HAS_VIRT_DB (buf) && buf->num_lines > limit))
+		if (BUF_MAT_COUNT (buf) - buf->ephemeral_count > limit ||
+		    (!HAS_VIRT_DB (buf) && buf->num_lines > limit))
 			gtk_xtext_remove_top (buf);
 	}
 
@@ -9792,7 +9793,8 @@ gtk_xtext_prepend_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 	if (buf->xtext->max_lines > 2)
 	{
 		int limit = HAS_VIRT_DB (buf) ? VIRT_MAT_WINDOW : buf->xtext->max_lines;
-		if (BUF_MAT_COUNT (buf) > limit || (!HAS_VIRT_DB (buf) && buf->num_lines > limit))
+		if (BUF_MAT_COUNT (buf) - buf->ephemeral_count > limit ||
+		    (!HAS_VIRT_DB (buf) && buf->num_lines > limit))
 			gtk_xtext_remove_bottom (buf);
 	}
 
@@ -9921,7 +9923,7 @@ gtk_xtext_insert_sorted_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 		/* Enforce materialization window for non-batch inserts.
 		 * During batch_mode, pruning is deferred to fe_set_batch_mode. */
 		if (!buf->batch_mode && buf->xtext->max_lines > 2 &&
-		    BUF_MAT_COUNT (buf) > VIRT_MAT_WINDOW)
+		    BUF_MAT_COUNT (buf) - buf->ephemeral_count > VIRT_MAT_WINDOW)
 		{
 			gtk_xtext_remove_top (buf);
 		}
@@ -10598,7 +10600,7 @@ gtk_xtext_enforce_mat_window (xtext_buffer *buf)
 		viewport_center = BUF_LINES_MAT (buf);  /* assume bottom */
 	}
 
-	while (BUF_MAT_COUNT (buf) > VIRT_MAT_WINDOW)
+	while (BUF_MAT_COUNT (buf) - buf->ephemeral_count > VIRT_MAT_WINDOW)
 	{
 		int old_count = BUF_MAT_COUNT (buf);
 
@@ -11622,13 +11624,17 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 	}
 
 	/* Evict from head if too far behind desired window.
-	 * Only evict when BUF_MAT_COUNT exceeds the materialization window size.
-	 * During active selection, pins prevent eviction of selected entries,
-	 * allowing count to grow up to max_lines. */
+	 * Only evict while the DB-backed count exceeds the materialization
+	 * window size — the same basis virt_should_materialize gates on.
+	 * (Counting ephemerals here made eviction stop N entries early, which
+	 * left the materialization gate open while the user was scrolled up:
+	 * a live message then linked at the list tail across a DB gap,
+	 * corrupting list/tree order.)  During active selection, pins prevent
+	 * eviction of selected entries, allowing count to grow up to max_lines. */
 	{
 		int max = VIRT_MAT_WINDOW;
 		while (buf->mat_first_index < want_start - VIRT_PAGE_SIZE &&
-		       BUF_MAT_COUNT (buf) > max)
+		       BUF_MAT_COUNT (buf) - buf->ephemeral_count > max)
 	{
 		/* Don't evict pinned entries (selection or ephemeral) */
 		if (buf->text_first && buf->sel_pin_start_id != 0 &&
@@ -11666,7 +11672,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		int max = VIRT_MAT_WINDOW;
 
 		while (mat_end_idx > want_end + VIRT_PAGE_SIZE &&
-		       BUF_MAT_COUNT (buf) > max)
+		       BUF_MAT_COUNT (buf) - buf->ephemeral_count > max)
 		{
 			/* Don't evict pinned entries (selection or ephemeral) */
 			if (buf->text_last && buf->sel_pin_end_id != 0 &&
@@ -11730,6 +11736,8 @@ gtk_xtext_virt_should_materialize (xtext_buffer *buf, time_t stamp,
                                    xtext_link_position dir)
 {
 	int est;
+	int db_mat, entries_after;
+	gboolean skip_below = FALSE;
 
 	if (!HAS_VIRT_DB (buf))
 		return TRUE;
@@ -11740,19 +11748,41 @@ gtk_xtext_virt_should_materialize (xtext_buffer *buf, time_t stamp,
 	if (BUF_MAT_COUNT (buf) - buf->ephemeral_count < VIRT_MAT_WINDOW)
 		return TRUE;
 
+	/* Contiguity invariant: the materialized window is one contiguous DB
+	 * index range.  A new entry may only be linked at the list tail when
+	 * no unloaded DB entries exist between the window end and it —
+	 * otherwise the linked list jumps the gap (newer entry at the tail,
+	 * the gap's older rows loaded after it) while the B-tree sorts by
+	 * (stamp, id), and the two orders diverge permanently. */
+	db_mat = BUF_MAT_COUNT (buf) - buf->ephemeral_count;
+	entries_after = buf->total_entries - buf->mat_first_index - db_mat;
+
 	if (dir == LINK_TAIL)
 	{
 		/* Live message at tail: materialize if user is following
-		 * (scrollbar at bottom), skip if scrolled up. */
-		if (!buf->text_last || buf->scroll_anchor.anchor_to_bottom)
+		 * (scrollbar at bottom) AND the window actually extends to the
+		 * DB tail.  entries_after > 0 with anchor_to_bottom should not
+		 * happen (the below-window click handling re-centers first),
+		 * but if it does, keeping the message DB-only is safe — the gap
+		 * corruption is not. */
+		if (!buf->text_last ||
+		    (buf->scroll_anchor.anchor_to_bottom && entries_after <= 0))
 			return TRUE;
 	}
 	else
 	{
-		/* HEAD or SORTED: materialize if the entry falls within or
-		 * adjacent to the materialized time range.  Skip only if
-		 * strictly older than the entire mat window. */
-		if (!buf->text_first || stamp <= 0 || stamp >= buf->text_first->stamp)
+		/* HEAD or SORTED: materialize if the entry falls within the
+		 * materialized time range.  Skip if strictly older than the
+		 * entire mat window — or newer than the window tail while
+		 * unloaded entries exist below it (chathistory-AFTER gap fill
+		 * targeting the unmaterialized region), which would link at the
+		 * list tail across the gap. */
+		if (!buf->text_first || stamp <= 0)
+			return TRUE;
+		if (entries_after > 0 && buf->text_last &&
+		    stamp > buf->text_last->stamp)
+			skip_below = TRUE;	/* bookkeep like a below-window entry */
+		else if (stamp >= buf->text_first->stamp)
 			return TRUE;
 	}
 
@@ -11772,7 +11802,7 @@ gtk_xtext_virt_should_materialize (xtext_buffer *buf, time_t stamp,
 	buf->total_entries++;
 	buf->num_lines += est;
 
-	if (dir != LINK_TAIL)
+	if (dir != LINK_TAIL && !skip_below)
 	{
 		/* Older entry shifts all DB indices up by 1 */
 		buf->mat_first_index++;
@@ -11780,13 +11810,15 @@ gtk_xtext_virt_should_materialize (xtext_buffer *buf, time_t stamp,
 	}
 
 	/* Update scrollbar atomically via configure.
-	 * For TAIL (new msg while scrolled up): grow upper, keep value.
-	 * For HEAD/SORTED (older entry): grow upper AND value in lockstep. */
+	 * For TAIL or a below-window entry (new msg while scrolled up):
+	 * grow upper, keep value.
+	 * For HEAD/SORTED above the window (older entry): grow upper AND
+	 * value in lockstep. */
 	if (buf->xtext && buf->xtext->buffer == buf && !buf->batch_mode)
 	{
 		GtkAdjustment *adj = buf->xtext->adj;
 		gdouble cur_val = gtk_adjustment_get_value (adj);
-		gdouble new_val = (dir == LINK_TAIL) ? cur_val : cur_val + est;
+		gdouble new_val = (dir == LINK_TAIL || skip_below) ? cur_val : cur_val + est;
 		gdouble new_upper = buf->num_lines;
 		gdouble page = gtk_adjustment_get_page_size (adj);
 
