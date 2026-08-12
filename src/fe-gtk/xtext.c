@@ -7531,7 +7531,10 @@ top_down:
 		gboolean changed = FALSE;
 		int adj_val = (int)gtk_adjustment_get_value (xtext->adj);
 		int adj_page = (int)gtk_adjustment_get_page_size (xtext->adj);
-		int line_pos = 0;
+		/* adj_val is absolute; text_first sits at LINES_BEFORE_MAT, not 0 —
+		 * without the seed everything in the viewport looks "scrolled off"
+		 * once history extends above the materialized window. */
+		int line_pos = LINES_BEFORE_MAT (xtext->buffer);
 
 		for (check = xtext->buffer->text_first; check; check = check->next)
 		{
@@ -10751,6 +10754,10 @@ gtk_xtext_moveto_marker_pos (GtkXText *xtext)
 
 		if (gtk_xtext_check_ent_visibility (xtext, marker, 1) == FALSE)
 		{
+			/* The adjustment space starts with the estimated lines of the
+			 * unmaterialized region above the window; text_first sits at
+			 * LINES_BEFORE_MAT, not 0 (cf. restore_scroll_anchor). */
+			value = LINES_BEFORE_MAT (buf);
 			while (ent)
 			{
 				if (ent == marker)
@@ -10796,7 +10803,10 @@ gtk_xtext_scroll_to_entry (xtext_buffer *buf, textentry *target)
 	if (gtk_xtext_check_ent_visibility (xtext, target, 1))
 		return;
 
-	/* Calculate line offset of target entry */
+	/* Calculate line offset of target entry.  The adjustment space starts
+	 * with the estimated lines of the unmaterialized region above the
+	 * window; text_first sits at LINES_BEFORE_MAT, not 0. */
+	value = LINES_BEFORE_MAT (buf);
 	for (ent = buf->text_first; ent; ent = ent->next)
 	{
 		if (ent == target)
