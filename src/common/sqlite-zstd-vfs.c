@@ -239,9 +239,23 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 		f->meta_page_count_saved = meta_page_count;
 		if (f->page_size > 0)
 			f->file_size = (sqlite3_int64)f->page_size * f->page_count;
+		else if (max_pgno >= 1)
+		{
+			/* Pages exist but page_size could not be determined (meta
+			 * missing and the page-1 header fallback above rejected an
+			 * implausible value) — this is a populated database we
+			 * cannot read, NOT an empty one.  Presenting it as empty
+			 * (page_count = 0) would let SQLite happily write a fresh
+			 * page 1 straight over real history — the same
+			 * silent-data-loss door the MAX(pgno) check above closes.
+			 * Fail the open instead of guessing. */
+			g_warning ("zstd-vfs: %s: %d page(s) present but page_size could "
+			           "not be determined — refusing to open as empty",
+			           path, max_pgno);
+			return SQLITE_CORRUPT;
+		}
 		else
-			/* page_size unknown — page_count > 0 with page_size == 0 is
-			 * an incoherent state; don't let it leak into geometry. */
+			/* Genuinely fresh/empty database: page_count is already 0. */
 			f->page_count = 0;
 
 		if (meta_page_count > 0 && meta_page_count != f->page_count)
@@ -486,7 +500,19 @@ begin_outer (zstd_vfs_file *f)
 	int rc;
 
 	if (f->in_transaction)
-		return SQLITE_OK;
+	{
+		if (!sqlite3_get_autocommit (f->outer_db))
+			return SQLITE_OK;
+
+		/* SQLite auto-rolls-back a transaction when a statement step
+		 * returns SQLITE_FULL/IOERR/BUSY/NOMEM/INTERRUPT — our flag is
+		 * stale: the transaction is gone even though we never called
+		 * COMMIT/ROLLBACK.  sqlite3_get_autocommit() is the documented
+		 * way to detect this.  Clear the flag and fall through to open
+		 * a fresh transaction; never let a subsequent write believe
+		 * it's already covered and autocommit on its own. */
+		f->in_transaction = 0;
+	}
 	rc = sqlite3_exec (f->outer_db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
 	if (rc != SQLITE_OK)
 	{
@@ -505,6 +531,23 @@ commit_outer (zstd_vfs_file *f)
 
 	if (!f->in_transaction)
 		return SQLITE_OK;
+
+	if (sqlite3_get_autocommit (f->outer_db))
+	{
+		/* Mirrors the check in begin_outer: the transaction was already
+		 * auto-rolled-back by SQLite before we got a chance to commit
+		 * it, so our flag was stale.  There is nothing to COMMIT — the
+		 * outer DB is already back at its pre-transaction state, and
+		 * every page write issued since the last successful commit
+		 * either never happened or was undone.  Report this as a
+		 * failure (not SQLITE_OK): callers must not be told the commit
+		 * succeeded when in fact no commit happened at all. */
+		g_warning ("zstd-vfs: outer transaction was rolled back by SQLite "
+		           "before commit (server-side abort) — writes since the "
+		           "last successful commit did not land");
+		f->in_transaction = 0;
+		return SQLITE_ERROR;
+	}
 
 	/* Keep meta.page_count fresh as of every commit (diagnostic; the
 	 * open path derives the real value from MAX(pgno)). */
