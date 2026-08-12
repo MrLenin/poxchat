@@ -10450,6 +10450,10 @@ gtk_xtext_lastlog (xtext_buffer *out, xtext_buffer *search_area)
 					char *tab;
 
 					matches++;
+					/* Pass the source timestamp through the append — the
+					 * B-tree is keyed by (stamp, id), so mutating
+					 * text_last->stamp after insertion would corrupt the
+					 * tree's sort order in the lastlog buffer. */
 					tab = strchr (msg->text, '\t');
 					if (tab && search_area->xtext->auto_indent)
 					{
@@ -10457,16 +10461,16 @@ gtk_xtext_lastlog (xtext_buffer *out, xtext_buffer *search_area)
 						gtk_xtext_append_indent (out,
 						                         (unsigned char *)msg->text, left_len,
 						                         (unsigned char *)tab + 1,
-						                         len - left_len - 1, 0);
+						                         len - left_len - 1, msg->timestamp);
 					}
 					else
 					{
-						gtk_xtext_append (out, (unsigned char *)msg->text, len, 0);
+						gtk_xtext_append (out, (unsigned char *)msg->text, len,
+						                  msg->timestamp);
 					}
 
 					if (out->text_last)
 					{
-						out->text_last->stamp = msg->timestamp;
 						gtk_xtext_search_textentry_add (out, out->text_last,
 						                                gl, TRUE);
 					}
@@ -10488,21 +10492,21 @@ gtk_xtext_lastlog (xtext_buffer *out, xtext_buffer *search_area)
 		if (gl)
 		{
 			matches++;
-			/* copy the text over */
+			/* copy the text over — with the source stamp, since the B-tree
+			 * is keyed by (stamp, id) and must not be mutated post-insert */
 			if (search_area->xtext->auto_indent)
 			{
 				gtk_xtext_append_indent (out, ent->str, ent->left_len,
 												 ent->str + ent->left_len + 1,
-												 ent->str_len - ent->left_len - 1, 0);
+												 ent->str_len - ent->left_len - 1, ent->stamp);
 			}
 			else
 			{
-				gtk_xtext_append (out, ent->str, ent->str_len, 0);
+				gtk_xtext_append (out, ent->str, ent->str_len, ent->stamp);
 			}
 
 			if (out->text_last)
 			{
-				out->text_last->stamp = ent->stamp;
 				gtk_xtext_search_textentry_add (out, out->text_last, gl, TRUE);
 			}
 		}
