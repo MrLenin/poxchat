@@ -1130,15 +1130,30 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 			int mat_top = LINES_BEFORE_MAT (xtext->buffer);
 			int mat_bot = mat_top + BUF_LINES_MAT (xtext->buffer);
 			int margin = (int) page_size;  /* 1 page buffer before triggering */
+			int db_mat = BUF_MAT_COUNT (xtext->buffer) -
+				xtext->buffer->ephemeral_count;
+			int entries_after = xtext->buffer->total_entries -
+				xtext->buffer->mat_first_index - db_mat;
 			/* Detect "scrollbar click into the unmaterialized region":
-			 * the click value is below mat_top, so the entry the user is
-			 * pointing at is not currently in memory.  ensure_range will
-			 * load entries around it, but ensure_range's internal
-			 * save/restore_scroll_anchor_top would otherwise teleport
-			 * value back to text_first (because pre-load nth(value)
-			 * clamped there).  Remember the click target so we can
-			 * re-place value after the load. */
-			gboolean click_into_unmat = (scroll_line < mat_top);
+			 * the click value is outside the materialized band, so the
+			 * entry the user is pointing at is not currently in memory.
+			 * Above the window that means scroll_line < mat_top; below it
+			 * the viewport top has passed mat_bot into the lines_after
+			 * estimate region (only meaningful when unloaded entries
+			 * actually exist below).  ensure_range will load (or re-center)
+			 * around it, but its internal anchor restore would otherwise
+			 * teleport value back to the old window (because pre-load
+			 * nth(value) clamped there).  Remember the click target so we
+			 * can re-place value after the load. */
+			gboolean click_above_unmat = (scroll_line < mat_top);
+			gboolean click_below_unmat = (entries_after > 0 &&
+				scroll_line > mat_bot);
+			gboolean click_into_unmat = click_above_unmat || click_below_unmat;
+			/* Was the drag all the way to the bottom?  Then the intent is
+			 * "newest messages", not a specific line — pin to the new
+			 * bottom after the load instead of re-placing the click line. */
+			gboolean click_to_bottom = click_below_unmat &&
+				xtext->buffer->scroll_anchor.anchor_to_bottom;
 			int click_target_value = scroll_line;
 
 			/* Only load if viewport is within margin of mat boundary (or outside it).
@@ -1146,10 +1161,6 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 			 * materialized window — nothing to load, and the spurious trigger
 			 * causes harmful head eviction that drifts lines_before_mat. */
 			{
-				int db_mat = BUF_MAT_COUNT (xtext->buffer) -
-					xtext->buffer->ephemeral_count;
-				int entries_after = xtext->buffer->total_entries -
-					xtext->buffer->mat_first_index - db_mat;
 				gboolean near_top = (scroll_line < mat_top + margin);
 				gboolean near_bot = (entries_after > 0 &&
 					scroll_line + (int) page_size > mat_bot - margin);
@@ -1186,27 +1197,33 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 						else
 							idx = 0;
 					}
+					else if (click_above_unmat)
+					{
+						/* Scrollbar click above the window: the user wants
+						 * an absolute line no anchor in the materialized
+						 * window can resolve to.  Compute a target DB index
+						 * from value / avg_lines_per_entry so ensure_range
+						 * loads (or re-centers) around the click target
+						 * instead of adjacent to the current window. */
+						idx = (int)(scroll_line /
+							xtext->buffer->avg_lines_per_entry);
+					}
+					else if (click_below_unmat)
+					{
+						/* Scrollbar click below the window: estimate how
+						 * many unloaded entries sit between the window end
+						 * and the viewport middle. */
+						int mat_end_idx = xtext->buffer->mat_first_index +
+							db_mat - 1;
+						idx = mat_end_idx + 1 +
+							(int)((scroll_line - mat_bot + page_size / 2) /
+								xtext->buffer->avg_lines_per_entry);
+					}
 					else if (near_top)
 					{
-						/* Two sub-cases:
-						 *
-						 * (a) value is just inside mat_top — wheel scroll
-						 *     approaching the head.  Extend the window
-						 *     upward by one page; target mat_first - 1.
-						 *
-						 * (b) value is well below mat_top — scrollbar
-						 *     click into the unmaterialized region.  The
-						 *     user wants to land at an absolute line that
-						 *     no anchor in the materialized window can
-						 *     resolve to.  Compute a target DB index from
-						 *     value / avg_lines_per_entry so ensure_range
-						 *     loads around the click target instead of
-						 *     adjacent to the current window. */
-						if (scroll_line < mat_top)
-							idx = (int)(scroll_line /
-								xtext->buffer->avg_lines_per_entry);
-						else
-							idx = xtext->buffer->mat_first_index - 1;
+						/* Wheel scroll approaching the head: extend the
+						 * window upward; target mat_first - 1. */
+						idx = xtext->buffer->mat_first_index - 1;
 					}
 					else /* near_bot */
 					{
@@ -1241,7 +1258,21 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 			 * entry's actual line number.  buf->scroll_anchor is then
 			 * refreshed to point at the BOTTOM-of-viewport entry per
 			 * the convention used by render_page. */
-			if (click_into_unmat)
+			if (click_to_bottom)
+			{
+				/* Drag to the very bottom: pin to the (re-centered) tail. */
+				gdouble new_upper = gtk_adjustment_get_upper (xtext->adj);
+				gdouble new_page = gtk_adjustment_get_page_size (xtext->adj);
+				gdouble new_val = new_upper - new_page;
+
+				if (new_val < 0)
+					new_val = 0;
+				g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
+				gtk_adjustment_set_value (xtext->adj, new_val);
+				g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
+				xtext->buffer->scroll_anchor.anchor_to_bottom = TRUE;
+			}
+			else if (click_into_unmat)
 			{
 				int top_sub;
 				textentry *top_target;
@@ -11417,6 +11448,124 @@ gtk_xtext_virt_evict_tail (xtext_buffer *buf)
 	gtk_xtext_kill_ent (buf, ent);
 }
 
+/* Re-center the materialization window on a distant target range.
+ * Used when the wanted range is disjoint from the current window: walking
+ * the gap would materialize (then immediately evict) every entry in
+ * between — a multi-second stall on a deep scrollbar jump — and linking
+ * across a gap would break the contiguity invariant (list order vs B-tree
+ * order).  Evicts every DB-backed entry, loads [want_start, want_end]
+ * fresh, and merge-splices the loaded entries around any kept ephemerals
+ * (which have no DB row and cannot be reloaded) in (stamp, id) order —
+ * the same comparator the B-tree uses — so both structures agree.
+ * lines_before_mat is re-seeded from the avg-based formula: the absorptive
+ * running credit tracked the old window and has no meaning across a
+ * discontinuous jump.
+ * Returns TRUE if the window was rebuilt; the caller must then skip its
+ * gap-walk and its anchor restore (the old anchors reference evicted
+ * entries — the jump initiator re-places the scroll value itself). */
+static gboolean
+gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
+{
+	scrollback_db *db = (scrollback_db *) buf->virt_db;
+	GSList *msgs, *iter;
+	textentry *cursor, *e, *next;
+
+	/* Selection pins reference materialized entries; fall back to the
+	 * normal (slow but pin-aware) gap walk while a selection is active. */
+	if (buf->sel_pin_start_id != 0 || buf->sel_pin_end_id != 0)
+		return FALSE;
+
+	msgs = scrollback_load_range (db, buf->virt_channel, want_start,
+	                              want_end - want_start + 1);
+	if (!msgs)
+		return FALSE;	/* DB error / empty range — keep the old window */
+
+	/* Evict every DB-backed entry; keep ephemerals. */
+	for (e = buf->text_first; e; e = next)
+	{
+		next = e->next;
+		if (!e->has_db_row)
+			continue;
+		if (e->prev)
+			e->prev->next = e->next;
+		else
+			buf->text_first = e->next;
+		if (e->next)
+			e->next->prev = e->prev;
+		else
+			buf->text_last = e->prev;
+		gtk_xtext_kill_ent (buf, e);
+	}
+
+	/* Materialize the new range.  Both the kept list and the loaded rows
+	 * are sorted, so a single forward merge cursor suffices. */
+	cursor = buf->text_first;
+	for (iter = msgs; iter; iter = iter->next)
+	{
+		scrollback_msg *msg = iter->data;
+		textentry *ent = gtk_xtext_virt_materialize_msg (buf, msg);
+		if (!ent)
+			continue;
+
+		while (cursor && entry_stamp_cmp (cursor, ent) < 0)
+			cursor = cursor->next;
+
+		if (cursor)
+		{
+			ent->prev = cursor->prev;
+			ent->next = cursor;
+			if (cursor->prev)
+				cursor->prev->next = ent;
+			else
+				buf->text_first = ent;
+			cursor->prev = ent;
+		}
+		else
+		{
+			ent->prev = buf->text_last;
+			ent->next = NULL;
+			if (buf->text_last)
+				buf->text_last->next = ent;
+			else
+				buf->text_first = ent;
+			buf->text_last = ent;
+		}
+	}
+	scrollback_msg_list_free (msgs);
+
+	/* Recompute day-boundary flags across the rebuilt list */
+	for (e = buf->text_first; e; e = e->next)
+	{
+		gboolean was = (e->flags & TEXTENTRY_FLAG_DAY_BOUNDARY) != 0;
+		gboolean should = prefs.hex_gui_day_separator && e->prev &&
+		                   e->stamp > 0 && e->prev->stamp > 0 &&
+		                   xtext_is_different_day (e->prev->stamp, e->stamp);
+		if (should && !was)
+		{
+			e->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
+			e->extra_lines_above++;
+			e->display_lines++;
+			if (buf->entry_tree)
+				update_weight234 (buf->entry_tree, e, 1);
+		}
+		else if (!should && was)
+		{
+			e->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
+			e->extra_lines_above--;
+			e->display_lines--;
+			if (buf->entry_tree)
+				update_weight234 (buf->entry_tree, e, -1);
+		}
+	}
+
+	buf->mat_first_index = want_start;
+	buf->lines_before_mat = (int)(want_start * buf->avg_lines_per_entry);
+	if (buf->lines_before_mat < 0)
+		buf->lines_before_mat = 0;
+
+	return TRUE;
+}
+
 /* Virtual scrollback (Phase 3+5): load/evict entries to maintain a window
  * of materialized entries around the given center_index.
  *
@@ -11431,6 +11580,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 	int want_start, want_end;
 	int mat_start, mat_end;
 	int old_mat_count, old_mat_first;
+	gboolean recentered = FALSE;
 	scrollback_db *db;
 
 	if (!buf->virt_db || !buf->virt_channel)
@@ -11454,6 +11604,19 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 
 	mat_start = buf->mat_first_index;
 	mat_end = buf->mat_first_index + (BUF_MAT_COUNT (buf) - buf->ephemeral_count) - 1;
+
+	/* Far target: the wanted range is disjoint from the current window by
+	 * more than an eviction buffer.  Rebuild the window around the target
+	 * instead of materializing the entire gap (unbounded synchronous load)
+	 * or linking across it (order corruption). */
+	if (BUF_MAT_COUNT (buf) - buf->ephemeral_count > 0 &&
+	    (want_end < mat_start - VIRT_PAGE_SIZE ||
+	     want_start > mat_end + VIRT_PAGE_SIZE))
+	{
+		recentered = gtk_xtext_virt_recenter (buf, want_start, want_end);
+		if (recentered)
+			goto recompute;
+	}
 
 	/* Prepend: load entries before current materialized window.
 	 * Build a local chain (oldest→newest) then splice at head. */
@@ -11692,11 +11855,17 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 	 * skip the recompute entirely.  This prevents a convergence loop where
 	 * each recompute shifts avg_lines_per_entry slightly, changing num_lines,
 	 * which triggers another adjustment_changed → ensure_range cycle. */
+recompute:
 	if (BUF_MAT_COUNT (buf) != old_mat_count || buf->mat_first_index != old_mat_first)
 	{
 		xtext_scroll_anchor er_anchor;
 
-		gtk_xtext_save_scroll_anchor_top (buf, &er_anchor);
+		/* After a re-center the old coordinate space is gone (window and
+		 * lines_before_mat re-seeded); the anchor sampled pre-jump can't
+		 * be restored meaningfully.  The jump initiator (click re-place,
+		 * scroll_to_entry, search navigate) sets the value itself. */
+		if (!recentered)
+			gtk_xtext_save_scroll_anchor_top (buf, &er_anchor);
 
 		if (buf->xtext && buf->xtext->vc_signal_tag)
 		{
@@ -11709,7 +11878,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			gtk_xtext_calc_lines_virtual_ex (buf, FALSE, FALSE);
 		}
 
-		if (buf->xtext && buf->xtext->adj)
+		if (!recentered && buf->xtext && buf->xtext->adj)
 		{
 			if (buf->xtext->vc_signal_tag)
 				g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
