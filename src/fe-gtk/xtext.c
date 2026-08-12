@@ -8284,81 +8284,10 @@ gtk_xtext_refresh (GtkXText * xtext)
 	}
 }
 
-static int
-gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
+static void
+gtk_xtext_free_ent_payload (textentry *ent)
 {
-	int visible;
-
-	/* Set visible to TRUE if this is the current buffer */
-	/* and this ent shows up on the screen now */
-	visible = buffer->xtext->buffer == buffer &&
-				 gtk_xtext_check_ent_visibility (buffer->xtext, ent, 0);
-
-	/* If the scroll anchor points to this entry, move to neighbor */
-	if (buffer->scroll_anchor.anchor_entry_id == ent->entry_id)
-	{
-		if (ent->next)
-		{
-			buffer->scroll_anchor.anchor_entry_id = ent->next->entry_id;
-			buffer->scroll_anchor.subline_offset = 0;
-		}
-		else if (ent->prev)
-		{
-			buffer->scroll_anchor.anchor_entry_id = ent->prev->entry_id;
-			buffer->scroll_anchor.subline_offset = 0;
-		}
-		else
-		{
-			buffer->scroll_anchor.anchor_entry_id = 0;
-			buffer->scroll_anchor.anchor_to_bottom = TRUE;
-		}
-	}
-	if (ent == buffer->xtext->hover_ent)
-		buffer->xtext->hover_ent = NULL;
-	if (ent == buffer->xtext->hover_reply_target)
-		buffer->xtext->hover_reply_target = NULL;
-	if (ent == buffer->xtext->flash_ent)
-		buffer->xtext->flash_ent = NULL;
-	if (ent == buffer->xtext->hilight_ent)
-		buffer->xtext->hilight_ent = NULL;
-	/* pagetop_ent is a raw cached pointer to "what's at adj->value".  If
-	 * the entry it points at is being killed (eviction during
-	 * virt_ensure_range can take down the head), null it so the next
-	 * render path (find_char_ex / check_ent_visibility) recomputes from
-	 * adj->value instead of walking ent->next on freed memory. */
-	if (ent == buffer->pagetop_ent)
-		buffer->pagetop_ent = NULL;
-
-	/* last_ent_start_id / last_ent_end_id: stale IDs self-heal (resolve to NULL) */
-
-	if (buffer->marker_pos_id == ent->entry_id)
-	{
-		/* Allow for "Marker line reset because exceeded scrollback limit. to appear. */
-		buffer->marker_pos_id = ent->next ? ent->next->entry_id : 0;
-		buffer->marker_state = MARKER_RESET_BY_KILL;
-	}
-
-	if (ent->marks)
-	{
-		gtk_xtext_search_textentry_del (buffer, ent);
-	}
-
-	/* IRCv3 modernization: remove from hash tables (Phase 1) */
-	if (ent->msgid && buffer->entries_by_msgid)
-		g_hash_table_remove (buffer->entries_by_msgid, ent->msgid);
-	if (buffer->entries_by_id)
-		g_hash_table_remove (buffer->entries_by_id, GSIZE_TO_POINTER (ent->entry_id));
-
-	/* Remove from display cache */
-	display_cache_remove (buffer->display_cache, ent->entry_id);
-
-	/* Remove from B-tree */
-	if (buffer->entry_tree)
-		del234 (buffer->entry_tree, ent);
-
-	if (ent->flags & TEXTENTRY_FLAG_EPHEMERAL)
-		buffer->ephemeral_count--;
-
+	g_list_free (ent->marks);	/* NULL if search_textentry_del/fini ran */
 	g_free (ent->msgid);
 
 	/* Phase 4: free separate str and redaction info */
@@ -8403,6 +8332,111 @@ gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
 	g_free (ent->raw_to_stripped_map);
 
 	g_free (ent);
+}
+
+/* Clear every cached pointer to ent held by the buffer or its widget.
+ * Shared by kill_ent and the bulk teardown paths (clear-all, buffer_free),
+ * which free entries without going through kill_ent. */
+static void
+gtk_xtext_unref_ent_pointers (xtext_buffer *buffer, textentry *ent)
+{
+	GtkXText *xtext = buffer->xtext;
+
+	if (ent == buffer->pagetop_ent)
+		buffer->pagetop_ent = NULL;
+	if (ent == buffer->insert_hint)
+	{
+		buffer->insert_hint = NULL;
+		buffer->insert_hint_lines = 0;
+	}
+
+	if (!xtext)
+		return;
+	if (ent == xtext->hover_ent)
+		xtext->hover_ent = NULL;
+	if (ent == xtext->hover_reply_target)
+		xtext->hover_reply_target = NULL;
+	if (ent == xtext->flash_ent)
+		xtext->flash_ent = NULL;
+	if (ent == xtext->hilight_ent)
+		xtext->hilight_ent = NULL;
+	if (ent == xtext->hover_react_ent)
+	{
+		/* The delayed popover timer NULL-checks these before firing */
+		xtext->hover_react_ent = NULL;
+		xtext->hover_react_target = NULL;
+	}
+	if (ent == xtext->redact_confirm_ent)
+		xtext->redact_confirm_ent = NULL;
+}
+
+static int
+gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
+{
+	int visible;
+
+	/* Set visible to TRUE if this is the current buffer */
+	/* and this ent shows up on the screen now */
+	visible = buffer->xtext->buffer == buffer &&
+				 gtk_xtext_check_ent_visibility (buffer->xtext, ent, 0);
+
+	/* If the scroll anchor points to this entry, move to neighbor */
+	if (buffer->scroll_anchor.anchor_entry_id == ent->entry_id)
+	{
+		if (ent->next)
+		{
+			buffer->scroll_anchor.anchor_entry_id = ent->next->entry_id;
+			buffer->scroll_anchor.subline_offset = 0;
+		}
+		else if (ent->prev)
+		{
+			buffer->scroll_anchor.anchor_entry_id = ent->prev->entry_id;
+			buffer->scroll_anchor.subline_offset = 0;
+		}
+		else
+		{
+			buffer->scroll_anchor.anchor_entry_id = 0;
+			buffer->scroll_anchor.anchor_to_bottom = TRUE;
+		}
+	}
+	/* pagetop_ent and friends are raw cached pointers.  If the entry being
+	 * killed (eviction during virt_ensure_range can take down the head) is
+	 * referenced by any of them, null it so later paths (find_char_ex /
+	 * check_ent_visibility / draw / timers) recompute instead of walking
+	 * freed memory. */
+	gtk_xtext_unref_ent_pointers (buffer, ent);
+
+	/* last_ent_start_id / last_ent_end_id: stale IDs self-heal (resolve to NULL) */
+
+	if (buffer->marker_pos_id == ent->entry_id)
+	{
+		/* Allow for "Marker line reset because exceeded scrollback limit. to appear. */
+		buffer->marker_pos_id = ent->next ? ent->next->entry_id : 0;
+		buffer->marker_state = MARKER_RESET_BY_KILL;
+	}
+
+	if (ent->marks)
+	{
+		gtk_xtext_search_textentry_del (buffer, ent);
+	}
+
+	/* IRCv3 modernization: remove from hash tables (Phase 1) */
+	if (ent->msgid && buffer->entries_by_msgid)
+		g_hash_table_remove (buffer->entries_by_msgid, ent->msgid);
+	if (buffer->entries_by_id)
+		g_hash_table_remove (buffer->entries_by_id, GSIZE_TO_POINTER (ent->entry_id));
+
+	/* Remove from display cache */
+	display_cache_remove (buffer->display_cache, ent->entry_id);
+
+	/* Remove from B-tree */
+	if (buffer->entry_tree)
+		del234 (buffer->entry_tree, ent);
+
+	if (ent->flags & TEXTENTRY_FLAG_EPHEMERAL)
+		buffer->ephemeral_count--;
+
+	gtk_xtext_free_ent_payload (ent);
 	return visible;
 }
 
@@ -8564,14 +8598,17 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 	else
 	{
 		/* delete all */
-		if (buf->search_found)
-			gtk_xtext_search_fini (buf);
+		gtk_xtext_search_fini (buf);
+		buf->hintsearch_id = 0;
+		buf->curdata.u = 0;
 		if (buf->xtext->auto_indent)
 			buf->indent = MARGIN;
 		buf->scroll_anchor.anchor_to_bottom = TRUE;
 		buf->scroll_anchor.anchor_entry_id = 0;
 		buf->last_ent_start_id = 0;
 		buf->last_ent_end_id = 0;
+		buf->sel_pin_start_id = 0;
+		buf->sel_pin_end_id = 0;
 		buf->marker_pos_id = 0;
 		if (buf->text_first)
 			marker_reset = TRUE;
@@ -8580,10 +8617,22 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 		while (buf->text_first)
 		{
 			next = buf->text_first->next;
-			g_free (buf->text_first);
+			gtk_xtext_unref_ent_pointers (buf, buf->text_first);
+			gtk_xtext_free_ent_payload (buf->text_first);
 			buf->text_first = next;
 		}
 		buf->text_last = NULL;
+		buf->ephemeral_count = 0;
+
+		/* Purge the freed entries from the lookup hashes and display cache.
+		 * scrollback_clear makes SQLite reuse rowids (no AUTOINCREMENT), so
+		 * stale keys would otherwise resolve future ids/msgids to freed
+		 * memory and make the materialize dup-guard eat new messages. */
+		if (buf->entries_by_msgid)
+			g_hash_table_remove_all (buf->entries_by_msgid);
+		if (buf->entries_by_id)
+			g_hash_table_remove_all (buf->entries_by_id);
+		display_cache_flush (buf->display_cache, buf);
 
 		/* Recreate the B-tree (old one has stale pointers) */
 		if (buf->entry_tree)
@@ -8599,7 +8648,6 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 			buf->total_entries = 0;
 			buf->mat_first_index = 0;
 			buf->lines_before_mat = 0;
-			buf->ephemeral_count = 0;
 		}
 	}
 
@@ -9177,9 +9225,11 @@ gtk_xtext_search (GtkXText * xtext, const gchar *text, gtk_xtext_search_flags fl
 				 * the first character of an occurrence on this line for this new search
 				 * is within that former item, use the occurrence as current.
 				 */
+				/* The hint entry may be gone (pruned in a non-virtual buffer,
+				 * or cleared) — treat a failed lookup like "no match here". */
 				ent = gtk_xtext_find_by_id (buf, buf->hintsearch_id);
 				last.u = buf->curdata.u;
-				for (mark = ent->marks; mark; mark = mark->next)
+				for (mark = ent ? ent->marks : NULL; mark; mark = mark->next)
 				{
 					this.u = GPOINTER_TO_UINT (mark->data);
 					if (this.o.start >= last.o.start && this.o.start < last.o.end)
@@ -9187,7 +9237,10 @@ gtk_xtext_search (GtkXText * xtext, const gchar *text, gtk_xtext_search_flags fl
 				}
 				if (mark == NULL)
 				{
-					for (ent = gtk_xtext_find_by_id (buf, buf->hintsearch_id); ent; ent = BACKWARD? ent->prev: ent->next)
+					ent = gtk_xtext_find_by_id (buf, buf->hintsearch_id);
+					if (ent == NULL)
+						ent = BACKWARD? buf->text_last: buf->text_first;
+					for (; ent; ent = BACKWARD? ent->prev: ent->next)
 						if (ent->marks)
 							break;
 					mark = ent? FIRSTLAST (ent->marks): NULL;
@@ -10941,23 +10994,11 @@ gtk_xtext_buffer_free (xtext_buffer *buf)
 	while (ent)
 	{
 		next = ent->next;
-		g_list_free (ent->marks);	/* search marks */
-		g_free (ent->msgid);	/* Free msgid if set (Phase 1) */
-		/* Phase 4: free separate str and redaction info */
-		if (ent->flags & TEXTENTRY_FLAG_SEPARATE_STR)
-			g_free (ent->str);
-		if (ent->redaction)
-		{
-			g_free (ent->redaction->original_content);
-			g_free (ent->redaction->redacted_by);
-			g_free (ent->redaction->redaction_reason);
-			g_free (ent->redaction);
-		}
-		g_free (ent->stripped_str);
-		g_free (ent->fmt_spans);
-		g_free (ent->emoji_list);
-		g_free (ent->raw_to_stripped_map);
-		g_free (ent);
+		/* Widget-level caches (flash/hover/hilight/...) can still point at
+		 * this buffer's entries — e.g. close a tab during the reply-jump
+		 * flash — so clear them before the entry is freed. */
+		gtk_xtext_unref_ent_pointers (buf, ent);
+		gtk_xtext_free_ent_payload (ent);
 		ent = next;
 	}
 
