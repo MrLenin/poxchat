@@ -305,6 +305,8 @@ static void gtk_xtext_scroll_adjustments (GtkXText *xtext, GtkAdjustment *hadj,
 										GtkAdjustment *vadj);
 static int gtk_xtext_render_ents (GtkXText * xtext, textentry *, textentry *);
 static textentry *xtext_resolve_marker (xtext_buffer *buf);
+static void gtk_xtext_restore_scroll_anchor_bottom (xtext_buffer *buf,
+                                                    const xtext_scroll_anchor *anchor);
 static void gtk_xtext_recalc_widths (xtext_buffer *buf, int);
 static void gtk_xtext_react_popover_hide (GtkXText *xtext);
 static void gtk_xtext_react_hover_update (GtkXText *xtext, textentry *ent,
@@ -1286,8 +1288,6 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 							xtext->buffer->scroll_anchor.subline_offset =
 								bot_sub;
 						}
-						xtext->buffer->scroll_anchor.anchor_to_bottom =
-							FALSE;
 						xtext->buffer->scroll_anchor.anchor_to_bottom = FALSE;
 					}
 				}
@@ -10958,8 +10958,11 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 		{
 			/* Restore scroll position from the persistent anchor.
 			 * The anchor was captured in adjustment_changed when the
-			 * user last interacted with this buffer. */
-			gtk_xtext_restore_scroll_anchor (buf, &buf->scroll_anchor);
+			 * user last interacted with this buffer.  It stores the
+			 * BOTTOM-edge entry, so use the bottom-convention restore —
+			 * the center variant walked the view down half a page per
+			 * tab revisit. */
+			gtk_xtext_restore_scroll_anchor_bottom (buf, &buf->scroll_anchor);
 		}
 	}
 
@@ -12601,9 +12604,12 @@ gtk_xtext_restore_scroll_anchor (xtext_buffer *buf, const xtext_scroll_anchor *a
 	target_line += LINES_BEFORE_MAT (buf);
 
 	/* Add subline offset, clamped to the entry's current subline count
-	 * (wrap points may have changed after reflow at a new width) */
+	 * (wrap points may have changed after reflow at a new width).
+	 * sublines has one node per text row — no +1 (cf. the top/bottom
+	 * variants); over-counting allowed the anchor to restore one row
+	 * past the entry's text. */
 	{
-		int text_sublines = (int)g_slist_length (ent->sublines) + 1;
+		int text_sublines = (int)g_slist_length (ent->sublines);
 		int clamped = anchor->subline_offset;
 		if (clamped >= text_sublines)
 			clamped = text_sublines - 1;
@@ -12636,6 +12642,82 @@ gtk_xtext_restore_scroll_anchor (xtext_buffer *buf, const xtext_scroll_anchor *a
 	/* Set the new scroll position */
 	gtk_adjustment_set_value (adj, new_value);
 
+}
+
+/* Bottom-based anchor restore: position the anchor entry+subline at the
+ * BOTTOM edge of the viewport.  This is the convention of the persistent
+ * buf->scroll_anchor (captured in adjustment_changed as nth(value+page-1)
+ * and consumed the same way by the bottom-anchored render path), so it is
+ * the restore buffer_show must use.  Restoring that anchor with the CENTER
+ * variant put the view ~half a page lower on every tab revisit — and the
+ * re-captured anchor then compounded the drift on the next round-trip. */
+static void
+gtk_xtext_restore_scroll_anchor_bottom (xtext_buffer *buf, const xtext_scroll_anchor *anchor)
+{
+	GtkAdjustment *adj;
+	textentry *ent;
+	int target_line;
+	gdouble new_value, upper, page_size;
+
+	if (!buf || !anchor || !buf->xtext)
+		return;
+
+	adj = buf->xtext->adj;
+	if (!adj)
+		return;
+
+	upper = gtk_adjustment_get_upper (adj);
+	page_size = gtk_adjustment_get_page_size (adj);
+
+	if (anchor->anchor_to_bottom)
+	{
+		buf->scroll_anchor.anchor_to_bottom = TRUE;
+		gtk_adjustment_set_value (adj, upper - page_size);
+		return;
+	}
+
+	if (anchor->anchor_entry_id == 0)
+		return;  /* Invalid anchor */
+
+	ent = gtk_xtext_find_by_id (buf, anchor->anchor_entry_id);
+	if (!ent)
+	{
+		XT_DBG ("xtext: scroll anchor (bottom) entry_id %" G_GUINT64_FORMAT
+			" not found on buffer mount; scroll position lost\n",
+			anchor->anchor_entry_id);
+		return;
+	}
+
+	target_line = gtk_xtext_entry_get_line (buf, ent);
+	if (target_line < 0)
+		return;
+	target_line += LINES_BEFORE_MAT (buf);
+
+	/* Subline offset, clamped to the entry's current display rows */
+	{
+		int text_sublines = (int)g_slist_length (ent->sublines);
+		int clamped = anchor->subline_offset;
+		if (clamped >= text_sublines)
+			clamped = text_sublines - 1;
+		if (clamped < 0)
+			clamped = 0;
+		target_line += clamped;
+	}
+
+	/* The anchored row is the LAST row of the viewport */
+	new_value = (gdouble)target_line - page_size + 1.0;
+
+	if (new_value > upper - page_size)
+		new_value = upper - page_size;
+	if (new_value < 0)
+		new_value = 0;
+
+	if (new_value >= upper - page_size - 1.0)
+		buf->scroll_anchor.anchor_to_bottom = TRUE;
+	else
+		buf->scroll_anchor.anchor_to_bottom = FALSE;
+
+	gtk_adjustment_set_value (adj, new_value);
 }
 
 /* Top-based anchor save: anchor to the top-visible entry (not center).
