@@ -142,8 +142,13 @@ static GtkWidgetClass *parent_class = NULL;
 
 /* Phase 4: entry modification support */
 #define TEXTENTRY_FLAG_SEPARATE_STR  0x01
-#define TEXTENTRY_FLAG_DAY_BOUNDARY  0x02
+#define TEXTENTRY_FLAG_DAY_SEP       0x02  /* entry IS a day-separator row */
 #define TEXTENTRY_FLAG_EPHEMERAL     0x04  /* no DB row; pinned during eviction */
+
+/* Day separators are first-class synthetic entries: zero text, stamped
+ * at local midnight of their day, ephemeral (no DB row).  See
+ * gtk_xtext_maybe_insert_day_sep. */
+#define XTEXT_ENT_IS_DAY_SEP(ent) (((ent)->flags & TEXTENTRY_FLAG_DAY_SEP) != 0)
 
 typedef struct xtext_redaction_info {
 	char *original_content;		/* preserved text for audit/reveal */
@@ -396,6 +401,27 @@ xtext_is_different_day (time_t a, time_t b)
 #endif
 	return (ta.tm_year != tb.tm_year || ta.tm_yday != tb.tm_yday);
 }
+
+/* Local midnight (00:00:00) of the calendar day containing t. */
+static time_t
+xtext_day_start (time_t t)
+{
+	struct tm tmv;
+#ifdef WIN32
+	localtime_s (&tmv, &t);
+#else
+	localtime_r (&t, &tmv);
+#endif
+	tmv.tm_hour = 0;
+	tmv.tm_min = 0;
+	tmv.tm_sec = 0;
+	tmv.tm_isdst = -1;
+	return mktime (&tmv);
+}
+
+static int gtk_xtext_maybe_insert_day_sep (xtext_buffer *buf, textentry *ent);
+static int gtk_xtext_drop_edge_day_sep (xtext_buffer *buf, gboolean at_head);
+static int gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent);
 
 /* GTK4 event controller callbacks - forward declarations */
 static void gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
@@ -1926,12 +1952,12 @@ gtk_xtext_find_x (GtkXText * xtext, int x, textentry * ent, int subline,
 	int indent;
 	unsigned char *str;
 
-	/* Adjust for extra lines above (day separator, reply context) */
+	/* Adjust for extra lines above (reply context) */
 	subline -= ent->extra_lines_above;
 	if (subline < 0)
 	{
 		*out_of_bounds = TRUE;
-		return 0;  /* click was on day separator / reply context line */
+		return 0;  /* click was on the reply context line */
 	}
 
 	if (subline < 1)
@@ -3535,21 +3561,19 @@ gtk_xtext_get_click_zone (GtkXText *xtext, int y, textentry **ent_out)
 	if (!ent)
 		return XTEXT_ZONE_TEXT;
 
+	/* Day separators own their entire (single) row. */
+	if (XTEXT_ENT_IS_DAY_SEP (ent))
+		return XTEXT_ZONE_DAY_SEP;
+
 	/* Subline layout for a rendered entry, in order:
-	 *   [extra_lines_above]              day_sep + reply context
+	 *   [extra_lines_above: 0 or 1]       reply context
 	 *   [visible_text]                    text wraps (clamped to preview when collapsed)
 	 *   [collapse_indicator: 0 or 1]      shown when collapsible
 	 *   [extra_lines_below: 0 or 1]       reaction badge row
 	 *
 	 * sum == ent->display_lines per ent_update_display_lines. */
 	if (subline < ent->extra_lines_above)
-	{
-		gboolean has_day_sep = (ent->flags & TEXTENTRY_FLAG_DAY_BOUNDARY)
-		                       && prefs.hex_gui_day_separator;
-		if (has_day_sep && subline == 0)
-			return XTEXT_ZONE_DAY_SEP;
 		return XTEXT_ZONE_REPLY;
-	}
 
 	text_sublines = g_slist_length (ent->sublines);
 	visible_text = ent->collapsed
@@ -4415,7 +4439,8 @@ gtk_xtext_selection_get_text (GtkXText *xtext, int *len_ret)
 	ent = gtk_xtext_find_by_id (buf, buf->last_ent_start_id);
 	while (ent)
 	{
-		if (ent->mark_start != -1)
+		/* Day separators are synthetic chrome — never copy them */
+		if (ent->mark_start != -1 && !XTEXT_ENT_IS_DAY_SEP (ent))
 		{
 			/* include timestamp? */
 			if (ent->mark_start == 0 && xtext->mark_stamp)
@@ -4444,7 +4469,7 @@ gtk_xtext_selection_get_text (GtkXText *xtext, int *len_ret)
 	ent = gtk_xtext_find_by_id (buf, buf->last_ent_start_id);
 	while (ent)
 	{
-		if (ent->mark_start != -1)
+		if (ent->mark_start != -1 && !XTEXT_ENT_IS_DAY_SEP (ent))
 		{
 			if (!first)
 			{
@@ -6187,21 +6212,11 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 	indent = ent->indent;
 	start_subline = subline;
 
-	/* --- Day separator line above the message --- */
-	if ((ent->flags & TEXTENTRY_FLAG_DAY_BOUNDARY) && prefs.hex_gui_day_separator)
+	/* --- Day separator: a whole synthetic one-row entry --- */
+	if (XTEXT_ENT_IS_DAY_SEP (ent))
 	{
-		if (subline == 0)
-		{
-			gtk_xtext_render_day_separator (xtext, ent, line, win_width);
-			line++;
-			taken++;
-			if (line >= lines_max)
-				return taken;
-		}
-		else
-		{
-			subline--;
-		}
+		gtk_xtext_render_day_separator (xtext, ent, line, win_width);
+		return 1;
 	}
 
 	/* --- Reply context line above the message --- */
@@ -6824,6 +6839,12 @@ gtk_xtext_save (GtkXText * xtext, int fh)
 	ent = xtext->buffer->text_first;
 	while (ent)
 	{
+		/* Day separators are synthetic chrome — don't write them out */
+		if (XTEXT_ENT_IS_DAY_SEP (ent))
+		{
+			ent = ent->next;
+			continue;
+		}
 		if (want_stamp && ent->stamp > 0)
 		{
 			stamp_len = xtext_get_stamp_str (ent->stamp, &stamp_str);
@@ -6991,30 +7012,40 @@ gtk_xtext_lines_taken (xtext_buffer *buf, textentry * ent)
 	}
 }
 
-/* Recompute day boundary flags for all entries in a buffer.
+/* Insert or remove day-separator entries buffer-wide.
  * Called when the hex_gui_day_separator preference changes. */
 
 void
 gtk_xtext_recalc_day_boundaries (xtext_buffer *buf)
 {
-	textentry *ent;
+	textentry *ent, *next;
 
-	for (ent = buf->text_first; ent; ent = ent->next)
+	if (!prefs.hex_gui_day_separator)
 	{
-		gboolean was = (ent->flags & TEXTENTRY_FLAG_DAY_BOUNDARY) != 0;
-		gboolean should = prefs.hex_gui_day_separator && ent->prev &&
-		                   ent->stamp > 0 && ent->prev->stamp > 0 &&
-		                   xtext_is_different_day (ent->prev->stamp, ent->stamp);
-
-		if (should && !was)
+		/* Pref off: remove every separator entry. */
+		for (ent = buf->text_first; ent; ent = next)
 		{
-			ent->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
-			ent->extra_lines_above++;
+			next = ent->next;
+			if (!XTEXT_ENT_IS_DAY_SEP (ent))
+				continue;
+			if (ent->prev)
+				ent->prev->next = ent->next;
+			else
+				buf->text_first = ent->next;
+			if (ent->next)
+				ent->next->prev = ent->prev;
+			else
+				buf->text_last = ent->prev;
+			gtk_xtext_kill_ent (buf, ent);
 		}
-		else if (!should && was)
+	}
+	else
+	{
+		for (ent = buf->text_first; ent; ent = next)
 		{
-			ent->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
-			ent->extra_lines_above--;
+			next = ent->next;
+			if (!XTEXT_ENT_IS_DAY_SEP (ent))
+				gtk_xtext_maybe_insert_day_sep (buf, ent);
 		}
 	}
 
@@ -8539,6 +8570,42 @@ gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
 	return visible;
 }
 
+/* If the head (or tail) of the list is a day separator, unlink and free
+ * it, returning its display-line count for the caller's accounting
+ * (0 when the edge is not a separator).  A separator at either edge is
+ * always stale chrome: at the head its predecessor is gone and the
+ * window edge never shows a day header; at the tail its day has no
+ * content below it. */
+static int
+gtk_xtext_drop_edge_day_sep (xtext_buffer *buf, gboolean at_head)
+{
+	textentry *ent = at_head ? buf->text_first : buf->text_last;
+	int lines;
+
+	if (!ent || !XTEXT_ENT_IS_DAY_SEP (ent))
+		return 0;
+
+	lines = ENT_DISPLAY_LINES (ent);
+	if (at_head)
+	{
+		buf->text_first = ent->next;
+		if (buf->text_first)
+			buf->text_first->prev = NULL;
+		else
+			buf->text_last = NULL;
+	}
+	else
+	{
+		buf->text_last = ent->prev;
+		if (buf->text_last)
+			buf->text_last->next = NULL;
+		else
+			buf->text_first = NULL;
+	}
+	gtk_xtext_kill_ent (buf, ent);
+	return lines;
+}
+
 /* Remove the topline from the linked list.
  * In virtual mode (Phase 4), this only evicts from the materialized window —
  * the entry survives in the SQLite DB and can be rematerialized later.
@@ -8548,92 +8615,98 @@ static void
 gtk_xtext_remove_top (xtext_buffer *buffer)
 {
 	textentry *ent;
+	int killed_visible = FALSE;
+	int value_shift = 0;
+	int sep_lines;
+
+	/* Drop any day separator at the head (defensive — removal below is
+	 * what normally exposes one), remove one real entry, then drop the
+	 * separator that removal may have exposed.  A separator is synthetic
+	 * (no DB ordinal), so its removal never shifts mat_first_index; its
+	 * line is credited like any other removed line. */
+	sep_lines = gtk_xtext_drop_edge_day_sep (buffer, TRUE);
+	if (sep_lines)
+	{
+		if (HAS_VIRT_DB (buffer))
+			buffer->lines_before_mat += sep_lines;
+		else
+		{
+			buffer->num_lines -= sep_lines;
+			buffer->last_pixel_pos -= (sep_lines * buffer->xtext->fontsize);
+			value_shift += sep_lines;
+		}
+	}
 
 	ent = buffer->text_first;
-	if (!ent)
-		return;
 
 	/* Ephemeral entries have no DB row and can't be rematerialized.
 	 * Skip eviction — the entry stays pinned.  Callers use if-not-while
 	 * so this won't loop. */
-	if (ent->flags & TEXTENTRY_FLAG_EPHEMERAL)
-		return;
-
-	if (HAS_VIRT_DB (buffer))
+	if (ent && !(ent->flags & TEXTENTRY_FLAG_EPHEMERAL))
 	{
-		/* DB-backed eviction: the entry survives in the DB, so use the
-		 * absorptive accounting (same as ensure_range head eviction) —
-		 * its actual lines move into the lines_before_mat estimate.
-		 * num_lines composition (LINES_BEFORE_MAT + mat + after) and the
-		 * adjustment coordinate space are unchanged, so unlike the
-		 * non-virtual path there is no num_lines/value shift.  Without
-		 * this credit, every live-append prune made the lines above the
-		 * window vanish from the scrollbar: upper stagnated for the whole
-		 * session and later scroll-up hit the lines_before_mat=0 clamp
-		 * while mat_first_index was still huge (thumb pegged to top,
-		 * spurious chathistory fetches). */
-		int ent_lines = ENT_DISPLAY_LINES (ent);
-
-		buffer->mat_first_index++;
-		buffer->lines_before_mat += ent_lines;
-
-		buffer->text_first = ent->next;
-		if (buffer->text_first)
+		if (HAS_VIRT_DB (buffer))
 		{
-			buffer->text_first->prev = NULL;
-			/* Remove stale day boundary - first entry has no predecessor.
-			 * Credit the lost boundary line to lines_before_mat too, so
-			 * the composition stays balanced (mirrors ensure_range). */
-			if (buffer->text_first->flags & TEXTENTRY_FLAG_DAY_BOUNDARY)
-			{
-				buffer->text_first->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
-				buffer->text_first->extra_lines_above--;
-				buffer->text_first->display_lines--;
-				if (buffer->entry_tree)
-					update_weight234 (buffer->entry_tree, buffer->text_first, -1);
-				buffer->lines_before_mat++;
-			}
+			/* DB-backed eviction: the entry survives in the DB, so use the
+			 * absorptive accounting (same as ensure_range head eviction) —
+			 * its actual lines move into the lines_before_mat estimate.
+			 * num_lines composition (LINES_BEFORE_MAT + mat + after) and the
+			 * adjustment coordinate space are unchanged, so unlike the
+			 * non-virtual path there is no num_lines/value shift.  Without
+			 * this credit, every live-append prune made the lines above the
+			 * window vanish from the scrollbar: upper stagnated for the whole
+			 * session and later scroll-up hit the lines_before_mat=0 clamp
+			 * while mat_first_index was still huge (thumb pegged to top,
+			 * spurious chathistory fetches). */
+			int ent_lines = ENT_DISPLAY_LINES (ent);
+
+			buffer->mat_first_index++;
+			buffer->lines_before_mat += ent_lines;
+
+			buffer->text_first = ent->next;
+			if (buffer->text_first)
+				buffer->text_first->prev = NULL;
+			else
+				buffer->text_last = NULL;
 		}
 		else
-			buffer->text_last = NULL;
-	}
-	else
-	{
-		int ent_lines = ENT_DISPLAY_LINES (ent);
-		buffer->num_lines -= ent_lines;
-		buffer->last_pixel_pos -= (ent_lines * buffer->xtext->fontsize);
-		buffer->text_first = ent->next;
-		if (buffer->text_first)
 		{
-			buffer->text_first->prev = NULL;
-			/* Remove stale day boundary - first entry has no predecessor */
-			if (buffer->text_first->flags & TEXTENTRY_FLAG_DAY_BOUNDARY)
-			{
-				buffer->text_first->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
-				buffer->text_first->extra_lines_above--;
-				buffer->text_first->display_lines--;
-				if (buffer->entry_tree)
-					update_weight234 (buffer->entry_tree, buffer->text_first, -1);
-				/* Keep num_lines in sync with tree weight. Without this
-				 * decrement, num_lines is off by 1 (stale) until the
-				 * next gtk_xtext_calc_lines, and adj->upper with it. */
-				buffer->num_lines--;
-				ent_lines++;  /* account for the removed boundary line */
-			}
+			int ent_lines = ENT_DISPLAY_LINES (ent);
+			buffer->num_lines -= ent_lines;
+			buffer->last_pixel_pos -= (ent_lines * buffer->xtext->fontsize);
+			buffer->text_first = ent->next;
+			if (buffer->text_first)
+				buffer->text_first->prev = NULL;
+			else
+				buffer->text_last = NULL;
+			value_shift += ent_lines;
 		}
-		else
-			buffer->text_last = NULL;
 
-		if (buffer->xtext->buffer == buffer)	/* is it the current buffer? */
+		killed_visible = gtk_xtext_kill_ent (buffer, ent);
+
+		/* Removal may have exposed a day separator at the new head. */
+		sep_lines = gtk_xtext_drop_edge_day_sep (buffer, TRUE);
+		if (sep_lines)
 		{
-			g_signal_handler_block (buffer->xtext->adj, buffer->xtext->vc_signal_tag);
-			gtk_adjustment_set_value (buffer->xtext->adj,
-				gtk_adjustment_get_value (buffer->xtext->adj) - ent_lines);
-			g_signal_handler_unblock (buffer->xtext->adj, buffer->xtext->vc_signal_tag);
+			if (HAS_VIRT_DB (buffer))
+				buffer->lines_before_mat += sep_lines;
+			else
+			{
+				buffer->num_lines -= sep_lines;
+				buffer->last_pixel_pos -= (sep_lines * buffer->xtext->fontsize);
+				value_shift += sep_lines;
+			}
 		}
 	}
 
-	if (gtk_xtext_kill_ent (buffer, ent))
+	if (value_shift && buffer->xtext->buffer == buffer)	/* is it the current buffer? */
+	{
+		g_signal_handler_block (buffer->xtext->adj, buffer->xtext->vc_signal_tag);
+		gtk_adjustment_set_value (buffer->xtext->adj,
+			gtk_adjustment_get_value (buffer->xtext->adj) - value_shift);
+		g_signal_handler_unblock (buffer->xtext->adj, buffer->xtext->vc_signal_tag);
+	}
+
+	if (killed_visible)
 	{
 		if (!buffer->xtext->add_io_tag)
 		{
@@ -8656,25 +8729,34 @@ static void
 gtk_xtext_remove_bottom (xtext_buffer *buffer)
 {
 	textentry *ent;
+	int killed_visible = FALSE;
+
+	/* A day separator never survives at the tail: its day has no content
+	 * below it.  Drop one defensively before, and again after, removing
+	 * the real tail entry. */
+	buffer->num_lines -= gtk_xtext_drop_edge_day_sep (buffer, FALSE);
 
 	ent = buffer->text_last;
-	if (!ent)
-		return;
 
 	/* Ephemeral entries are pinned — can't be rematerialized from DB */
-	if (ent->flags & TEXTENTRY_FLAG_EPHEMERAL)
-		return;
+	if (ent && !(ent->flags & TEXTENTRY_FLAG_EPHEMERAL))
 	{
-		int ent_lines = ENT_DISPLAY_LINES (ent);
-		buffer->num_lines -= ent_lines;
-	}
-	buffer->text_last = ent->prev;
-	if (buffer->text_last)
-		buffer->text_last->next = NULL;
-	else
-		buffer->text_first = NULL;
+		{
+			int ent_lines = ENT_DISPLAY_LINES (ent);
+			buffer->num_lines -= ent_lines;
+		}
+		buffer->text_last = ent->prev;
+		if (buffer->text_last)
+			buffer->text_last->next = NULL;
+		else
+			buffer->text_first = NULL;
 
-	if (gtk_xtext_kill_ent (buffer, ent))
+		killed_visible = gtk_xtext_kill_ent (buffer, ent);
+
+		buffer->num_lines -= gtk_xtext_drop_edge_day_sep (buffer, FALSE);
+	}
+
+	if (killed_visible)
 	{
 		if (!buffer->xtext->add_io_tag)
 		{
@@ -9620,39 +9702,6 @@ gtk_xtext_link_entry (xtext_buffer *buf, textentry *ent, xtext_link_position pos
 		break;
 	}
 
-	/* Day boundary: check ent vs its predecessor */
-	if (prefs.hex_gui_day_separator && ent->prev && ent->stamp > 0 &&
-	    ent->prev->stamp > 0 && xtext_is_different_day (ent->prev->stamp, ent->stamp))
-	{
-		ent->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
-		ent->extra_lines_above++;
-	}
-
-	/* Day boundary: update next entry's boundary based on new predecessor */
-	if (prefs.hex_gui_day_separator && ent->next && ent->next->stamp > 0 && ent->stamp > 0)
-	{
-		gboolean was_boundary = (ent->next->flags & TEXTENTRY_FLAG_DAY_BOUNDARY) != 0;
-		gboolean is_boundary = xtext_is_different_day (ent->stamp, ent->next->stamp);
-		if (is_boundary && !was_boundary)
-		{
-			ent->next->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
-			ent->next->extra_lines_above++;
-			ent->next->display_lines++;
-			if (buf->entry_tree)
-				update_weight234 (buf->entry_tree, ent->next, 1);
-			buf->num_lines++;
-		}
-		else if (!is_boundary && was_boundary)
-		{
-			ent->next->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
-			ent->next->extra_lines_above--;
-			ent->next->display_lines--;
-			if (buf->entry_tree)
-				update_weight234 (buf->entry_tree, ent->next, -1);
-			buf->num_lines--;
-		}
-	}
-
 	/* Subline computation */
 	ent->sublines = NULL;
 	if (buf->window_width > 0)
@@ -9697,7 +9746,75 @@ gtk_xtext_link_entry (xtext_buffer *buf, textentry *ent, xtext_link_position pos
 	if (buf->entry_tree)
 		add234 (buf->entry_tree, ent);
 
+	/* Day separators are first-class entries.  After linking a real
+	 * entry, ensure a separator exists on either side of it where it now
+	 * borders a different local day: the prev side covers appends and
+	 * ordinary inserts, the next side covers prepends and the join point
+	 * when older history materializes above the current head.  Both
+	 * sides fold into the returned line count so callers that shift the
+	 * scroll value by "lines added" stay accurate. */
+	if (!XTEXT_ENT_IS_DAY_SEP (ent))
+	{
+		new_lines += gtk_xtext_maybe_insert_day_sep (buf, ent);
+		if (ent->next && !XTEXT_ENT_IS_DAY_SEP (ent->next))
+			new_lines += gtk_xtext_maybe_insert_day_sep (buf, ent->next);
+	}
+
 	return new_lines;
+}
+
+/* Insert a day-separator entry before `ent` when `ent` starts a new
+ * local calendar day relative to its list predecessor.  Returns the
+ * number of display lines added (0 if no separator was needed).
+ *
+ * The separator is stamped at ent's local midnight, so the (stamp, id)
+ * comparator used by both the B-tree and the linked list places it
+ * between the last entry of the previous day and every entry of its own
+ * day — chathistory backfill on either side lands on the correct side
+ * of it with no flag migration.  An entry stamped exactly at midnight
+ * would tie with the separator's stamp and win the id tiebreak (DB
+ * rowids < LOCAL_ENTRY_ID_BASE), putting the separator on the wrong
+ * side; creation is skipped for that one-second window (cosmetic). */
+static int
+gtk_xtext_maybe_insert_day_sep (xtext_buffer *buf, textentry *ent)
+{
+	textentry *sep;
+	time_t midnight;
+
+	if (!prefs.hex_gui_day_separator)
+		return 0;
+	if (XTEXT_ENT_IS_DAY_SEP (ent) || !ent->prev || ent->stamp <= 0)
+		return 0;
+	if (XTEXT_ENT_IS_DAY_SEP (ent->prev))
+		return 0;	/* already has one */
+	if (ent->prev->stamp <= 0 ||
+	    !xtext_is_different_day (ent->prev->stamp, ent->stamp))
+		return 0;
+
+	midnight = xtext_day_start (ent->stamp);
+	if (midnight == (time_t) -1 || ent->stamp <= midnight)
+		return 0;
+
+	sep = g_malloc0 (1 + sizeof (textentry));
+	sep->str = (unsigned char *) sep + sizeof (textentry);
+	sep->str_len = 0;
+	sep->left_len = -1;
+	sep->indent = MARGIN;
+
+	gtk_xtext_init_entry (buf, sep, midnight);
+	sep->flags |= TEXTENTRY_FLAG_DAY_SEP;
+	sep->group_id = 0;	/* never part of a multiline group */
+	/* Always ephemeral, even in non-virtual buffers: a later
+	 * set_virtual conversion must not count separators as DB rows. */
+	if (!(sep->flags & TEXTENTRY_FLAG_EPHEMERAL))
+	{
+		sep->flags |= TEXTENTRY_FLAG_EPHEMERAL;
+		buf->ephemeral_count++;
+	}
+
+	sep->prev = ent->prev;
+	sep->next = ent;
+	return gtk_xtext_link_entry (buf, sep, LINK_BEFORE);
 }
 
 /* append a textentry to our linked list */
@@ -9900,9 +10017,15 @@ gtk_xtext_insert_sorted_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 
 	gtk_xtext_init_entry (buf, ent, stamp);
 
-	/* Find insertion point - walk forward to find first entry with stamp > ent->stamp.
-	 * When insert_hint is set (sorted batch), start from the hint to avoid O(N²). */
-	if (buf->insert_hint && buf->insert_hint->stamp <= ent->stamp)
+	/* Find insertion point — walk forward to the first entry that sorts
+	 * after ent under the same (stamp, id) comparator the B-tree uses.
+	 * A plain stamp comparison diverges from the tree on ties: day
+	 * separators carry local ids >= LOCAL_ENTRY_ID_BASE, so an entry
+	 * stamped exactly at a separator's midnight must land BEFORE the
+	 * separator in both structures, not after it in just one.
+	 * When insert_hint is set (sorted batch), start from the hint to
+	 * avoid O(N²). */
+	if (buf->insert_hint && entry_stamp_cmp (buf->insert_hint, ent) < 0)
 	{
 		lines_before_insert = buf->insert_hint_lines;
 		pos = buf->insert_hint->next;
@@ -9911,7 +10034,7 @@ gtk_xtext_insert_sorted_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 	{
 		pos = buf->text_first;
 	}
-	while (pos && pos->stamp <= ent->stamp)
+	while (pos && entry_stamp_cmp (pos, ent) < 0)
 	{
 		if (pos->sublines)
 			lines_before_insert += g_slist_length (pos->sublines);
@@ -10568,7 +10691,8 @@ gtk_xtext_foreach (xtext_buffer *buf, GtkXTextForeach func, void *data)
 
 		while (ent)
 		{
-			(*func) (buf->xtext, ent->str, data);
+			if (!XTEXT_ENT_IS_DAY_SEP (ent))
+				(*func) (buf->xtext, ent->str, data);
 			ent = ent->next;
 		}
 	}
@@ -11467,18 +11591,7 @@ gtk_xtext_virt_evict_head (xtext_buffer *buf)
 
 	buf->text_first = ent->next;
 	if (buf->text_first)
-	{
 		buf->text_first->prev = NULL;
-		/* Remove stale day boundary on new head */
-		if (buf->text_first->flags & TEXTENTRY_FLAG_DAY_BOUNDARY)
-		{
-			buf->text_first->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
-			buf->text_first->extra_lines_above--;
-			buf->text_first->display_lines--;
-			if (buf->entry_tree)
-				update_weight234 (buf->entry_tree, buf->text_first, -1);
-		}
-	}
 	else
 		buf->text_last = NULL;
 
@@ -11537,11 +11650,13 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 	if (!msgs)
 		return FALSE;	/* DB error / empty range — keep the old window */
 
-	/* Evict every DB-backed entry; keep ephemerals. */
+	/* Evict every DB-backed entry; keep ephemerals — except day
+	 * separators, which are synthetic and recreated for the new window
+	 * below (stale ones would sit at wrong positions after the jump). */
 	for (e = buf->text_first; e; e = next)
 	{
 		next = e->next;
-		if (!e->has_db_row)
+		if (!e->has_db_row && !XTEXT_ENT_IS_DAY_SEP (e))
 			continue;
 		if (e->prev)
 			e->prev->next = e->next;
@@ -11590,29 +11705,14 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 	}
 	scrollback_msg_list_free (msgs);
 
-	/* Recompute day-boundary flags across the rebuilt list */
-	for (e = buf->text_first; e; e = e->next)
+	/* Recreate day separators across the rebuilt list (all dropped with
+	 * the DB-backed entries above).  Insertion happens before `e`, so
+	 * iterating via the saved next pointer never revisits. */
+	for (e = buf->text_first; e; e = next)
 	{
-		gboolean was = (e->flags & TEXTENTRY_FLAG_DAY_BOUNDARY) != 0;
-		gboolean should = prefs.hex_gui_day_separator && e->prev &&
-		                   e->stamp > 0 && e->prev->stamp > 0 &&
-		                   xtext_is_different_day (e->prev->stamp, e->stamp);
-		if (should && !was)
-		{
-			e->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
-			e->extra_lines_above++;
-			e->display_lines++;
-			if (buf->entry_tree)
-				update_weight234 (buf->entry_tree, e, 1);
-		}
-		else if (!should && was)
-		{
-			e->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
-			e->extra_lines_above--;
-			e->display_lines--;
-			if (buf->entry_tree)
-				update_weight234 (buf->entry_tree, e, -1);
-		}
+		next = e->next;
+		if (!XTEXT_ENT_IS_DAY_SEP (e))
+			gtk_xtext_maybe_insert_day_sep (buf, e);
 	}
 
 	buf->mat_first_index = want_start;
@@ -11721,41 +11821,39 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		buf->mat_first_index = want_start;
 		scrollback_msg_list_free (msgs);
 
-		/* Fix day boundaries for newly prepended entries and the join point */
+		/* Create day separators between the newly prepended entries and
+		 * at the join with the old head (which, as the previous window
+		 * head, never had one). */
 		{
-			textentry *e;
+			textentry *e = buf->text_first;
 			int checked = 0;
-			for (e = buf->text_first; e && checked < loaded + 1; e = e->next, checked++)
+			while (e && checked < loaded + 1)
 			{
-				gboolean was = (e->flags & TEXTENTRY_FLAG_DAY_BOUNDARY) != 0;
-				gboolean should = prefs.hex_gui_day_separator && e->prev &&
-				                   e->stamp > 0 && e->prev->stamp > 0 &&
-				                   xtext_is_different_day (e->prev->stamp, e->stamp);
-				if (should && !was)
+				textentry *nxt = e->next;
+				if (!XTEXT_ENT_IS_DAY_SEP (e))
 				{
-					e->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
-					e->extra_lines_above++;
-					e->display_lines++;
-					if (buf->entry_tree)
-						update_weight234 (buf->entry_tree, e, 1);
+					gtk_xtext_maybe_insert_day_sep (buf, e);
+					checked++;
 				}
-				else if (!should && was)
-				{
-					e->flags &= ~TEXTENTRY_FLAG_DAY_BOUNDARY;
-					e->extra_lines_above--;
-					e->display_lines--;
-					if (buf->entry_tree)
-						update_weight234 (buf->entry_tree, e, -1);
-				}
+				e = nxt;
 			}
 		}
 
-		/* Absorptive: prepended entries move from estimated to actual */
+		/* Absorptive: prepended entries move from estimated to actual.
+		 * Separators created between loaded entries are credited too —
+		 * their rows were part of the estimate when this region was last
+		 * evicted.  The join separator before the old head (a brand-new
+		 * row, never estimated) is not walked: the loop stops after the
+		 * last loaded DB entry. */
 		{
 			textentry *e;
-			int checked = 0;
-			for (e = buf->text_first; e && checked < loaded; e = e->next, checked++)
+			int credited = 0;
+			for (e = buf->text_first; e && credited < loaded; e = e->next)
+			{
 				buf->lines_before_mat -= ENT_DISPLAY_LINES (e);
+				if (e->has_db_row)
+					credited++;
+			}
 			if (buf->lines_before_mat < 0)
 				buf->lines_before_mat = 0;
 		}
@@ -11785,17 +11883,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 				buf->text_first = ent;
 			buf->text_last = ent;
 
-			/* Day boundary */
-			if (prefs.hex_gui_day_separator && ent->prev &&
-			    ent->stamp > 0 && ent->prev->stamp > 0 &&
-			    xtext_is_different_day (ent->prev->stamp, ent->stamp))
-			{
-				ent->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
-				ent->extra_lines_above++;
-				ent->display_lines++;
-				if (buf->entry_tree)
-					update_weight234 (buf->entry_tree, ent, 1);
-			}
+			gtk_xtext_maybe_insert_day_sep (buf, ent);
 			loaded++;
 		}
 
@@ -11826,18 +11914,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 				buf->text_first = ent;
 			buf->text_last = ent;
 
-			/* Day boundary */
-			if (prefs.hex_gui_day_separator && ent->prev &&
-			    ent->stamp > 0 && ent->prev->stamp > 0 &&
-			    xtext_is_different_day (ent->prev->stamp, ent->stamp))
-			{
-				ent->flags |= TEXTENTRY_FLAG_DAY_BOUNDARY;
-				ent->extra_lines_above++;
-				ent->display_lines++;
-				if (buf->entry_tree)
-					update_weight234 (buf->entry_tree, ent, 1);
-			}
-
+			gtk_xtext_maybe_insert_day_sep (buf, ent);
 		}
 
 		scrollback_msg_list_free (msgs);
@@ -11856,6 +11933,20 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		while (buf->mat_first_index < want_start - VIRT_PAGE_SIZE &&
 		       BUF_MAT_COUNT (buf) - buf->ephemeral_count > max)
 	{
+		/* Drop a day separator exposed at the head before the pin checks —
+		 * it is synthetic (EPHEMERAL, no DB ordinal) and would otherwise
+		 * jam the loop on the ephemeral guard below.  Its line moves into
+		 * the estimate like any other evicted line; mat_first_index is
+		 * untouched. */
+		{
+			int sep_lines = gtk_xtext_drop_edge_day_sep (buf, TRUE);
+			if (sep_lines)
+			{
+				buf->lines_before_mat += sep_lines;
+				continue;
+			}
+		}
+
 		/* Don't evict pinned entries (selection or ephemeral) */
 		if (buf->text_first && buf->sel_pin_start_id != 0 &&
 		    buf->text_first->entry_id == buf->sel_pin_start_id)
@@ -11865,15 +11956,13 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 
 		{
 			int evicted_lines = ENT_DISPLAY_LINES (buf->text_first);
-			gboolean next_loses_boundary = (buf->text_first->next &&
-			    (buf->text_first->next->flags & TEXTENTRY_FLAG_DAY_BOUNDARY));
 			gtk_xtext_virt_evict_head (buf);
 			buf->lines_before_mat += evicted_lines;
-			if (next_loses_boundary)
-				buf->lines_before_mat++;
 		}
 		buf->mat_first_index++;
 	}
+	/* The final eviction may have left a separator at the head. */
+	buf->lines_before_mat += gtk_xtext_drop_edge_day_sep (buf, TRUE);
 	}
 
 	/* Tail eviction: symmetric with head eviction.  When the user scrolls
@@ -11894,6 +11983,12 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		while (mat_end_idx > want_end + VIRT_PAGE_SIZE &&
 		       BUF_MAT_COUNT (buf) - buf->ephemeral_count > max)
 		{
+			/* Drop a day separator exposed at the tail — synthetic, and it
+			 * would jam the loop on the ephemeral guard below.  num_lines
+			 * is resynced by the recompute below, matching evict_tail. */
+			if (gtk_xtext_drop_edge_day_sep (buf, FALSE))
+				continue;
+
 			/* Don't evict pinned entries (selection or ephemeral) */
 			if (buf->text_last && buf->sel_pin_end_id != 0 &&
 			    buf->text_last->entry_id == buf->sel_pin_end_id)
@@ -11905,6 +12000,8 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			mat_db_count = BUF_MAT_COUNT (buf) - buf->ephemeral_count;
 			mat_end_idx = buf->mat_first_index + mat_db_count - 1;
 		}
+		/* The final eviction may have left a separator at the tail. */
+		gtk_xtext_drop_edge_day_sep (buf, FALSE);
 	}
 
 	/* Phase 5: only recompute if something was actually loaded or evicted.
@@ -12655,9 +12752,10 @@ gtk_xtext_entry_set_reply (xtext_buffer *buf, textentry *ent,
 	ent->reply->target_preview = target_preview ? g_strdup (target_preview) : NULL;
 
 	{
-		int new_above = (ent->flags & TEXTENTRY_FLAG_DAY_BOUNDARY) ? 2 : 1;
-		int delta = new_above - ent->extra_lines_above;
-		ent->extra_lines_above = new_above;
+		/* extra_lines_above means "reply context row" only — day
+		 * separators are their own entries. */
+		int delta = 1 - ent->extra_lines_above;
+		ent->extra_lines_above = 1;
 
 		if (delta != 0)
 		{
