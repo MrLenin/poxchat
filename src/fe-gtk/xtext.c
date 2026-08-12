@@ -3589,11 +3589,15 @@ gtk_xtext_get_click_zone (GtkXText *xtext, int y, textentry **ent_out)
 
 	/* Reaction badge sits after the visible text and (if present) the
 	 * collapse indicator.  Use the rendered layout's bounds, not the
-	 * full text wrap count — for collapsed entries those differ. */
+	 * full text wrap count — for collapsed entries those differ.
+	 * Require an actual badge row: without the extra_lines_below check,
+	 * a transiently stale sublines list classifies every subline as a
+	 * badge hit, and the press handler then swallows the click that
+	 * should have opened a link. */
 	{
 		int badge_start = ent->extra_lines_above + visible_text
 			+ (ent->collapsible ? 1 : 0);
-		if (subline >= badge_start)
+		if (ent->extra_lines_below > 0 && subline >= badge_start)
 			return XTEXT_ZONE_REACT;
 	}
 
