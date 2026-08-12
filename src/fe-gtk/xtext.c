@@ -11027,8 +11027,21 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 		xtext->buffer = buf;
 		dontscroll (buf);	/* force scrolling off */
 
-		/* Set upper before value to avoid clamping issues */
-		gtk_adjustment_set_upper (xtext->adj, buf->num_lines);
+		/* Reconfigure upper AND page_size before restoring value.  The
+		 * shared adjustment may carry a page_size clamped to a previous
+		 * undersized buffer (see the GTK4 configure-rejection clamp in
+		 * adjustment_set); only bumping upper left that stale small page
+		 * on a full buffer — wrong thumb size and bottom-tolerance math
+		 * until the next append or resize.  Block value-changed: the
+		 * clamp may move the stale value, and the restores below set the
+		 * real one. */
+		g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
+		gtk_xtext_adjustment_set (buf, FALSE);
+		g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
+		/* adjustment_set's clamp sets anchor_to_bottom when the (stale,
+		 * previous-buffer) value exceeded the new range — restore the
+		 * flag captured above; the value restores below re-derive it. */
+		buf->scroll_anchor.anchor_to_bottom = was_down;
 
 		/* Restore scroll position - force to bottom if buffer was tracking bottom.
 		 * Must use saved was_down since dontscroll cleared anchor_to_bottom above. */
