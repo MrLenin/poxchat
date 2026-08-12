@@ -2320,6 +2320,8 @@ mg_changui_destroy (session *sess)
 		/* it fixes: Gdk-CRITICAL **: gdk_colormap_get_screen: */
 		/*           assertion `GDK_IS_COLORMAP (cmap)' failed */
 		ret = sess->gui->window;
+		if (sess->gui->search_debounce_tag)
+			g_source_remove (sess->gui->search_debounce_tag);
 		g_free (sess->gui);
 		sess->gui = NULL;
 	}
@@ -4296,6 +4298,13 @@ search_handle_event(int search_type, session_gui *gui)
 	GError *err = NULL;
 	gboolean backwards = FALSE;
 
+	/* Any explicit search action supersedes a pending debounced change */
+	if (gui->search_debounce_tag)
+	{
+		g_source_remove (gui->search_debounce_tag);
+		gui->search_debounce_tag = 0;
+	}
+
 	if (gui->search_msgid_mode)
 	{
 		text = hc_entry_get_text (gui->shentry);
@@ -4360,10 +4369,24 @@ search_handle_event(int search_type, session_gui *gui)
 	}
 }
 
+static gboolean
+search_debounce_fire (gpointer data)
+{
+	session_gui *gui = data;
+
+	gui->search_debounce_tag = 0;
+	search_handle_event (SEARCH_CHANGE, gui);
+	return G_SOURCE_REMOVE;
+}
+
 static void
 search_handle_change(GtkWidget *wid, session_gui *gui)
 {
-	search_handle_event(SEARCH_CHANGE, gui);
+	/* Debounce typing: in virtual mode a search scans the channel's
+	 * entire DB, which is too heavy to run per keystroke. */
+	if (gui->search_debounce_tag)
+		g_source_remove (gui->search_debounce_tag);
+	gui->search_debounce_tag = g_timeout_add (200, search_debounce_fire, gui);
 }
 
 static void
@@ -4434,6 +4457,9 @@ mg_search_toggle_gui (session_gui *gui)
 		gtk_widget_set_visible(gui->shbox, FALSE);
 		gtk_widget_grab_focus(gui->input_box);
 		hc_entry_set_text(gui->shentry, "");
+		/* Blanking the entry queued a debounced change; run the reset
+		 * (search_fini / highlight clear) immediately instead. */
+		search_handle_event (SEARCH_CHANGE, gui);
 		if (gui->search_msgid_mode)
 		{
 			/* The blanked entry short-circuits in msgid mode; make sure any
@@ -5744,7 +5770,11 @@ fe_session_callback (session *sess)
 		fe_timeout_remove (sess->gui->bartag);
 
 	if (sess->gui != &static_mg_gui)
+	{
+		if (sess->gui->search_debounce_tag)
+			g_source_remove (sess->gui->search_debounce_tag);
 		g_free (sess->gui);
+	}
 	g_free (sess->res);
 }
 

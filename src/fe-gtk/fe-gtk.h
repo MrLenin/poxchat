@@ -170,6 +170,7 @@ typedef struct session_gui
 		GtkWidget *shbox, *shentry;	/* search bar hbox */
 		GtkWidget *shhighlight, *shmatchcase, *shregex; /* find bar text-search toggles (insensitive in msgid mode) */
 		gboolean search_msgid_mode; /* find bar: treat the entry as an IRCv3 msgid lookup */
+		guint search_debounce_tag; /* pending debounced search (virtual-mode DB scans are per-keystroke otherwise) */
 		gulong search_changed_signal; /* hook for search change event so blanking the box doesn't suck */
 
 	GtkWidget *reply_bar;	/* IRCv3: "Replying to <nick>" bar above input */
