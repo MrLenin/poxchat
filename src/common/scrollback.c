@@ -491,26 +491,39 @@ finalize_statements (scrollback_db *sdb)
  * Prevents retrying (and re-warning) for every channel on the same network. */
 #define SCROLLBACK_FAILED_SENTINEL ((scrollback_db *)(gsize)1)
 
-/* Check database integrity.  Returns TRUE if OK, FALSE if corrupt. */
-static gboolean
+typedef enum {
+	SB_INTEGRITY_OK,
+	SB_INTEGRITY_CORRUPT,	/* quick_check ran and reported malformation */
+	SB_INTEGRITY_ERROR	/* indeterminate (busy / I/O) — do NOT recreate */
+} sb_integrity;
+
+/* Check database integrity.  Only SB_INTEGRITY_CORRUPT may trigger the
+ * backup-and-recreate path; transient errors must never cost history. */
+static sb_integrity
 scrollback_check_integrity (sqlite3 *db)
 {
 	sqlite3_stmt *stmt;
 	int rc;
-	gboolean ok = FALSE;
+	sb_integrity result;
 
 	rc = sqlite3_prepare_v2 (db, "PRAGMA quick_check(1)", -1, &stmt, NULL);
 	if (rc != SQLITE_OK)
-		return FALSE;
+		return (rc == SQLITE_CORRUPT || rc == SQLITE_NOTADB)
+			? SB_INTEGRITY_CORRUPT : SB_INTEGRITY_ERROR;
 
-	if (sqlite3_step (stmt) == SQLITE_ROW)
+	rc = sqlite3_step (stmt);
+	if (rc == SQLITE_ROW)
 	{
-		const char *result = (const char *)sqlite3_column_text (stmt, 0);
-		if (result && strcmp (result, "ok") == 0)
-			ok = TRUE;
+		const char *text = (const char *)sqlite3_column_text (stmt, 0);
+		result = (text && strcmp (text, "ok") == 0)
+			? SB_INTEGRITY_OK : SB_INTEGRITY_CORRUPT;
 	}
+	else
+		result = (rc == SQLITE_CORRUPT || rc == SQLITE_NOTADB)
+			? SB_INTEGRITY_CORRUPT : SB_INTEGRITY_ERROR;
+
 	sqlite3_finalize (stmt);
-	return ok;
+	return result;
 }
 
 /* Back up a corrupt DB file by renaming it with a timestamp suffix. */
@@ -590,24 +603,40 @@ scrollback_open (const char *network)
 	}
 
 	/* Check for corruption before using the database */
-	if (!scrollback_check_integrity (sdb->db))
 	{
-		g_warning ("Scrollback database corrupt for %s — backing up and recreating", network);
-		sqlite3_close (sdb->db);
-		scrollback_backup_corrupt (path);
+		sb_integrity integ = scrollback_check_integrity (sdb->db);
 
-		/* Re-open — creates a fresh empty database */
-		rc = sqlite3_open_v2 (path, &sdb->db,
-		                      SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, "zstd");
-		if (rc != SQLITE_OK)
+		if (integ == SB_INTEGRITY_ERROR)
 		{
-			g_warning ("Failed to recreate scrollback database %s: %s", path, sqlite3_errmsg (sdb->db));
+			g_warning ("Scrollback database for %s unreadable right now "
+			           "(busy or I/O error) — will retry next session", network);
 			sqlite3_close (sdb->db);
 			g_free (path);
 			g_free (sdb->network);
 			g_hash_table_insert (open_dbs, g_strdup (network), SCROLLBACK_FAILED_SENTINEL);
 			g_free (sdb);
 			return NULL;
+		}
+
+		if (integ == SB_INTEGRITY_CORRUPT)
+		{
+			g_warning ("Scrollback database corrupt for %s — backing up and recreating", network);
+			sqlite3_close (sdb->db);
+			scrollback_backup_corrupt (path);
+
+			/* Re-open — creates a fresh empty database */
+			rc = sqlite3_open_v2 (path, &sdb->db,
+			                      SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, "zstd");
+			if (rc != SQLITE_OK)
+			{
+				g_warning ("Failed to recreate scrollback database %s: %s", path, sqlite3_errmsg (sdb->db));
+				sqlite3_close (sdb->db);
+				g_free (path);
+				g_free (sdb->network);
+				g_hash_table_insert (open_dbs, g_strdup (network), SCROLLBACK_FAILED_SENTINEL);
+				g_free (sdb);
+				return NULL;
+			}
 		}
 	}
 
