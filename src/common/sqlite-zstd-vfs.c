@@ -51,6 +51,7 @@ typedef struct {
 	/* inner database geometry */
 	int page_size;           /* 0 until first write */
 	int page_count;
+	int meta_page_count_saved;	/* last page_count written to meta */
 	sqlite3_int64 file_size; /* page_count * page_size */
 
 	/* zstd contexts */
@@ -149,9 +150,12 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 		-1, &f->stmt_max_pgno, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
-	/* Load metadata */
+	/* Load meta geometry (diagnostic only — authoritative values derived below) */
 	{
 		sqlite3_stmt *s;
+		int meta_page_size = 0, meta_page_count = 0;
+		int max_pgno = 0;
+
 		rc = sqlite3_prepare_v2 (f->outer_db,
 			"SELECT value FROM meta WHERE key = 'page_size'",
 			-1, &s, NULL);
@@ -161,7 +165,7 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 			{
 				const char *v = (const char *)sqlite3_column_text (s, 0);
 				if (v)
-					f->page_size = atoi (v);
+					meta_page_size = atoi (v);
 			}
 			sqlite3_finalize (s);
 		}
@@ -175,13 +179,46 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 			{
 				const char *v = (const char *)sqlite3_column_text (s, 0);
 				if (v)
-					f->page_count = atoi (v);
+					meta_page_count = atoi (v);
 			}
 			sqlite3_finalize (s);
 		}
 
-		if (f->page_size > 0 && f->page_count > 0)
+		/* meta.page_count is only refreshed at commit/close; after an unclean
+		 * exit it is stale and must never shrink the file — a too-small size
+		 * reads as a truncated (i.e. "corrupt") inner DB.  The pages table,
+		 * covered by the outer DB's own journal, is the committed truth. */
+		sqlite3_reset (f->stmt_max_pgno);
+		if (sqlite3_step (f->stmt_max_pgno) == SQLITE_ROW)
+			max_pgno = sqlite3_column_int (f->stmt_max_pgno, 0);
+		sqlite3_reset (f->stmt_max_pgno);
+
+		f->page_size = meta_page_size;
+		if (f->page_size <= 0 && max_pgno >= 1)
+		{
+			/* Fall back to the inner header: page 1 is stored raw and
+			 * carries the page size at bytes 16-17, big-endian (1 = 64K). */
+			sqlite3_reset (f->stmt_read);
+			sqlite3_bind_int (f->stmt_read, 1, 1);
+			if (sqlite3_step (f->stmt_read) == SQLITE_ROW
+			    && sqlite3_column_int (f->stmt_read, 1) == COMPRESS_RAW
+			    && sqlite3_column_bytes (f->stmt_read, 0) >= 100)
+			{
+				const unsigned char *hdr = sqlite3_column_blob (f->stmt_read, 0);
+				int ps = (hdr[16] << 8) | hdr[17];
+				f->page_size = (ps == 1) ? 65536 : ps;
+			}
+			sqlite3_reset (f->stmt_read);
+		}
+
+		f->page_count = max_pgno;
+		f->meta_page_count_saved = meta_page_count;
+		if (f->page_size > 0)
 			f->file_size = (sqlite3_int64)f->page_size * f->page_count;
+
+		if (meta_page_count > 0 && meta_page_count != f->page_count)
+			g_message ("zstd-vfs: %s: derived page_count %d (stale meta said %d) — self-healed",
+			           path, f->page_count, meta_page_count);
 	}
 
 	/* Load dictionary if available */
