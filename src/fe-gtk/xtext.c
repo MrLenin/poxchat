@@ -293,8 +293,8 @@ static guint xtext_signals[LAST_SIGNAL];
 char *nocasestrstr (const char *text, const char *tofind);	/* util.c */
 int xtext_get_stamp_str (time_t, char **);
 static void gtk_xtext_render_page (GtkXText * xtext);
-void gtk_xtext_calc_lines (xtext_buffer *buf, int);
-static void gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf, int fire_signal,
+void gtk_xtext_calc_lines (xtext_buffer *buf);
+static void gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
                                               gboolean recompute_sublines);
 static gboolean gtk_xtext_is_selecting (GtkXText *xtext);
 static char *gtk_xtext_selection_get_text (GtkXText *xtext, int *len_ret);
@@ -948,8 +948,17 @@ gtk_xtext_init (GtkXText * xtext)
 	 * so visual selection remains until user clicks elsewhere. */
 }
 
+/* Reconcile the adjustment's upper/page_size/value with the buffer's
+ * current line count.  This is internal geometry maintenance, not user
+ * scrolling: value-changed is blocked around the configure, because the
+ * only value movement here is the clamp (upper shrank past a stale
+ * value), and synchronously re-entering adjustment_changed →
+ * ensure_range from arbitrary reflow paths (separator drag, badge
+ * growth, status strip) caused spurious window loads mid-mutation.
+ * (Historical note: this function used to take a fire_signal argument
+ * that was never read.) */
 static void
-gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
+gtk_xtext_adjustment_set (xtext_buffer *buf)
 {
 	GtkAdjustment *adj = buf->xtext->adj;
 	gdouble upper, page_size, value;
@@ -1000,7 +1009,16 @@ gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
 		if (page_size > upper)
 			page_size = upper;
 
-		gtk_adjustment_configure (adj, value, 0, upper, 1, page_size, page_size);
+		if (buf->xtext->vc_signal_tag)
+		{
+			g_signal_handler_block (adj, buf->xtext->vc_signal_tag);
+			gtk_adjustment_configure (adj, value, 0, upper, 1, page_size, page_size);
+			g_signal_handler_unblock (adj, buf->xtext->vc_signal_tag);
+		}
+		else
+		{
+			gtk_adjustment_configure (adj, value, 0, upper, 1, page_size, page_size);
+		}
 	}
 }
 
@@ -1653,7 +1671,7 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 			/* First real allocation — text was loaded before the widget had
 			 * a width, so line counts are wrong.  Recalculate immediately
 			 * and scroll to bottom if that's where we should be. */
-			gtk_xtext_calc_lines (xtext->buffer, FALSE);
+			gtk_xtext_calc_lines (xtext->buffer);
 			if (xtext->buffer->scroll_anchor.anchor_to_bottom)
 				gtk_adjustment_set_value (xtext->adj,
 					gtk_adjustment_get_upper (xtext->adj) -
@@ -1687,7 +1705,7 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 #endif
 			if (xtext->vc_signal_tag)
 				g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
-			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE, TRUE);
+			gtk_xtext_calc_lines_virtual_ex (xtext->buffer, TRUE);
 			if (xtext->vc_signal_tag)
 				g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
 			if (was_down)
@@ -1695,7 +1713,7 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 				xtext->buffer->scroll_anchor.anchor_to_bottom = TRUE;
 			}
 			gtk_xtext_restore_scroll_anchor (xtext->buffer, &xtext->resize_anchor);
-			gtk_xtext_adjustment_set (xtext->buffer, FALSE);
+			gtk_xtext_adjustment_set (xtext->buffer);
 #if XTEXT_DEBUG_SCROLL
 			XT_DBG ("[resize] immediate: %lld us  mat=%d\n",
 				(long long)(g_get_monotonic_time () - t0),
@@ -1712,7 +1730,7 @@ gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline
 		gdouble old_page = gtk_adjustment_get_page_size (xtext->adj);
 		gdouble old_value = gtk_adjustment_get_value (xtext->adj);
 
-		gtk_xtext_adjustment_set (xtext->buffer, FALSE);
+		gtk_xtext_adjustment_set (xtext->buffer);
 
 		if (was_down)
 		{
@@ -3416,7 +3434,7 @@ gtk_xtext_button_release (GtkGestureClick *gesture, int n_press, double x, doubl
 		if (xtext->buffer->indent != old)
 		{
 			gtk_xtext_recalc_widths (xtext->buffer, FALSE);
-			gtk_xtext_adjustment_set (xtext->buffer, TRUE);
+			gtk_xtext_adjustment_set (xtext->buffer);
 			gtk_widget_queue_draw (widget);
 		} else
 			gtk_widget_queue_draw (widget);
@@ -4240,7 +4258,7 @@ gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double event_x, d
 					update_weight234 (xtext->buffer->entry_tree, zone_ent,
 					                  zone_ent->display_lines - old_dl);
 			}
-			gtk_xtext_calc_lines (xtext->buffer, FALSE);
+			gtk_xtext_calc_lines (xtext->buffer);
 			gtk_xtext_restore_scroll_anchor (xtext->buffer, &anchor);
 			if (was_down)
 			{
@@ -6675,7 +6693,7 @@ gtk_xtext_recalc_widths (xtext_buffer *buf, int do_str_width)
 		ent = ent->next;
 	}
 
-	gtk_xtext_calc_lines (buf, FALSE);
+	gtk_xtext_calc_lines (buf);
 }
 
 int
@@ -7000,14 +7018,14 @@ gtk_xtext_recalc_day_boundaries (xtext_buffer *buf)
 		}
 	}
 
-	gtk_xtext_calc_lines (buf, TRUE);
+	gtk_xtext_calc_lines (buf);
 }
 
 /* Calculate number of actual lines (with wraps), to set adj->lower. *
  * This should only be called when the window resizes.               */
 
 static void
-gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf, int fire_signal,
+gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
                                   gboolean recompute_sublines)
 {
 	textentry *ent;
@@ -7110,17 +7128,17 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf, int fire_signal,
 	if (buf->num_lines < 1)
 		buf->num_lines = 1;
 
-	gtk_xtext_adjustment_set (buf, fire_signal);
+	gtk_xtext_adjustment_set (buf);
 }
 
 static void
-gtk_xtext_calc_lines_virtual (xtext_buffer *buf, int fire_signal)
+gtk_xtext_calc_lines_virtual (xtext_buffer *buf)
 {
-	gtk_xtext_calc_lines_virtual_ex (buf, fire_signal, TRUE);
+	gtk_xtext_calc_lines_virtual_ex (buf, TRUE);
 }
 
 void
-gtk_xtext_calc_lines (xtext_buffer *buf, int fire_signal)
+gtk_xtext_calc_lines (xtext_buffer *buf)
 {
 	/* All buffers use the lazy-reflow path (GTK4-style).  Block
 	 * value-changed during recompute to prevent adjustment_changed
@@ -7129,7 +7147,7 @@ gtk_xtext_calc_lines (xtext_buffer *buf, int fire_signal)
 	gboolean was_down = buf->scroll_anchor.anchor_to_bottom;
 	if (buf->xtext->vc_signal_tag)
 		g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
-	gtk_xtext_calc_lines_virtual (buf, fire_signal);
+	gtk_xtext_calc_lines_virtual (buf);
 	if (buf->xtext->vc_signal_tag)
 		g_signal_handler_unblock (buf->xtext->adj, buf->xtext->vc_signal_tag);
 	if (was_down)
@@ -7628,7 +7646,7 @@ top_down:
 
 		if (changed)
 		{
-			gtk_xtext_calc_lines (xtext->buffer, TRUE);
+			gtk_xtext_calc_lines (xtext->buffer);
 			gtk_widget_queue_draw (GTK_WIDGET (xtext));
 		}
 	}
@@ -7877,7 +7895,7 @@ xtext_status_expire_tick (gpointer data)
 		xtext->status_expire_timer = g_timeout_add (ms, xtext_status_expire_tick, xtext);
 	}
 
-	gtk_xtext_adjustment_set (xtext->buffer, TRUE);
+	gtk_xtext_adjustment_set (xtext->buffer);
 	if (xtext->buffer->scroll_anchor.anchor_to_bottom)
 		gtk_adjustment_set_value (xtext->adj,
 			gtk_adjustment_get_upper (xtext->adj) -
@@ -7937,7 +7955,7 @@ gtk_xtext_status_set (GtkXText *xtext, const char *key, const char *text,
 
 		if (was_visible != xtext->status_strip_visible)
 		{
-			gtk_xtext_adjustment_set (xtext->buffer, TRUE);
+			gtk_xtext_adjustment_set (xtext->buffer);
 			if (xtext->buffer->scroll_anchor.anchor_to_bottom)
 				gtk_adjustment_set_value (xtext->adj,
 					gtk_adjustment_get_upper (xtext->adj) -
@@ -7981,7 +7999,7 @@ gtk_xtext_status_remove (GtkXText *xtext, const char *key)
 		xtext->status_strip_visible = (xtext->status_item_count > 0);
 		if (was_visible != xtext->status_strip_visible)
 		{
-			gtk_xtext_adjustment_set (xtext->buffer, TRUE);
+			gtk_xtext_adjustment_set (xtext->buffer);
 			if (xtext->buffer->scroll_anchor.anchor_to_bottom)
 				gtk_adjustment_set_value (xtext->adj,
 					gtk_adjustment_get_upper (xtext->adj) -
@@ -8039,7 +8057,7 @@ xtext_status_sweep_placeholders (GtkXText *xtext)
 		xtext->status_strip_visible = (xtext->status_item_count > 0);
 		if (was_visible != xtext->status_strip_visible)
 		{
-			gtk_xtext_adjustment_set (xtext->buffer, TRUE);
+			gtk_xtext_adjustment_set (xtext->buffer);
 			if (xtext->buffer->scroll_anchor.anchor_to_bottom)
 				gtk_adjustment_set_value (xtext->adj,
 					gtk_adjustment_get_upper (xtext->adj) -
@@ -8767,11 +8785,11 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 
 	if (buf->xtext->buffer == buf)
 	{
-		gtk_xtext_calc_lines (buf, TRUE);
+		gtk_xtext_calc_lines (buf);
 		gtk_xtext_refresh (buf->xtext);
 	} else
 	{
-		gtk_xtext_calc_lines (buf, FALSE);
+		gtk_xtext_calc_lines (buf);
 	}
 
 	if (marker_reset)
@@ -9437,7 +9455,7 @@ gtk_xtext_render_page_timeout (GtkXText * xtext)
 	} else if (xtext->buffer->scroll_anchor.anchor_to_bottom)
 	{
 		g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
-		gtk_xtext_adjustment_set (xtext->buffer, FALSE);
+		gtk_xtext_adjustment_set (xtext->buffer);
 		gtk_adjustment_set_value (adj, gtk_adjustment_get_upper (adj) - gtk_adjustment_get_page_size (adj));
 		g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
 		xtext->buffer->scroll_anchor.anchor_to_bottom = TRUE;
@@ -9445,7 +9463,7 @@ gtk_xtext_render_page_timeout (GtkXText * xtext)
 		gtk_widget_queue_draw (GTK_WIDGET (xtext));
 	} else
 	{
-		gtk_xtext_adjustment_set (xtext->buffer, TRUE);
+		gtk_xtext_adjustment_set (xtext->buffer);
 		if (xtext->force_render)
 		{
 			xtext->force_render = FALSE;
@@ -11040,7 +11058,7 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 		 * clamp may move the stale value, and the restores below set the
 		 * real one. */
 		g_signal_handler_block (xtext->adj, xtext->vc_signal_tag);
-		gtk_xtext_adjustment_set (buf, FALSE);
+		gtk_xtext_adjustment_set (buf);
 		g_signal_handler_unblock (xtext->adj, xtext->vc_signal_tag);
 		/* adjustment_set's clamp sets anchor_to_bottom when the (stale,
 		 * previous-buffer) value exceeded the new range — restore the
@@ -11097,7 +11115,7 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 		buf->window_height = h;
 		if (buf->scroll_anchor.anchor_to_bottom)
 			gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper (xtext->adj));
-		gtk_xtext_adjustment_set (buf, FALSE);
+		gtk_xtext_adjustment_set (buf);
 	}
 
 	if (render)
@@ -11242,7 +11260,7 @@ gtk_xtext_buffer_set_virtual (xtext_buffer *buf, void *db, const char *channel,
 		gboolean was_down = buf->scroll_anchor.anchor_to_bottom;
 
 		g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
-		gtk_xtext_calc_lines_virtual (buf, TRUE);
+		gtk_xtext_calc_lines_virtual (buf);
 
 		if (was_down && buf->xtext->buffer == buf)
 		{
@@ -11906,16 +11924,8 @@ recompute:
 		if (!recentered)
 			gtk_xtext_save_scroll_anchor_top (buf, &er_anchor);
 
-		if (buf->xtext && buf->xtext->vc_signal_tag)
-		{
-			g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
-			gtk_xtext_calc_lines_virtual_ex (buf, TRUE, FALSE);
-			g_signal_handler_unblock (buf->xtext->adj, buf->xtext->vc_signal_tag);
-		}
-		else
-		{
-			gtk_xtext_calc_lines_virtual_ex (buf, FALSE, FALSE);
-		}
+		/* adjustment_set (via calc) blocks value-changed itself */
+		gtk_xtext_calc_lines_virtual_ex (buf, FALSE);
 
 		if (!recentered && buf->xtext && buf->xtext->adj)
 		{
@@ -12277,7 +12287,7 @@ gtk_xtext_entry_set_text (xtext_buffer *buf, textentry *ent,
 	/* Update scrollbar and redraw if visible */
 	if (buf->xtext->buffer == buf)
 	{
-		gtk_xtext_adjustment_set (buf, TRUE);
+		gtk_xtext_adjustment_set (buf);
 		if (gtk_xtext_check_ent_visibility (buf->xtext, ent, 0))
 			gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
 	}
@@ -12539,7 +12549,7 @@ gtk_xtext_entry_add_reaction (xtext_buffer *buf, textentry *ent,
 				buf->num_lines += 1;
 				if (buf->xtext)
 				{
-					gtk_xtext_adjustment_set (buf, TRUE);
+					gtk_xtext_adjustment_set (buf);
 					if (was_at_bottom)
 					{
 						buf->scroll_anchor.anchor_to_bottom = TRUE;
@@ -12602,7 +12612,7 @@ gtk_xtext_entry_remove_reaction (xtext_buffer *buf, textentry *ent,
 						buf->num_lines -= 1;
 						if (buf->xtext)
 						{
-							gtk_xtext_adjustment_set (buf, TRUE);
+							gtk_xtext_adjustment_set (buf);
 							if (buf->scroll_anchor.anchor_to_bottom)
 								gtk_adjustment_set_value (buf->xtext->adj,
 									gtk_adjustment_get_upper (buf->xtext->adj) -
@@ -12668,7 +12678,7 @@ gtk_xtext_entry_set_reply (xtext_buffer *buf, textentry *ent,
 				buf->num_lines += delta;
 				if (buf->xtext)
 				{
-					gtk_xtext_adjustment_set (buf, TRUE);
+					gtk_xtext_adjustment_set (buf);
 					if (was_at_bottom)
 					{
 						buf->scroll_anchor.anchor_to_bottom = TRUE;

@@ -2651,7 +2651,7 @@ fe_scrollback_extras_done (session *sess)
 
 	/* Recalculate total line count after reactions/replies added extra lines.
 	 * This corrects num_lines and scroll position after bulk attachment. */
-	gtk_xtext_calc_lines (sess->res->buffer, FALSE);
+	gtk_xtext_calc_lines (sess->res->buffer);
 }
 
 void
@@ -2709,7 +2709,7 @@ fe_set_batch_mode (session *sess, gboolean on)
 		if (HAS_VIRT_DB (buf))
 			gtk_xtext_enforce_mat_window (buf);
 
-		gtk_xtext_calc_lines (buf, FALSE);
+		gtk_xtext_calc_lines (buf);
 		gtk_xtext_restore_scroll_anchor_top (buf, &buf->batch_anchor);
 
 		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));

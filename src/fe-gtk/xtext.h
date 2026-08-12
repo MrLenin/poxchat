@@ -483,7 +483,7 @@ textentry *gtk_xtext_search (GtkXText * xtext, const gchar *text, gtk_xtext_sear
 void gtk_xtext_reset_marker_pos (GtkXText *xtext);
 int gtk_xtext_moveto_marker_pos (GtkXText *xtext);
 void gtk_xtext_scroll_to_entry (xtext_buffer *buf, textentry *target);
-void gtk_xtext_calc_lines (xtext_buffer *buf, int fire_signal);
+void gtk_xtext_calc_lines (xtext_buffer *buf);
 void gtk_xtext_recalc_day_boundaries (xtext_buffer *buf);
 void gtk_xtext_set_marker_from_timestamp (xtext_buffer *buf, time_t timestamp);
 void gtk_xtext_check_marker_visibility(GtkXText *xtext);
