@@ -1,5 +1,14 @@
 # Virtual Scrollback Audit
 
+**Status (2026-08-12):** C1, C2 (and C3-C6), M1, M2, M5-M11, m3 fixed —
+see commits c9e8b586..231d46bb.  M3/M4/M11 landed as the contiguity
+gates (47fcab38) + window re-center (231d46bb).  Still open: the minor
+list in §3 (highlight-all on materialization, buffer_show page_size
+reconfigure, /clear reaction/reply orphans, global UNIQUE(msgid),
+pending-msgid race, group_id persistence, save-file ephemerals,
+session-reuse buffer mixing, lastlog stamp mutation, initial-load
+tiebreaker, per-keystroke DB search scan).
+
 Date: 2026-08-10
 Scope: the virtual scrollback subsystem — `src/fe-gtk/xtext.c` (windowing,
 line accounting, render path, search/navigation) and `src/common/scrollback.c`
