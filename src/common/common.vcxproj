@@ -22,6 +22,7 @@
     <ClInclude Include="fe.h" />
     <ClInclude Include="history.h" />
     <ClInclude Include="ignore.h" />
+    <ClInclude Include="image-upload.h" />
     <ClInclude Include="inbound.h" />
     <ClInclude Include="inet.h" />
     <ClInclude Include="$(PoxChatLib)marshal.h" />
@@ -65,6 +66,7 @@
     <ClCompile Include="ctcp.c" />
     <ClCompile Include="dcc.c" />
     <ClCompile Include="history.c" />
+    <ClCompile Include="image-upload.c" />
     <ClCompile Include="plugin-identd.c" />
     <ClCompile Include="ignore.c" />
     <ClCompile Include="inbound.c" />
