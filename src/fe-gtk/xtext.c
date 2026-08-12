@@ -9099,6 +9099,17 @@ gtk_xtext_search_virt_scan (xtext_buffer *buf)
 		scrollback_msg_list_free (msgs);
 	}
 
+	/* A re-scan can run without a full search_fini (DB grew since the
+	 * last scan).  Drop the previous marks first: search_textentry_add
+	 * overwrites ent->marks (leaking the old list) and would append the
+	 * entry to search_found a second time — the duplicate then dangles
+	 * after kill_ent's single g_list_remove. */
+	g_list_foreach (buf->search_found, gtk_xtext_search_textentry_fini, 0);
+	g_list_free (buf->search_found);
+	buf->search_found = NULL;
+	buf->cursearch = NULL;
+	buf->curmark = NULL;
+
 	/* Also mark materialized entries for highlight_all rendering */
 	for (ent = buf->text_first; ent; ent = ent->next)
 	{
@@ -11390,6 +11401,17 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	if (msg->redacted_by && msg->redacted_by[0])
 		gtk_xtext_entry_apply_redaction (buf, ent, msg->redacted_by,
 		                                 msg->redact_reason, msg->redact_time);
+
+	/* Apply active-search marks.  The scan pass only marks entries that
+	 * were materialized at scan time; without this, matches materialized
+	 * later (scrolling through history, deep jumps, re-center) render
+	 * without their highlight-all marking. */
+	if (buf->search_text && !ent->marks)
+	{
+		GList *gl = gtk_xtext_search_textentry (buf, ent);
+		if (gl)
+			gtk_xtext_search_textentry_add (buf, ent, gl, FALSE);
+	}
 
 	return ent;
 }
