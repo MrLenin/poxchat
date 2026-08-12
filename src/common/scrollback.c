@@ -314,21 +314,21 @@ prepare_statements (scrollback_db *sdb)
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT id, channel_id, timestamp, msgid, text, redacted_by, redact_reason, "
 		"redact_time, is_user_msg "
-		"FROM messages WHERE channel_id = ? ORDER BY timestamp DESC LIMIT ?",
+		"FROM messages WHERE channel_id = ? ORDER BY timestamp DESC, id DESC LIMIT ?",
 		-1, &sdb->stmt_load, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
 	/* Get newest msgid */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT msgid FROM messages WHERE channel_id = ? AND msgid IS NOT NULL "
-		"AND msgid NOT LIKE 'pending:%' ORDER BY timestamp DESC LIMIT 1",
+		"AND msgid NOT LIKE 'pending:%' ORDER BY timestamp DESC, id DESC LIMIT 1",
 		-1, &sdb->stmt_newest_msgid, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
 	/* Get oldest msgid */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT msgid FROM messages WHERE channel_id = ? AND msgid IS NOT NULL "
-		"AND msgid NOT LIKE 'pending:%' ORDER BY timestamp ASC LIMIT 1",
+		"AND msgid NOT LIKE 'pending:%' ORDER BY timestamp ASC, id ASC LIMIT 1",
 		-1, &sdb->stmt_oldest_msgid, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
@@ -447,7 +447,7 @@ prepare_statements (scrollback_db *sdb)
 	/* Virtual scrollback: search message text */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT id, text FROM messages WHERE channel_id = ? AND text LIKE ? "
-		"ORDER BY timestamp ASC",
+		"ORDER BY timestamp ASC, id ASC",
 		-1, &sdb->stmt_search_text, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
