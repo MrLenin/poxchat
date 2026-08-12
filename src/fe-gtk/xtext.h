@@ -593,6 +593,14 @@ gboolean gtk_xtext_entry_redaction_matches (textentry *ent,
                                             const char *reason,
                                             time_t redact_time);
 
+/* Snapshot the original content, swap in the "[Message deleted by ...]"
+ * placeholder (preserving the nick column), and mark the entry redacted.
+ * No-op if the entry already carries this exact redaction. */
+void gtk_xtext_entry_apply_redaction (xtext_buffer *buf, textentry *ent,
+                                      const char *redacted_by,
+                                      const char *reason,
+                                      time_t redact_time);
+
 /* Mark ent as "redact-on-confirm": user clicked the redact button while
  * the entry was still PENDING.  The flag is read and cleared by
  * fe_confirm_entry once the echo/labeled-response arrives and a real

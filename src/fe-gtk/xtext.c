@@ -11308,6 +11308,14 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 		scrollback_reaction_list_free (reactions);
 	}
 
+	/* Re-apply visual redaction from the DB.  The initial scrollback load
+	 * does this via fe_redact_message, but an evict + ensure_range rebuild
+	 * starts from the stored original text — without this, scrolling away
+	 * and back displayed the supposedly-deleted content again. */
+	if (msg->redacted_by && msg->redacted_by[0])
+		gtk_xtext_entry_apply_redaction (buf, ent, msg->redacted_by,
+		                                 msg->redact_reason, msg->redact_time);
+
 	return ent;
 }
 
@@ -12096,6 +12104,58 @@ gtk_xtext_entry_set_pending_redact (textentry *ent, gboolean pending)
 {
 	if (ent)
 		ent->pending_redact = pending ? 1 : 0;
+}
+
+/* Apply visual redaction to a materialized entry: snapshot the original
+ * content for click-to-reveal, swap in the "[Message deleted by ...]"
+ * placeholder (preserving the nick column), and mark the entry redacted.
+ * No-op when the entry already carries this exact redaction, so replays
+ * don't kick a revealed entry back to the placeholder. */
+void
+gtk_xtext_entry_apply_redaction (xtext_buffer *buf, textentry *ent,
+                                 const char *redacted_by, const char *reason,
+                                 time_t redact_time)
+{
+	char *placeholder;
+
+	if (!ent || !redacted_by || !redacted_by[0])
+		return;
+
+	if (gtk_xtext_entry_redaction_matches (ent, redacted_by, reason, redact_time))
+		return;
+
+	/* Preserve original content for accountability / reveal */
+	gtk_xtext_entry_set_redaction_info (buf, ent, (const char *)ent->str,
+	                                    ent->str_len, redacted_by, reason,
+	                                    redact_time);
+
+	if (reason && *reason)
+		placeholder = g_strdup_printf ("\017[Message deleted by %s: %s]",
+		                               redacted_by, reason);
+	else
+		placeholder = g_strdup_printf ("\017[Message deleted by %s]",
+		                               redacted_by);
+
+	if (ent->left_len >= 0)
+	{
+		/* Indented: preserve left portion (nick + separator) */
+		int plen = (int)strlen (placeholder);
+		int new_len = ent->left_len + 1 + plen;
+		unsigned char *new_str = g_malloc (new_len + 1);
+		memcpy (new_str, ent->str, ent->left_len + 1);
+		memcpy (new_str + ent->left_len + 1, placeholder, plen);
+		new_str[new_len] = '\0';
+		gtk_xtext_entry_set_text (buf, ent, new_str, new_len);
+		g_free (new_str);
+	}
+	else
+	{
+		gtk_xtext_entry_set_text (buf, ent, (const unsigned char *)placeholder,
+		                          (int)strlen (placeholder));
+	}
+	g_free (placeholder);
+
+	gtk_xtext_entry_set_state (buf, ent, XTEXT_STATE_REDACTED);
 }
 
 gboolean
