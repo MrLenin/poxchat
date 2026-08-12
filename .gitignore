@@ -44,3 +44,5 @@ plugins/fishlim/fishlim.vcxproj.filters
 src/common/common.vcxproj.filters
 win32/copy/copy.vcxproj.filters
 win32/Directory.Build.props
+# zstd VFS crash-consistency harness build/run outputs
+tools/out/

@@ -189,8 +189,21 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 		 * reads as a truncated (i.e. "corrupt") inner DB.  The pages table,
 		 * covered by the outer DB's own journal, is the committed truth. */
 		sqlite3_reset (f->stmt_max_pgno);
-		if (sqlite3_step (f->stmt_max_pgno) == SQLITE_ROW)
+		rc = sqlite3_step (f->stmt_max_pgno);
+		if (rc == SQLITE_ROW)
 			max_pgno = sqlite3_column_int (f->stmt_max_pgno, 0);
+		else
+		{
+			/* MAX(pgno) is an aggregate — it always returns exactly one
+			 * row on success.  Anything else (BUSY, I/O error, ...) must
+			 * not be swallowed: doing so leaves max_pgno at 0, which
+			 * presents a healthy-looking *empty* database and invites
+			 * the app to silently rebuild over real history. */
+			g_warning ("zstd-vfs: %s: MAX(pgno) query failed (%d): %s",
+			           path, rc, sqlite3_errmsg (f->outer_db));
+			sqlite3_reset (f->stmt_max_pgno);
+			return SQLITE_ERROR;
+		}
 		sqlite3_reset (f->stmt_max_pgno);
 
 		f->page_size = meta_page_size;
@@ -206,7 +219,18 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 			{
 				const unsigned char *hdr = sqlite3_column_blob (f->stmt_read, 0);
 				int ps = (hdr[16] << 8) | hdr[17];
-				f->page_size = (ps == 1) ? 65536 : ps;
+
+				/* Only accept plausible SQLite page sizes: 1 means 64K,
+				 * otherwise a power of two in [512, 32768].  Anything
+				 * else is a corrupt/foreign header — leave page_size at
+				 * 0 rather than trust a bogus value. */
+				if (ps == 1)
+					f->page_size = 65536;
+				else if (ps >= 512 && ps <= 32768 && (ps & (ps - 1)) == 0)
+					f->page_size = ps;
+				else
+					g_warning ("zstd-vfs: %s: implausible page_size %d in "
+					           "page-1 header, ignoring", path, ps);
 			}
 			sqlite3_reset (f->stmt_read);
 		}
@@ -215,6 +239,10 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 		f->meta_page_count_saved = meta_page_count;
 		if (f->page_size > 0)
 			f->file_size = (sqlite3_int64)f->page_size * f->page_count;
+		else
+			/* page_size unknown — page_count > 0 with page_size == 0 is
+			 * an incoherent state; don't let it leak into geometry. */
+			f->page_count = 0;
 
 		if (meta_page_count > 0 && meta_page_count != f->page_count)
 			g_message ("zstd-vfs: %s: derived page_count %d (stale meta said %d) — self-healed",
@@ -446,6 +474,59 @@ train_dictionary (zstd_vfs_file *f)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Outer transaction helpers                                          */
+/* ------------------------------------------------------------------ */
+
+/* Every page write must land inside an outer transaction — a crash
+ * between autocommitted page writes would leave the inner DB torn with
+ * no journal to roll back (the inner runs journal_mode=MEMORY). */
+static int
+begin_outer (zstd_vfs_file *f)
+{
+	int rc;
+
+	if (f->in_transaction)
+		return SQLITE_OK;
+	rc = sqlite3_exec (f->outer_db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
+	if (rc != SQLITE_OK)
+	{
+		g_warning ("zstd-vfs: BEGIN IMMEDIATE failed (%d): %s",
+		           rc, sqlite3_errmsg (f->outer_db));
+		return rc;
+	}
+	f->in_transaction = 1;
+	return SQLITE_OK;
+}
+
+static int
+commit_outer (zstd_vfs_file *f)
+{
+	int rc;
+
+	if (!f->in_transaction)
+		return SQLITE_OK;
+
+	/* Keep meta.page_count fresh as of every commit (diagnostic; the
+	 * open path derives the real value from MAX(pgno)). */
+	if (f->page_count != f->meta_page_count_saved)
+	{
+		outer_db_save_meta_int (f, "page_count", f->page_count);
+		f->meta_page_count_saved = f->page_count;
+	}
+
+	rc = sqlite3_exec (f->outer_db, "COMMIT", NULL, NULL, NULL);
+	f->in_transaction = 0;
+	if (rc != SQLITE_OK)
+	{
+		g_warning ("zstd-vfs: COMMIT failed (%d): %s — rolling back",
+		           rc, sqlite3_errmsg (f->outer_db));
+		sqlite3_exec (f->outer_db, "ROLLBACK", NULL, NULL, NULL);
+		return rc;
+	}
+	return SQLITE_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /*  sqlite3_io_methods — compressed main database file                 */
 /* ------------------------------------------------------------------ */
 
@@ -455,11 +536,7 @@ zvfs_close (sqlite3_file *file)
 	zstd_vfs_file *f = (zstd_vfs_file *)file;
 
 	/* Commit any open transaction */
-	if (f->in_transaction)
-	{
-		sqlite3_exec (f->outer_db, "COMMIT", NULL, NULL, NULL);
-		f->in_transaction = 0;
-	}
+	commit_outer (f);
 
 	/* Train dictionary if we don't have one yet */
 	train_dictionary (f);
@@ -494,10 +571,20 @@ zvfs_read (sqlite3_file *file, void *buf, int iAmt, sqlite3_int64 iOfst)
 	sqlite3_bind_int (f->stmt_read, 1, pgno);
 
 	rc = sqlite3_step (f->stmt_read);
-	if (rc != SQLITE_ROW)
+	if (rc == SQLITE_DONE)
 	{
+		/* Page genuinely absent — legitimate sparse/EOF read */
 		memset (buf, 0, iAmt);
 		return SQLITE_IOERR_SHORT_READ;
+	}
+	if (rc != SQLITE_ROW)
+	{
+		/* BUSY / I/O error / etc. — never fake zeroed data, it reads
+		 * as a truncated DB and triggers corruption recovery upstream */
+		g_warning ("zstd-vfs: read page %d failed (%d): %s",
+		           pgno, rc, sqlite3_errmsg (f->outer_db));
+		memset (buf, 0, iAmt);
+		return SQLITE_IOERR_READ;
 	}
 
 	{
@@ -564,6 +651,9 @@ zvfs_write (sqlite3_file *file, const void *buf, int iAmt, sqlite3_int64 iOfst)
 	int compressed_len = 0;
 	int method = COMPRESS_RAW;
 
+	if (begin_outer (f) != SQLITE_OK)
+		return SQLITE_IOERR_WRITE;
+
 	/* Page size detection: first write reveals it */
 	if (f->page_size == 0)
 	{
@@ -622,9 +712,17 @@ zvfs_truncate (sqlite3_file *file, sqlite3_int64 nByte)
 
 	new_count = (int)(nByte / f->page_size);
 
+	if (begin_outer (f) != SQLITE_OK)
+		return SQLITE_IOERR_TRUNCATE;
+
 	sqlite3_reset (f->stmt_delete_above);
 	sqlite3_bind_int (f->stmt_delete_above, 1, new_count);
-	sqlite3_step (f->stmt_delete_above);
+	if (sqlite3_step (f->stmt_delete_above) != SQLITE_DONE)
+	{
+		g_warning ("zstd-vfs: truncate to %d pages failed: %s",
+		           new_count, sqlite3_errmsg (f->outer_db));
+		return SQLITE_IOERR_TRUNCATE;
+	}
 
 	f->page_count = new_count;
 	f->file_size = nByte;
@@ -637,11 +735,15 @@ zvfs_sync (sqlite3_file *file, int flags)
 {
 	zstd_vfs_file *f = (zstd_vfs_file *)file;
 
-	if (f->in_transaction)
-	{
-		sqlite3_exec (f->outer_db, "COMMIT", NULL, NULL, NULL);
-		f->in_transaction = 0;
-	}
+	if (commit_outer (f) != SQLITE_OK)
+		return SQLITE_IOERR_FSYNC;
+
+	/* SQLite may keep writing under the same lock hold after a sync
+	 * (e.g. multi-step commits); reopen the envelope immediately so no
+	 * write ever lands outside a transaction.  Best-effort: on failure
+	 * the begin_outer in zvfs_write retries and reports properly. */
+	if (f->lock_level >= 2)
+		begin_outer (f);
 
 	return SQLITE_OK;
 }
@@ -659,11 +761,8 @@ zvfs_lock (sqlite3_file *file, int level)
 {
 	zstd_vfs_file *f = (zstd_vfs_file *)file;
 
-	if (level >= 2 && !f->in_transaction) /* RESERVED or higher */
-	{
-		sqlite3_exec (f->outer_db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
-		f->in_transaction = 1;
-	}
+	if (level >= 2 && begin_outer (f) != SQLITE_OK) /* RESERVED or higher */
+		return SQLITE_BUSY;
 
 	f->lock_level = level;
 	return SQLITE_OK;
@@ -677,11 +776,8 @@ zvfs_unlock (sqlite3_file *file, int level)
 	/* When dropping below RESERVED, the inner SQLite's implicit
 	 * transaction is done — commit the outer DB.  With journal_mode=MEMORY,
 	 * xSync may never be called, so this is our commit point. */
-	if (level < 2 && f->lock_level >= 2 && f->in_transaction)
-	{
-		sqlite3_exec (f->outer_db, "COMMIT", NULL, NULL, NULL);
-		f->in_transaction = 0;
-	}
+	if (level < 2 && f->lock_level >= 2)
+		commit_outer (f);
 
 	f->lock_level = level;
 	return SQLITE_OK;
