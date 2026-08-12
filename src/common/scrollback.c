@@ -913,6 +913,7 @@ void
 scrollback_clear (scrollback_db *db, const char *channel)
 {
 	gint64 channel_id;
+	sqlite3_stmt *stmt;
 
 	if (!db || !channel)
 		return;
@@ -920,6 +921,31 @@ scrollback_clear (scrollback_db *db, const char *channel)
 	channel_id = scrollback_get_channel_id (db, channel);
 	if (channel_id <= 0)
 		return;
+
+	/* Purge dependent rows first — the subqueries reference messages.
+	 * replies has no channel column, so resolve through the channel's
+	 * msgids; reactions can carry pre-migration rows with NULL
+	 * channel_id, so match those through target_msgid as well.  Without
+	 * this, cleared channels accumulate orphaned reaction/reply rows
+	 * that re-attach stale state to re-fetched msgids. */
+	if (sqlite3_prepare_v2 (db->db,
+		"DELETE FROM replies WHERE msgid IN "
+		"(SELECT msgid FROM messages WHERE channel_id = ?1 AND msgid IS NOT NULL)",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, channel_id);
+		sqlite3_step (stmt);
+		sqlite3_finalize (stmt);
+	}
+	if (sqlite3_prepare_v2 (db->db,
+		"DELETE FROM reactions WHERE channel_id = ?1 OR target_msgid IN "
+		"(SELECT msgid FROM messages WHERE channel_id = ?1 AND msgid IS NOT NULL)",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, channel_id);
+		sqlite3_step (stmt);
+		sqlite3_finalize (stmt);
+	}
 
 	sqlite3_reset (db->stmt_clear);
 	sqlite3_bind_int64 (db->stmt_clear, 1, channel_id);
