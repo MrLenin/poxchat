@@ -8413,9 +8413,17 @@ gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
 
 	if (buffer->marker_pos_id == ent->entry_id)
 	{
-		/* Allow for "Marker line reset because exceeded scrollback limit. to appear. */
-		buffer->marker_pos_id = ent->next ? ent->next->entry_id : 0;
-		buffer->marker_state = MARKER_RESET_BY_KILL;
+		/* Eviction is not deletion: a DB-backed entry keeps its entry_id
+		 * (== rowid) across re-materialization, so the marker resolves
+		 * again when the entry is reloaded — leave it alone.  Migrating
+		 * here dragged the marker to the window head on every live-append
+		 * prune, and tail eviction zeroed it outright. */
+		if (!(HAS_VIRT_DB (buffer) && ent->has_db_row))
+		{
+			/* Allow for "Marker line reset because exceeded scrollback limit. to appear. */
+			buffer->marker_pos_id = ent->next ? ent->next->entry_id : 0;
+			buffer->marker_state = MARKER_RESET_BY_KILL;
+		}
 	}
 
 	if (ent->marks)
@@ -10749,6 +10757,19 @@ gtk_xtext_moveto_marker_pos (GtkXText *xtext)
 
 	{
 		textentry *marker = xtext_resolve_marker (buf);
+
+		/* Evicted but DB-backed marker (entry_id == rowid): materialize a
+		 * window around it so "jump to marker" can reach deep history. */
+		if (!marker && HAS_VIRT_DB (buf) &&
+		    buf->marker_pos_id < LOCAL_ENTRY_ID_BASE)
+		{
+			scrollback_db *db = (scrollback_db *) buf->virt_db;
+			int idx = scrollback_get_index_of_rowid (db, buf->virt_channel,
+				(gint64) buf->marker_pos_id);
+			gtk_xtext_virt_ensure_range (buf, idx, VIRT_PAGE_SIZE);
+			marker = xtext_resolve_marker (buf);
+		}
+
 		if (!marker)
 			return buf->marker_state;
 
