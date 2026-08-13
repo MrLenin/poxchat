@@ -6576,7 +6576,32 @@ mg_drag_reap_stuck_icon_cb (gpointer user_data)
 	GdkSurface *surface = gdk_drag_get_drag_surface (drag);
 
 	if (surface && gdk_surface_get_mapped (surface))
+	{
 		gdk_surface_hide (surface);
+
+#ifdef G_OS_WIN32
+		/* The stuck drag is worse than a cosmetic ghost: GDK-Win32 runs
+		 * the OLE2 DoDragDrop loop on a dedicated DND thread, and in the
+		 * stuck state that loop never returns — Windows considers a drag
+		 * to be permanently in progress, which progressively breaks
+		 * drag-and-drop for EVERY OTHER process until this one exits
+		 * (observed: exiting PoxChat restored Explorer's DND).  The loop
+		 * only re-evaluates IDropSource::QueryContinueDrag when input
+		 * arrives, so nudge the mouse by a net-zero delta: the loop
+		 * wakes, sees the button is no longer down, and exits. */
+		{
+			INPUT in[2];
+			memset (in, 0, sizeof (in));
+			in[0].type = INPUT_MOUSE;
+			in[0].mi.dwFlags = MOUSEEVENTF_MOVE;
+			in[0].mi.dx = 1;
+			in[0].mi.dy = 0;
+			in[1] = in[0];
+			in[1].mi.dx = -1;
+			SendInput (2, in, sizeof (INPUT));
+		}
+#endif
+	}
 
 	g_object_unref (drag);
 	return G_SOURCE_REMOVE;
