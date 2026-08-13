@@ -73,6 +73,7 @@
 #include "gtk-helpers.h"
 #include "hex-emoji-chooser.h"	/* hex_emoji_lookup_name for reaction hover tooltip */
 #include "../common/scrollback.h"	/* Virtual scrollback (Phase 3): scrollback_msg, scrollback_load_range */
+#include "../common/text.h"	/* poxchat_timing_log (POXCHAT_TIMING instrumentation) */
 
 #define charlen(str) g_utf8_skip[*(guchar *)(str)]
 
@@ -4353,6 +4354,13 @@ gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double event_x, d
 						g_hash_table_add (xtext->buffer->user_expanded,
 						                  GSIZE_TO_POINTER (zone_ent->entry_id));
 				}
+				poxchat_timing_log ("collapse-toggle buf=%p id=%" G_GUINT64_FORMAT
+				                    " now=%s set-size=%u",
+				                    (void *)xtext->buffer,
+				                    zone_ent->entry_id,
+				                    zone_ent->collapsed ? "collapsed" : "expanded",
+				                    xtext->buffer->user_expanded
+				                        ? g_hash_table_size (xtext->buffer->user_expanded) : 0);
 			}
 			gtk_xtext_calc_lines (xtext->buffer);
 			gtk_xtext_restore_scroll_anchor (xtext->buffer, &anchor);
@@ -9750,17 +9758,22 @@ gtk_xtext_maybe_autocollapse (xtext_buffer *buf, textentry *ent)
 
 	if (should_collapse)
 	{
+		gboolean remembered = (buf->user_expanded &&
+			g_hash_table_contains (buf->user_expanded,
+			                       GSIZE_TO_POINTER (ent->entry_id)));
+
 		ent->collapsible = TRUE;
 		/* Respect an explicit user expansion from earlier this session:
 		 * the entry stays expandable-collapsed by default, but if the
 		 * user opened it, evict + rematerialize must not shut it. */
-		if (buf->user_expanded &&
-		    g_hash_table_contains (buf->user_expanded,
-		                           GSIZE_TO_POINTER (ent->entry_id)))
-			ent->collapsed = FALSE;
-		else
-			ent->collapsed = TRUE;
+		ent->collapsed = !remembered;
 		ent_update_display_lines (ent);
+
+		poxchat_timing_log ("autocollapse buf=%p id=%" G_GUINT64_FORMAT
+		                    " remembered=%d set-size=%u",
+		                    (void *)buf, ent->entry_id, remembered,
+		                    buf->user_expanded
+		                        ? g_hash_table_size (buf->user_expanded) : 0);
 	}
 }
 
@@ -11767,6 +11780,9 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 		XT_PERF ("recenter-bail empty-load want=[%d,%d]", want_start, want_end);
 		return FALSE;	/* DB error / empty range — keep the old window */
 	}
+
+	poxchat_timing_log ("recenter buf=%p want=[%d..%d] old_mat_first=%d",
+	                    (void *)buf, want_start, want_end, buf->mat_first_index);
 
 	/* Evict every DB-backed entry; keep ephemerals — except day
 	 * separators, which are synthetic and recreated for the new window
