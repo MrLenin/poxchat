@@ -138,6 +138,45 @@ xt_dbg (const char *fmt, ...)
 #define XT_DBG(...) ((void)0)
 #endif
 
+/* Temporary timing instrumentation for the long-thumb-drag stall in huge
+ * virtual buffers (2026-08, see memory project_virt-scroll-jump-perf.md).
+ * Appends to c:/tmp/scroll-perf.log (Windows GUI builds have no visible
+ * stderr; DebugView is a worse capture story than a file the user can
+ * paste).  Flip to 1 when chasing virtual-scrollback latency. */
+#define XTEXT_VIRT_PERF_LOG 0
+
+#if XTEXT_VIRT_PERF_LOG
+static void
+xt_perf (const char *fmt, ...)
+{
+	static FILE *fp = NULL;
+	static gint64 t_start = 0;
+	va_list ap;
+
+	if (!fp)
+	{
+#ifdef WIN32
+		fp = fopen ("c:/tmp/scroll-perf.log", "a");
+#else
+		fp = fopen ("/tmp/scroll-perf.log", "a");
+#endif
+		if (!fp)
+			return;
+		t_start = g_get_monotonic_time ();
+		fprintf (fp, "=== session start ===\n");
+	}
+	fprintf (fp, "%9.3f ", (g_get_monotonic_time () - t_start) / 1000.0);
+	va_start (ap, fmt);
+	vfprintf (fp, fmt, ap);
+	va_end (ap);
+	fputc ('\n', fp);
+	fflush (fp);
+}
+#define XT_PERF(...) xt_perf (__VA_ARGS__)
+#else
+#define XT_PERF(...) ((void)0)
+#endif
+
 static GtkWidgetClass *parent_class = NULL;
 
 /* Phase 4: entry modification support */
@@ -1289,6 +1328,9 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 					if (radius < VIRT_PAGE_SIZE)
 						radius = VIRT_PAGE_SIZE;
 
+					XT_PERF ("vc-trigger val=%.0f idx=%d radius=%d above=%d below=%d",
+					         gtk_adjustment_get_value (xtext->adj), idx, radius,
+					         click_above_unmat, click_below_unmat);
 					gtk_xtext_virt_ensure_range (xtext->buffer, idx, radius);
 				}
 			}
@@ -3474,6 +3516,20 @@ gtk_xtext_button_release (GtkGestureClick *gesture, int n_press, double x, doubl
 		{
 			g_source_remove (xtext->scroll_tag);
 			xtext->scroll_tag = 0;
+		}
+
+		/* The press provisionally pinned the clicked entry (drag-gesture
+		 * begin) so it couldn't be evicted before a selection drag got
+		 * going.  If this press ended without rendering a selection, drop
+		 * the pin: selection_render re-pins for real selections, and a
+		 * stale pin permanently disables virt recentering — a later far
+		 * jump then gap-fills the whole channel (observed: single click
+		 * on text + scrollbar jump = 20-50s synchronous materialization
+		 * of up to 65k entries). */
+		if (!xtext->buffer->last_ent_start_id)
+		{
+			xtext->buffer->sel_pin_start_id = 0;
+			xtext->buffer->sel_pin_end_id = 0;
 		}
 
 		/* If button_press already handled this click (reply button, reaction
@@ -11643,16 +11699,40 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 	scrollback_db *db = (scrollback_db *) buf->virt_db;
 	GSList *msgs, *iter;
 	textentry *cursor, *e, *next;
+#if XTEXT_VIRT_PERF_LOG
+	gint64 pt0, pt_load, pt_evict, pt_merge;
+	int p_loaded = 0;
+#endif
 
-	/* Selection pins reference materialized entries; fall back to the
-	 * normal (slow but pin-aware) gap walk while a selection is active. */
+	/* Selection pins reference materialized entries, and the window must
+	 * stay contiguous — so a selection cannot survive a far jump.  The
+	 * old behavior (bail out, let ensure_range gap-fill up to the pins)
+	 * synchronously materialized the entire span: a 65k-entry channel
+	 * took ~45s.  Clearing the selection and rebuilding around the
+	 * target is the only bounded option. */
 	if (buf->sel_pin_start_id != 0 || buf->sel_pin_end_id != 0)
-		return FALSE;
+	{
+		XT_PERF ("recenter: clearing selection pins start=%" G_GUINT64_FORMAT
+		         " end=%" G_GUINT64_FORMAT " for far jump",
+		         (guint64) buf->sel_pin_start_id, (guint64) buf->sel_pin_end_id);
+		gtk_xtext_selection_clear (buf);
+		buf->last_ent_start_id = 0;
+		buf->last_ent_end_id = 0;
+	}
 
+#if XTEXT_VIRT_PERF_LOG
+	pt0 = g_get_monotonic_time ();
+#endif
 	msgs = scrollback_load_range (db, buf->virt_channel, want_start,
 	                              want_end - want_start + 1);
+#if XTEXT_VIRT_PERF_LOG
+	pt_load = g_get_monotonic_time ();
+#endif
 	if (!msgs)
+	{
+		XT_PERF ("recenter-bail empty-load want=[%d,%d]", want_start, want_end);
 		return FALSE;	/* DB error / empty range — keep the old window */
+	}
 
 	/* Evict every DB-backed entry; keep ephemerals — except day
 	 * separators, which are synthetic and recreated for the new window
@@ -11673,6 +11753,10 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 		gtk_xtext_kill_ent (buf, e);
 	}
 
+#if XTEXT_VIRT_PERF_LOG
+	pt_evict = g_get_monotonic_time ();
+#endif
+
 	/* Materialize the new range.  Both the kept list and the loaded rows
 	 * are sorted, so a single forward merge cursor suffices. */
 	cursor = buf->text_first;
@@ -11682,6 +11766,9 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 		textentry *ent = gtk_xtext_virt_materialize_msg (buf, msg);
 		if (!ent)
 			continue;
+#if XTEXT_VIRT_PERF_LOG
+		p_loaded++;
+#endif
 
 		while (cursor && entry_stamp_cmp (cursor, ent) < 0)
 			cursor = cursor->next;
@@ -11709,6 +11796,10 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 	}
 	scrollback_msg_list_free (msgs);
 
+#if XTEXT_VIRT_PERF_LOG
+	pt_merge = g_get_monotonic_time ();
+#endif
+
 	/* Recreate day separators across the rebuilt list (all dropped with
 	 * the DB-backed entries above).  Insertion happens before `e`, so
 	 * iterating via the saved next pointer never revisits. */
@@ -11723,6 +11814,13 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 	buf->lines_before_mat = (int)(want_start * buf->avg_lines_per_entry);
 	if (buf->lines_before_mat < 0)
 		buf->lines_before_mat = 0;
+
+	XT_PERF ("recenter want=[%d,%d] n=%d load=%.1fms evict=%.1fms merge=%.1fms sep=%.1fms",
+	         want_start, want_end, p_loaded,
+	         (pt_load - pt0) / 1000.0,
+	         (pt_evict - pt_load) / 1000.0,
+	         (pt_merge - pt_evict) / 1000.0,
+	         (g_get_monotonic_time () - pt_merge) / 1000.0);
 
 	return TRUE;
 }
@@ -11743,9 +11841,16 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 	int old_mat_count, old_mat_first;
 	gboolean recentered = FALSE;
 	scrollback_db *db;
+#if XTEXT_VIRT_PERF_LOG
+	gint64 et0, et_work;
+#endif
 
 	if (!buf->virt_db || !buf->virt_channel)
 		return;
+
+#if XTEXT_VIRT_PERF_LOG
+	et0 = g_get_monotonic_time ();
+#endif
 
 	old_mat_count = BUF_MAT_COUNT (buf);
 	old_mat_first = buf->mat_first_index;
@@ -11777,6 +11882,14 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		recentered = gtk_xtext_virt_recenter (buf, want_start, want_end);
 		if (recentered)
 			goto recompute;
+		XT_PERF ("far-target FELL THROUGH want=[%d,%d] mat=[%d,%d] eph=%d",
+		         want_start, want_end, mat_start, mat_end, buf->ephemeral_count);
+	}
+	else if (want_end < mat_start - VIRT_PAGE_SIZE ||
+	         want_start > mat_end + VIRT_PAGE_SIZE)
+	{
+		XT_PERF ("far-target GUARD SKIPPED mat_count=%d eph=%d",
+		         BUF_MAT_COUNT (buf), buf->ephemeral_count);
 	}
 
 	/* Prepend: load entries before current materialized window.
@@ -12014,6 +12127,9 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 	 * each recompute shifts avg_lines_per_entry slightly, changing num_lines,
 	 * which triggers another adjustment_changed → ensure_range cycle. */
 recompute:
+#if XTEXT_VIRT_PERF_LOG
+	et_work = g_get_monotonic_time ();
+#endif
 	if (BUF_MAT_COUNT (buf) != old_mat_count || buf->mat_first_index != old_mat_first)
 	{
 		xtext_scroll_anchor er_anchor;
@@ -12037,6 +12153,13 @@ recompute:
 				g_signal_handler_unblock (buf->xtext->adj, buf->xtext->vc_signal_tag);
 		}
 	}
+
+	XT_PERF ("ensure center=%d r=%d rec=%d mat %d@%d -> %d@%d work=%.1fms recompute=%.1fms",
+	         center_index, radius, recentered,
+	         old_mat_count, old_mat_first,
+	         BUF_MAT_COUNT (buf), buf->mat_first_index,
+	         (et_work - et0) / 1000.0,
+	         (g_get_monotonic_time () - et_work) / 1000.0);
 }
 
 /* Virtual scrollback: decide whether an entry should be materialized into
