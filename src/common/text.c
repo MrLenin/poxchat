@@ -345,14 +345,21 @@ scrollback_load (session *sess)
 	/* Try migration from old text file format first */
 	scrollback_migrate (db, network, sess->channel);
 
-	/* Load the newest messages from SQLite.  Virtual mode will page in older
-	 * entries on demand via ensure_range.  Cap the initial load at 500 entries
-	 * to keep startup fast — this fills the viewport plus scroll buffer. */
+	/* Load the newest messages from SQLite.  Virtual mode pages in older
+	 * entries on demand via ensure_range, so the initial replay only needs
+	 * to fill the viewport plus a scroll margin — it is NOT the history
+	 * depth.  Replaying deep here is pure connect-time cost: each line is
+	 * a synchronous Pango shape on the UI thread (~0.4 ms), and with the
+	 * old 500-entry cap an 11-channel autojoin froze the UI for ~2.2 s
+	 * right after "Connection Complete".  Chathistory dedup no longer
+	 * depends on this depth either: known_msgids seeding falls back to an
+	 * indexed DB lookup (scrollback_session_has_msgid) for anything the
+	 * replay didn't cover. */
 	t_step = g_get_monotonic_time ();
 	{
 		int initial_load = prefs.hex_text_max_lines;
-		if (initial_load > 500)
-			initial_load = 500;
+		if (initial_load > 150)
+			initial_load = 150;
 		messages = scrollback_db_load (db, sess->channel, initial_load);
 	}
 	poxchat_timing_log ("scrollback_load %s: query %.1f ms", sess->channel,
