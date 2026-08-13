@@ -6560,11 +6560,40 @@ mg_chanview_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
 		gtk_widget_set_visible (gui->bottom_drop_strip, TRUE);
 }
 
+/* GDK-Win32 sometimes never finalizes a drag: when the button is
+ * released right at the drag threshold with no further movement, OLE2
+ * never reports DRAGDROP_S_CANCEL, gdk_win32_drag_finalize() never
+ * runs, and the drag-icon surface stays mapped on screen forever (a
+ * "ghost"; enough of them degrades DND for the whole process).
+ * Upstream: https://discourse.gnome.org/t/21110 — still reproducible
+ * on GTK 4.20.  Workaround: after drag-end, give GDK a beat to
+ * finalize normally, then hide the drag surface ourselves if it is
+ * still mapped.  A no-op on healthy drags (surface already unmapped). */
+static gboolean
+mg_drag_reap_stuck_icon_cb (gpointer user_data)
+{
+	GdkDrag *drag = user_data;
+	GdkSurface *surface = gdk_drag_get_drag_surface (drag);
+
+	if (surface && gdk_surface_get_mapped (surface))
+		gdk_surface_hide (surface);
+
+	g_object_unref (drag);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+mg_drag_reap_stuck_icon (GdkDrag *drag)
+{
+	if (drag)
+		g_timeout_add (250, mg_drag_reap_stuck_icon_cb, g_object_ref (drag));
+}
+
 static void
 mg_chanview_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
                          gboolean delete_data, gpointer user_data)
 {
-	(void) drag; (void) delete_data; (void) user_data;
+	(void) delete_data; (void) user_data;
 
 	/* Reset the drag source gesture so its internal sequence state is
 	 * clean for the next drag. Without this, in-app drops that reparent
@@ -6574,6 +6603,7 @@ mg_chanview_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
 	if (source)
 		gtk_event_controller_reset (GTK_EVENT_CONTROLLER (source));
 
+	mg_drag_reap_stuck_icon (drag);
 	mg_clear_all_drop_indicators ();
 }
 
@@ -6581,11 +6611,12 @@ static void
 mg_userlist_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
                          gboolean delete_data, gpointer user_data)
 {
-	(void) drag; (void) delete_data; (void) user_data;
+	(void) delete_data; (void) user_data;
 
 	if (source)
 		gtk_event_controller_reset (GTK_EVENT_CONTROLLER (source));
 
+	mg_drag_reap_stuck_icon (drag);
 	mg_clear_all_drop_indicators ();
 }
 

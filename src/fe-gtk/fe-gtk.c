@@ -333,6 +333,18 @@ fe_args (int argc, char *argv[])
 
 	gtk_init ();
 
+	/* Raise the DND initiation threshold (default 8 px).  A slightly
+	 * jittery press on a chanview tab or nick otherwise starts a drag
+	 * that is released at the threshold with no further movement — the
+	 * exact sequence that hits a GDK-Win32 bug where OLE2 never reports
+	 * DRAGDROP_S_CANCEL, gdk_win32_drag_finalize() never runs, and the
+	 * drag icon ghosts on screen (see mg_drag_reap_stuck_icon).  Our
+	 * layout-swap drags are deliberate long gestures, so a higher
+	 * threshold costs them nothing while making accidental
+	 * threshold-grazing drags far rarer. */
+	g_object_set (gtk_settings_get_default (),
+	              "gtk-dnd-drag-threshold", 16, NULL);
+
 	/* Create GtkApplication — g_application_run() in fe_main() will
 	 * handle registration, startup/activate signals, and the main loop.
 	 * NON_UNIQUE: allow multiple instances (PoxChat tradition). */
