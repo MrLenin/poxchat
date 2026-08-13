@@ -1680,6 +1680,7 @@ void
 inbound_login_start (session *sess, char *nick, char *servname,
 							const message_tags_data *tags_data)
 {
+	poxchat_timing_log ("001 welcome (%s)", servname);
 	inbound_newnick (sess->server, sess->server->nick, nick, TRUE, tags_data);
 	server_set_name (sess->server, servname);
 	if (sess->type == SESS_SERVER)
@@ -1927,6 +1928,8 @@ inbound_login_end (session *sess, char *text, const message_tags_data *tags_data
 	if (!serv->end_of_motd)
 	{
 		serv->end_of_motd = TRUE;
+
+		poxchat_timing_log ("end of MOTD — autojoin starting (%s)", serv->servername);
 
 		if (prefs.hex_dcc_ip_from_server && serv->use_who)
 		{
@@ -3409,6 +3412,8 @@ inbound_sasl_authenticate (server *serv, char *data)
 
 		EMIT_SIGNAL_TIMESTAMP (XP_TE_SASLAUTH, serv->server_session, user, (char*)mech,
 								NULL,	NULL,	0,	0);
+
+	poxchat_timing_log ("SASL authenticated (%s)", serv->servername);
 }
 
 void

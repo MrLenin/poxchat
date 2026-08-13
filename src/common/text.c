@@ -18,6 +18,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
@@ -273,6 +274,39 @@ scrollback_save_reply_for_session (session *sess, const char *msgid,
 		                       target_nick, target_preview);
 }
 
+/* --- Connect-path timing instrumentation --------------------------------
+ * No-op unless the POXCHAT_TIMING environment variable is set; then
+ * appends to c:/tmp/poxchat-timing.log (fails silently if the dir is
+ * missing).  Splits the post-"Connection Complete" window between
+ * server-side gaps, the scrollback-open integrity scan, and per-channel
+ * load/print costs. */
+void
+poxchat_timing_log (const char *fmt, ...)
+{
+	static gint64 t0 = 0;
+	static int enabled = -1;
+	FILE *f;
+	va_list ap;
+	gint64 now = g_get_monotonic_time ();
+
+	if (enabled < 0)
+		enabled = (g_getenv ("POXCHAT_TIMING") != NULL);
+	if (!enabled)
+		return;
+
+	if (t0 == 0)
+		t0 = now;
+	f = fopen ("c:/tmp/poxchat-timing.log", "a");
+	if (!f)
+		return;
+	fprintf (f, "[%10.1f ms] ", (now - t0) / 1000.0);
+	va_start (ap, fmt);
+	vfprintf (f, fmt, ap);
+	va_end (ap);
+	fputc ('\n', f);
+	fclose (f);
+}
+
 void
 scrollback_load (session *sess)
 {
@@ -281,6 +315,7 @@ scrollback_load (session *sess)
 	const char *network;
 	gint lines = 0;
 	time_t newest_time = 0;
+	gint64 t_total, t_step;
 
 	if (sess->text_scrollback == SET_DEFAULT)
 	{
@@ -300,6 +335,9 @@ scrollback_load (session *sess)
 	if (!network)
 		return;
 
+	t_total = g_get_monotonic_time ();
+	poxchat_timing_log ("scrollback_load %s: begin", sess->channel);
+
 	db = scrollback_open (network);
 	if (!db)
 		return;
@@ -310,13 +348,17 @@ scrollback_load (session *sess)
 	/* Load the newest messages from SQLite.  Virtual mode will page in older
 	 * entries on demand via ensure_range.  Cap the initial load at 500 entries
 	 * to keep startup fast — this fills the viewport plus scroll buffer. */
+	t_step = g_get_monotonic_time ();
 	{
 		int initial_load = prefs.hex_text_max_lines;
 		if (initial_load > 500)
 			initial_load = 500;
 		messages = scrollback_db_load (db, sess->channel, initial_load);
 	}
+	poxchat_timing_log ("scrollback_load %s: query %.1f ms", sess->channel,
+	                    (g_get_monotonic_time () - t_step) / 1000.0);
 
+	t_step = g_get_monotonic_time ();
 	for (iter = messages; iter; iter = iter->next)
 	{
 		scrollback_msg *msg = iter->data;
@@ -378,10 +420,16 @@ scrollback_load (session *sess)
 		lines++;
 	}
 
+	poxchat_timing_log ("scrollback_load %s: print %d lines %.1f ms", sess->channel,
+	                    lines, (g_get_monotonic_time () - t_step) / 1000.0);
+
 	/* Get msgid tracking info from database */
+	t_step = g_get_monotonic_time ();
 	sess->scrollback_newest_msgid = scrollback_get_newest_msgid (db, sess->channel);
 	sess->scrollback_oldest_msgid = scrollback_get_oldest_msgid (db, sess->channel);
 	sess->scrollback_newest_time = scrollback_get_newest_time (db, sess->channel);
+	poxchat_timing_log ("scrollback_load %s: msgid queries %.1f ms", sess->channel,
+	                    (g_get_monotonic_time () - t_step) / 1000.0);
 
 	/* Initialize oldest_msgid from scrollback for scroll-to-load support.
 	 * This allows CHATHISTORY BEFORE requests when user scrolls to top. */
@@ -393,6 +441,7 @@ scrollback_load (session *sess)
 	scrollback_msg_list_free (messages);
 
 	/* Re-attach persisted reactions and reply contexts to loaded entries */
+	t_step = g_get_monotonic_time ();
 	if (lines > 0)
 	{
 		GSList *reactions = scrollback_load_reactions (db, sess->channel);
@@ -421,6 +470,8 @@ scrollback_load (session *sess)
 		/* Recalculate total line count after adding extra lines */
 		fe_scrollback_extras_done (sess);
 	}
+	poxchat_timing_log ("scrollback_load %s: extras %.1f ms", sess->channel,
+	                    (g_get_monotonic_time () - t_step) / 1000.0);
 
 	/* Always enable virtual scrollback when a DB exists — this allows
 	 * scrolling back through unlimited history stored in SQLite.
@@ -428,12 +479,17 @@ scrollback_load (session *sess)
 	 * while the DB provides the full history on demand.
 	 * Enable even for empty DBs (fresh channels) so entries saved
 	 * later get proper virtual tracking from the start. */
+	t_step = g_get_monotonic_time ();
 	{
 		int total = scrollback_count (db, sess->channel);
 		gint64 max_id = scrollback_get_max_rowid (db, sess->channel);
 		fe_scrollback_set_virtual (sess, db, sess->channel, total, max_id);
 		sess->scrollback_virtual_set = TRUE;
 	}
+	poxchat_timing_log ("scrollback_load %s: set_virtual %.1f ms; total %.1f ms",
+	                    sess->channel,
+	                    (g_get_monotonic_time () - t_step) / 1000.0,
+	                    (g_get_monotonic_time () - t_total) / 1000.0);
 
 	if (lines)
 	{

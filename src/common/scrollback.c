@@ -734,7 +734,11 @@ scrollback_open (const char *network)
 
 	/* Check for corruption before using the database */
 	{
+		gint64 t_integ = g_get_monotonic_time ();
 		sb_integrity integ = scrollback_check_integrity (sdb->db);
+
+		poxchat_timing_log ("scrollback_open %s: integrity quick_check %.1f ms",
+		                    network, (g_get_monotonic_time () - t_integ) / 1000.0);
 
 		if (integ == SB_INTEGRITY_ERROR)
 		{
@@ -772,13 +776,18 @@ scrollback_open (const char *network)
 
 	g_free (path);
 
-	if (!init_database (sdb))
 	{
-		sqlite3_close (sdb->db);
-		g_free (sdb->network);
-		g_hash_table_insert (open_dbs, g_strdup (network), SCROLLBACK_FAILED_SENTINEL);
-		g_free (sdb);
-		return NULL;
+		gint64 t_init = g_get_monotonic_time ();
+		if (!init_database (sdb))
+		{
+			sqlite3_close (sdb->db);
+			g_free (sdb->network);
+			g_hash_table_insert (open_dbs, g_strdup (network), SCROLLBACK_FAILED_SENTINEL);
+			g_free (sdb);
+			return NULL;
+		}
+		poxchat_timing_log ("scrollback_open %s: init/migrations %.1f ms",
+		                    network, (g_get_monotonic_time () - t_init) / 1000.0);
 	}
 
 	if (!prepare_statements (sdb))

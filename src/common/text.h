@@ -52,6 +52,9 @@ void scrollback_save_reply_for_session (session *sess, const char *msgid,
 void scrollback_confirm_pending (session *sess, const char *label, const char *real_msgid);
 gboolean scrollback_session_has_msgid (session *sess, const char *msgid,
                                        time_t timestamp);
+/* Connect-path timing instrumentation (see text.c); no-op unless the
+ * POXCHAT_TIMING env var is set, then logs to c:/tmp/poxchat-timing.log. */
+void poxchat_timing_log (const char *fmt, ...);
 void scrollback_redact_for_session (session *sess, const char *msgid,
                                     const char *redacted_by, const char *reason,
                                     time_t redact_time);

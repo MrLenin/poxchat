@@ -519,6 +519,7 @@ session *
 new_ircwindow (server *serv, char *name, int type, int focus)
 {
 	session *sess;
+	gint64 t_win = g_get_monotonic_time ();
 
 	switch (type)
 	{
@@ -541,6 +542,10 @@ new_ircwindow (server *serv, char *name, int type, int focus)
 		sess = session_new (serv, name, type, focus);
 		break;
 	}
+
+	poxchat_timing_log ("new_ircwindow %s: tab build %.1f ms",
+	                    name ? name : "(server)",
+	                    (g_get_monotonic_time () - t_win) / 1000.0);
 
 	irc_init (sess);
 	chanopt_load (sess);
