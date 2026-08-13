@@ -111,13 +111,17 @@ char *scrollback_get_oldest_msgid (scrollback_db *db, const char *channel);
 time_t scrollback_get_newest_time (scrollback_db *db, const char *channel);
 
 /**
- * Check if a msgid already exists (for deduplication).
+ * Check if a msgid already exists in a channel (for deduplication).
+ * Channel-scoped: msgids are only unique per channel (multi-target
+ * messages share one msgid across targets).
  *
  * @param db Database handle
+ * @param channel Channel name
  * @param msgid Message ID to check
- * @return TRUE if msgid exists
+ * @return TRUE if msgid exists in that channel
  */
-gboolean scrollback_has_msgid (scrollback_db *db, const char *msgid);
+gboolean scrollback_has_msgid (scrollback_db *db, const char *channel,
+                               const char *msgid);
 
 /**
  * Update a pending placeholder msgid to the real server-assigned msgid.
@@ -130,15 +134,19 @@ gboolean scrollback_update_pending_msgid (scrollback_db *db, const char *channel
 /**
  * Mark a message as redacted in scrollback.
  * Preserves the original text for accountability; stores who redacted it and why.
+ * Channel-scoped: a multi-target copy of the msgid in another channel is
+ * not redacted collaterally.
  *
  * @param db Database handle
+ * @param channel Channel the redaction was issued in
  * @param msgid Message ID to redact
  * @param redacted_by Nick who performed the redaction
  * @param reason Redaction reason (may be NULL)
  * @param redact_time When the redaction occurred
  * @return TRUE if a message was updated
  */
-gboolean scrollback_redact_message (scrollback_db *db, const char *msgid,
+gboolean scrollback_redact_message (scrollback_db *db, const char *channel,
+                                    const char *msgid,
                                     const char *redacted_by, const char *reason,
                                     time_t redact_time);
 
@@ -199,9 +207,10 @@ gboolean scrollback_save_reaction (scrollback_db *db, const char *channel,
                                    const char *nick, gboolean is_self, time_t timestamp);
 
 /**
- * Remove a reaction from scrollback.
+ * Remove a reaction from scrollback (channel-scoped).
  */
-gboolean scrollback_remove_reaction (scrollback_db *db, const char *target_msgid,
+gboolean scrollback_remove_reaction (scrollback_db *db, const char *channel,
+                                     const char *target_msgid,
                                      const char *reaction_text, const char *nick);
 
 /**
@@ -216,14 +225,16 @@ GSList *scrollback_load_reactions (scrollback_db *db, const char *channel);
  *
  * @return GSList of scrollback_reaction* (caller frees via scrollback_reaction_list_free)
  */
-GSList *scrollback_load_reactions_by_msgid (scrollback_db *db, const char *target_msgid);
+GSList *scrollback_load_reactions_by_msgid (scrollback_db *db, const char *channel,
+                                            const char *target_msgid);
 void scrollback_reaction_free (scrollback_reaction *r);
 void scrollback_reaction_list_free (GSList *list);
 
 /**
- * Save reply context for a message.
+ * Save reply context for a message (channel-scoped upsert).
  */
-gboolean scrollback_save_reply (scrollback_db *db, const char *msgid,
+gboolean scrollback_save_reply (scrollback_db *db, const char *channel,
+                                const char *msgid,
                                 const char *target_msgid, const char *target_nick,
                                 const char *target_preview);
 
@@ -241,7 +252,8 @@ void scrollback_reply_list_free (GSList *list);
  * to entries that were evicted and reloaded from the DB.
  * @return scrollback_reply* (caller frees with scrollback_reply_free) or NULL if no reply.
  */
-scrollback_reply *scrollback_load_reply_by_msgid (scrollback_db *db, const char *msgid);
+scrollback_reply *scrollback_load_reply_by_msgid (scrollback_db *db, const char *channel,
+                                                  const char *msgid);
 
 /* --- Virtual scrollback query functions --- */
 

@@ -11578,7 +11578,7 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	if (msg->msgid && msg->msgid[0] && buf->virt_db)
 	{
 		scrollback_reply *r = scrollback_load_reply_by_msgid (
-			(scrollback_db *)buf->virt_db, msg->msgid);
+			(scrollback_db *)buf->virt_db, buf->virt_channel, msg->msgid);
 		if (r)
 		{
 			guint64 target_id = 0;
@@ -11602,7 +11602,7 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	if (msg->msgid && msg->msgid[0] && buf->virt_db)
 	{
 		GSList *reactions = scrollback_load_reactions_by_msgid (
-			(scrollback_db *)buf->virt_db, msg->msgid);
+			(scrollback_db *)buf->virt_db, buf->virt_channel, msg->msgid);
 		GSList *it;
 		for (it = reactions; it; it = it->next)
 		{

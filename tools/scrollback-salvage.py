@@ -219,6 +219,14 @@ def migrate_image(image_path):
                         "(SELECT id FROM channels WHERE name = ?) "
                         "WHERE channel = ? AND channel_id IS NULL",
                         (ch_name, ch_name))
+            # Per-channel msgid uniqueness (mirrors init_database): the old
+            # global idx_msgid dropped multi-target copies; the merge's
+            # OR IGNORE dedup must use the same per-channel key the app does.
+            # Must follow the channel_id backfill above.
+            db.execute("DROP INDEX IF EXISTS idx_msgid")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_msgid "
+                       "ON messages(channel_id, msgid) "
+                       "WHERE msgid IS NOT NULL")
     finally:
         db.close()
 
@@ -243,7 +251,7 @@ def merge_backup(live_image, backup_image):
                        f"SELECT DISTINCT {ch} FROM bk.messages b")
 
             before = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-            # msgid rows: idx_msgid (partial UNIQUE) dedupes via OR IGNORE
+            # msgid rows: idx_channel_msgid (partial UNIQUE) dedupes via OR IGNORE
             db.execute(f"""
                 INSERT OR IGNORE INTO messages
                     (channel, timestamp, msgid, text,

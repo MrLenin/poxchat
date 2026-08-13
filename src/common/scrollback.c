@@ -178,8 +178,10 @@ init_database (scrollback_db *sdb)
 		"    redact_time INTEGER"
 		");"
 		"CREATE INDEX IF NOT EXISTS idx_channel_time ON messages(channel, timestamp);"
-		"CREATE UNIQUE INDEX IF NOT EXISTS idx_msgid ON messages(msgid) WHERE msgid IS NOT NULL;"
-		/* IRCv3 reactions: persisted per (target_msgid, reaction_text, nick) */
+		/* IRCv3 reactions: persisted per (channel, target_msgid,
+		 * reaction_text, nick).  msgids are only unique per channel
+		 * (multi-target messages share one), so the key is channel-scoped.
+		 * Legacy DBs with the old global UNIQUE are rebuilt below. */
 		"CREATE TABLE IF NOT EXISTS reactions ("
 		"    id INTEGER PRIMARY KEY,"
 		"    channel TEXT NOT NULL,"
@@ -188,15 +190,20 @@ init_database (scrollback_db *sdb)
 		"    nick TEXT NOT NULL,"
 		"    is_self INTEGER NOT NULL DEFAULT 0,"
 		"    timestamp INTEGER NOT NULL,"
-		"    UNIQUE(target_msgid, reaction_text, nick)"
+		"    channel_id INTEGER REFERENCES channels(id),"
+		"    UNIQUE(channel_id, target_msgid, reaction_text, nick)"
 		");"
 		"CREATE INDEX IF NOT EXISTS idx_reactions_target ON reactions(channel, target_msgid);"
-		/* IRCv3 replies: persisted as (msgid → target_msgid) mapping */
+		/* IRCv3 replies: persisted as (channel, msgid → target_msgid).
+		 * Channel-scoped for the same reason; legacy shape rebuilt below. */
 		"CREATE TABLE IF NOT EXISTS replies ("
-		"    msgid TEXT PRIMARY KEY,"
+		"    id INTEGER PRIMARY KEY,"
+		"    channel_id INTEGER REFERENCES channels(id),"
+		"    msgid TEXT NOT NULL,"
 		"    target_msgid TEXT NOT NULL,"
 		"    target_nick TEXT,"
-		"    target_preview TEXT"
+		"    target_preview TEXT,"
+		"    UNIQUE(channel_id, msgid)"
 		");";
 
 	char *errmsg = NULL;
@@ -284,6 +291,121 @@ init_database (scrollback_db *sdb)
 		}
 	}
 
+	/* Per-channel msgid uniqueness.  A multi-target PRIVMSG (or a
+	 * STATUSMSG variant like @#chan) delivers one msgid to several
+	 * targets; under the old global UNIQUE(msgid) the second channel's
+	 * save was silently dropped, so its copy vanished on eviction and
+	 * after restart.  Per-channel uniqueness is strictly weaker than
+	 * global, so the new index always builds on existing data.  Must
+	 * run after the channel_id backfill above so legacy rows are
+	 * scoped too (rows still NULL compare distinct, which is safe).
+	 * INSERT OR IGNORE dedup semantics are preserved per channel. */
+	sqlite3_exec (sdb->db, "DROP INDEX IF EXISTS idx_msgid;", NULL, NULL, NULL);
+	sqlite3_exec (sdb->db,
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_msgid "
+		"ON messages(channel_id, msgid) WHERE msgid IS NOT NULL;",
+		NULL, NULL, NULL);
+
+	/* Rebuild legacy reactions/replies tables whose keys predate channel
+	 * scoping.  Inline UNIQUE constraints can't be altered in place, so
+	 * detect the old shape via sqlite_master and copy into the new shape.
+	 * Must run after the channel_id backfill above so the copied rows
+	 * carry their channel scope. */
+	{
+		sqlite3_stmt *chk;
+		gboolean rebuild_reactions = FALSE, rebuild_replies = FALSE;
+
+		if (sqlite3_prepare_v2 (sdb->db,
+			"SELECT name, sql FROM sqlite_master WHERE type='table' "
+			"AND name IN ('reactions','replies')",
+			-1, &chk, NULL) == SQLITE_OK)
+		{
+			while (sqlite3_step (chk) == SQLITE_ROW)
+			{
+				const char *name = (const char *)sqlite3_column_text (chk, 0);
+				const char *sql = (const char *)sqlite3_column_text (chk, 1);
+				if (!name || !sql)
+					continue;
+				if (strcmp (name, "reactions") == 0 &&
+				    strstr (sql, "UNIQUE(target_msgid") != NULL)
+					rebuild_reactions = TRUE;
+				if (strcmp (name, "replies") == 0 &&
+				    strstr (sql, "msgid TEXT PRIMARY KEY") != NULL)
+					rebuild_replies = TRUE;
+			}
+			sqlite3_finalize (chk);
+		}
+
+		if (rebuild_reactions)
+		{
+			rc = sqlite3_exec (sdb->db,
+				"BEGIN;"
+				"CREATE TABLE reactions_new ("
+				"    id INTEGER PRIMARY KEY,"
+				"    channel TEXT NOT NULL,"
+				"    target_msgid TEXT NOT NULL,"
+				"    reaction_text TEXT NOT NULL,"
+				"    nick TEXT NOT NULL,"
+				"    is_self INTEGER NOT NULL DEFAULT 0,"
+				"    timestamp INTEGER NOT NULL,"
+				"    channel_id INTEGER REFERENCES channels(id),"
+				"    UNIQUE(channel_id, target_msgid, reaction_text, nick)"
+				");"
+				"INSERT OR IGNORE INTO reactions_new "
+				"    (id, channel, target_msgid, reaction_text, nick, is_self, timestamp, channel_id) "
+				"    SELECT id, channel, target_msgid, reaction_text, nick, is_self, timestamp, channel_id "
+				"    FROM reactions;"
+				"DROP TABLE reactions;"
+				"ALTER TABLE reactions_new RENAME TO reactions;"
+				"CREATE INDEX IF NOT EXISTS idx_reactions_target ON reactions(channel, target_msgid);"
+				"CREATE INDEX IF NOT EXISTS idx_reactions_channel_id ON reactions(channel_id, target_msgid);"
+				"COMMIT;",
+				NULL, NULL, &errmsg);
+			if (rc != SQLITE_OK)
+			{
+				g_warning ("scrollback: reactions channel-scope rebuild failed: %s", errmsg);
+				sqlite3_free (errmsg);
+				errmsg = NULL;
+				sqlite3_exec (sdb->db, "ROLLBACK;", NULL, NULL, NULL);
+			}
+		}
+
+		if (rebuild_replies)
+		{
+			/* channel_id backfill: pre-rebuild data was written under the
+			 * global msgid uniqueness, so resolving through messages is
+			 * unambiguous.  Orphaned reply rows (message gone) get NULL and
+			 * are simply never loaded. */
+			rc = sqlite3_exec (sdb->db,
+				"BEGIN;"
+				"CREATE TABLE replies_new ("
+				"    id INTEGER PRIMARY KEY,"
+				"    channel_id INTEGER REFERENCES channels(id),"
+				"    msgid TEXT NOT NULL,"
+				"    target_msgid TEXT NOT NULL,"
+				"    target_nick TEXT,"
+				"    target_preview TEXT,"
+				"    UNIQUE(channel_id, msgid)"
+				");"
+				"INSERT OR IGNORE INTO replies_new "
+				"    (channel_id, msgid, target_msgid, target_nick, target_preview) "
+				"    SELECT (SELECT m.channel_id FROM messages m WHERE m.msgid = r.msgid LIMIT 1), "
+				"           r.msgid, r.target_msgid, r.target_nick, r.target_preview "
+				"    FROM replies r;"
+				"DROP TABLE replies;"
+				"ALTER TABLE replies_new RENAME TO replies;"
+				"COMMIT;",
+				NULL, NULL, &errmsg);
+			if (rc != SQLITE_OK)
+			{
+				g_warning ("scrollback: replies channel-scope rebuild failed: %s", errmsg);
+				sqlite3_free (errmsg);
+				errmsg = NULL;
+				sqlite3_exec (sdb->db, "ROLLBACK;", NULL, NULL, NULL);
+			}
+		}
+	}
+
 	return TRUE;
 }
 
@@ -338,9 +460,10 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_newest_time, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
-	/* Check msgid exists */
+	/* Check msgid exists (channel-scoped: msgids are only unique per
+	 * channel — a multi-target message shares one msgid across targets) */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"SELECT 1 FROM messages WHERE msgid = ? LIMIT 1",
+		"SELECT 1 FROM messages WHERE channel_id = ? AND msgid = ? LIMIT 1",
 		-1, &sdb->stmt_has_msgid, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
@@ -357,9 +480,10 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_save_reaction, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
-	/* IRCv3 reactions: remove */
+	/* IRCv3 reactions: remove (channel-scoped) */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"DELETE FROM reactions WHERE target_msgid = ? AND reaction_text = ? AND nick = ?",
+		"DELETE FROM reactions WHERE channel_id = ? AND target_msgid = ? "
+		"AND reaction_text = ? AND nick = ?",
 		-1, &sdb->stmt_remove_reaction, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
@@ -371,32 +495,33 @@ prepare_statements (scrollback_db *sdb)
 	if (rc != SQLITE_OK) goto fail;
 
 	/* IRCv3 reactions: load for a single target msgid (used on virt re-materialize
-	 * so re-built historical entries regain their badges) */
+	 * so re-built historical entries regain their badges); channel-scoped */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT target_msgid, reaction_text, nick, is_self FROM reactions "
-		"WHERE target_msgid = ? ORDER BY reaction_text",
+		"WHERE channel_id = ? AND target_msgid = ? ORDER BY reaction_text",
 		-1, &sdb->stmt_load_reactions_by_msgid, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
-	/* IRCv3 replies: save */
+	/* IRCv3 replies: save (channel-scoped upsert on UNIQUE(channel_id, msgid)) */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"INSERT OR REPLACE INTO replies (msgid, target_msgid, target_nick, target_preview) "
-		"VALUES (?, ?, ?, ?)",
+		"INSERT OR REPLACE INTO replies (channel_id, msgid, target_msgid, target_nick, target_preview) "
+		"VALUES (?, ?, ?, ?, ?)",
 		-1, &sdb->stmt_save_reply, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
-	/* IRCv3 replies: load all for msgs in a channel */
+	/* IRCv3 replies: load all for a channel (replies carry channel_id
+	 * directly; rows with NULL channel_id are pre-migration orphans whose
+	 * message is gone, so never loading them is correct) */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"SELECT r.msgid, r.target_msgid, r.target_nick, r.target_preview "
-		"FROM replies r INNER JOIN messages m ON r.msgid = m.msgid "
-		"WHERE m.channel_id = ?",
+		"SELECT msgid, target_msgid, target_nick, target_preview "
+		"FROM replies WHERE channel_id = ?",
 		-1, &sdb->stmt_load_reply, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
-	/* IRCv3 replies: load one by msgid (for re-materialization) */
+	/* IRCv3 replies: load one by msgid (for re-materialization); channel-scoped */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT target_msgid, target_nick, target_preview "
-		"FROM replies WHERE msgid = ?",
+		"FROM replies WHERE channel_id = ? AND msgid = ?",
 		-1, &sdb->stmt_load_reply_by_msgid, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
@@ -406,10 +531,11 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_update_pending, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
-	/* Redact: mark a message as redacted by msgid */
+	/* Redact: mark a message as redacted by msgid (channel-scoped so a
+	 * multi-target copy in another channel is not redacted collaterally) */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"UPDATE messages SET redacted_by = ?, redact_reason = ?, redact_time = ? "
-		"WHERE msgid = ?",
+		"WHERE channel_id = ? AND msgid = ?",
 		-1, &sdb->stmt_redact, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
@@ -877,15 +1003,21 @@ scrollback_get_newest_time (scrollback_db *db, const char *channel)
 }
 
 gboolean
-scrollback_has_msgid (scrollback_db *db, const char *msgid)
+scrollback_has_msgid (scrollback_db *db, const char *channel, const char *msgid)
 {
 	int rc;
+	gint64 channel_id;
 
-	if (!db || !msgid || !msgid[0])
+	if (!db || !channel || !msgid || !msgid[0])
+		return FALSE;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
 		return FALSE;
 
 	sqlite3_reset (db->stmt_has_msgid);
-	sqlite3_bind_text (db->stmt_has_msgid, 1, msgid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int64 (db->stmt_has_msgid, 1, channel_id);
+	sqlite3_bind_text (db->stmt_has_msgid, 2, msgid, -1, SQLITE_TRANSIENT);
 
 	rc = sqlite3_step (db->stmt_has_msgid);
 	return (rc == SQLITE_ROW);
@@ -916,13 +1048,19 @@ scrollback_update_pending_msgid (scrollback_db *db, const char *channel,
 }
 
 gboolean
-scrollback_redact_message (scrollback_db *db, const char *msgid,
+scrollback_redact_message (scrollback_db *db, const char *channel,
+                           const char *msgid,
                            const char *redacted_by, const char *reason,
                            time_t redact_time)
 {
 	int rc;
+	gint64 channel_id;
 
-	if (!db || !db->stmt_redact || !msgid)
+	if (!db || !db->stmt_redact || !channel || !msgid)
+		return FALSE;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
 		return FALSE;
 
 	sqlite3_reset (db->stmt_redact);
@@ -932,7 +1070,8 @@ scrollback_redact_message (scrollback_db *db, const char *msgid,
 	else
 		sqlite3_bind_null (db->stmt_redact, 2);
 	sqlite3_bind_int64 (db->stmt_redact, 3, (sqlite3_int64) redact_time);
-	sqlite3_bind_text (db->stmt_redact, 4, msgid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int64 (db->stmt_redact, 4, channel_id);
+	sqlite3_bind_text (db->stmt_redact, 5, msgid, -1, SQLITE_TRANSIENT);
 
 	rc = sqlite3_step (db->stmt_redact);
 	return (rc == SQLITE_DONE && sqlite3_changes (db->db) > 0);
@@ -951,15 +1090,15 @@ scrollback_clear (scrollback_db *db, const char *channel)
 	if (channel_id <= 0)
 		return;
 
-	/* Purge dependent rows first — the subqueries reference messages.
-	 * replies has no channel column, so resolve through the channel's
-	 * msgids; reactions can carry pre-migration rows with NULL
-	 * channel_id, so match those through target_msgid as well.  Without
-	 * this, cleared channels accumulate orphaned reaction/reply rows
-	 * that re-attach stale state to re-fetched msgids. */
+	/* Purge dependent rows first.  Both tables now carry channel_id, but
+	 * pre-migration rows can have it NULL — match those through the
+	 * channel's msgids as a second leg.  Without this, cleared channels
+	 * accumulate orphaned reaction/reply rows that re-attach stale state
+	 * to re-fetched msgids. */
 	if (sqlite3_prepare_v2 (db->db,
-		"DELETE FROM replies WHERE msgid IN "
-		"(SELECT msgid FROM messages WHERE channel_id = ?1 AND msgid IS NOT NULL)",
+		"DELETE FROM replies WHERE channel_id = ?1 OR "
+		"(channel_id IS NULL AND msgid IN "
+		"(SELECT msgid FROM messages WHERE channel_id = ?1 AND msgid IS NOT NULL))",
 		-1, &stmt, NULL) == SQLITE_OK)
 	{
 		sqlite3_bind_int64 (stmt, 1, channel_id);
@@ -967,8 +1106,9 @@ scrollback_clear (scrollback_db *db, const char *channel)
 		sqlite3_finalize (stmt);
 	}
 	if (sqlite3_prepare_v2 (db->db,
-		"DELETE FROM reactions WHERE channel_id = ?1 OR target_msgid IN "
-		"(SELECT msgid FROM messages WHERE channel_id = ?1 AND msgid IS NOT NULL)",
+		"DELETE FROM reactions WHERE channel_id = ?1 OR "
+		"(channel_id IS NULL AND target_msgid IN "
+		"(SELECT msgid FROM messages WHERE channel_id = ?1 AND msgid IS NOT NULL))",
 		-1, &stmt, NULL) == SQLITE_OK)
 	{
 		sqlite3_bind_int64 (stmt, 1, channel_id);
@@ -1224,19 +1364,26 @@ scrollback_save_reaction (scrollback_db *db, const char *channel,
 
 /* IRCv3 reactions: remove a reaction from scrollback */
 gboolean
-scrollback_remove_reaction (scrollback_db *db, const char *target_msgid,
+scrollback_remove_reaction (scrollback_db *db, const char *channel,
+                            const char *target_msgid,
                             const char *reaction_text, const char *nick)
 {
 	int rc;
+	gint64 channel_id;
 
-	if (!db || !db->stmt_remove_reaction || !target_msgid ||
+	if (!db || !db->stmt_remove_reaction || !channel || !target_msgid ||
 	    !reaction_text || !nick)
 		return FALSE;
 
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return FALSE;
+
 	sqlite3_reset (db->stmt_remove_reaction);
-	sqlite3_bind_text (db->stmt_remove_reaction, 1, target_msgid, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text (db->stmt_remove_reaction, 2, reaction_text, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text (db->stmt_remove_reaction, 3, nick, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int64 (db->stmt_remove_reaction, 1, channel_id);
+	sqlite3_bind_text (db->stmt_remove_reaction, 2, target_msgid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text (db->stmt_remove_reaction, 3, reaction_text, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text (db->stmt_remove_reaction, 4, nick, -1, SQLITE_TRANSIENT);
 
 	rc = sqlite3_step (db->stmt_remove_reaction);
 	return rc == SQLITE_DONE;
@@ -1277,16 +1424,24 @@ scrollback_load_reactions (scrollback_db *db, const char *channel)
 }
 
 GSList *
-scrollback_load_reactions_by_msgid (scrollback_db *db, const char *target_msgid)
+scrollback_load_reactions_by_msgid (scrollback_db *db, const char *channel,
+                                    const char *target_msgid)
 {
 	GSList *list = NULL;
 	int rc;
+	gint64 channel_id;
 
-	if (!db || !db->stmt_load_reactions_by_msgid || !target_msgid || !target_msgid[0])
+	if (!db || !db->stmt_load_reactions_by_msgid || !channel ||
+	    !target_msgid || !target_msgid[0])
+		return NULL;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
 		return NULL;
 
 	sqlite3_reset (db->stmt_load_reactions_by_msgid);
-	sqlite3_bind_text (db->stmt_load_reactions_by_msgid, 1, target_msgid,
+	sqlite3_bind_int64 (db->stmt_load_reactions_by_msgid, 1, channel_id);
+	sqlite3_bind_text (db->stmt_load_reactions_by_msgid, 2, target_msgid,
 	                   -1, SQLITE_TRANSIENT);
 
 	while ((rc = sqlite3_step (db->stmt_load_reactions_by_msgid)) == SQLITE_ROW)
@@ -1321,26 +1476,33 @@ scrollback_reaction_list_free (GSList *list)
 
 /* IRCv3 replies: save reply context to scrollback */
 gboolean
-scrollback_save_reply (scrollback_db *db, const char *msgid,
+scrollback_save_reply (scrollback_db *db, const char *channel,
+                       const char *msgid,
                        const char *target_msgid, const char *target_nick,
                        const char *target_preview)
 {
 	int rc;
+	gint64 channel_id;
 
-	if (!db || !db->stmt_save_reply || !msgid || !target_msgid)
+	if (!db || !db->stmt_save_reply || !channel || !msgid || !target_msgid)
+		return FALSE;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
 		return FALSE;
 
 	sqlite3_reset (db->stmt_save_reply);
-	sqlite3_bind_text (db->stmt_save_reply, 1, msgid, -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text (db->stmt_save_reply, 2, target_msgid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int64 (db->stmt_save_reply, 1, channel_id);
+	sqlite3_bind_text (db->stmt_save_reply, 2, msgid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text (db->stmt_save_reply, 3, target_msgid, -1, SQLITE_TRANSIENT);
 	if (target_nick)
-		sqlite3_bind_text (db->stmt_save_reply, 3, target_nick, -1, SQLITE_TRANSIENT);
-	else
-		sqlite3_bind_null (db->stmt_save_reply, 3);
-	if (target_preview)
-		sqlite3_bind_text (db->stmt_save_reply, 4, target_preview, -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text (db->stmt_save_reply, 4, target_nick, -1, SQLITE_TRANSIENT);
 	else
 		sqlite3_bind_null (db->stmt_save_reply, 4);
+	if (target_preview)
+		sqlite3_bind_text (db->stmt_save_reply, 5, target_preview, -1, SQLITE_TRANSIENT);
+	else
+		sqlite3_bind_null (db->stmt_save_reply, 5);
 
 	rc = sqlite3_step (db->stmt_save_reply);
 	return rc == SQLITE_DONE;
@@ -1384,16 +1546,23 @@ scrollback_load_replies (scrollback_db *db, const char *channel)
  * re-materialization to reattach reply context when an entry that was
  * evicted gets reloaded from the DB. */
 scrollback_reply *
-scrollback_load_reply_by_msgid (scrollback_db *db, const char *msgid)
+scrollback_load_reply_by_msgid (scrollback_db *db, const char *channel,
+                                const char *msgid)
 {
 	scrollback_reply *r;
 	int rc;
+	gint64 channel_id;
 
-	if (!db || !db->stmt_load_reply_by_msgid || !msgid || !msgid[0])
+	if (!db || !db->stmt_load_reply_by_msgid || !channel || !msgid || !msgid[0])
+		return NULL;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
 		return NULL;
 
 	sqlite3_reset (db->stmt_load_reply_by_msgid);
-	sqlite3_bind_text (db->stmt_load_reply_by_msgid, 1, msgid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int64 (db->stmt_load_reply_by_msgid, 1, channel_id);
+	sqlite3_bind_text (db->stmt_load_reply_by_msgid, 2, msgid, -1, SQLITE_TRANSIENT);
 
 	rc = sqlite3_step (db->stmt_load_reply_by_msgid);
 	if (rc != SQLITE_ROW)

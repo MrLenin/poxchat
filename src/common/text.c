@@ -177,7 +177,8 @@ scrollback_redact_for_session (session *sess, const char *msgid,
 	if (!db)
 		return;
 
-	if (scrollback_redact_message (db, msgid, redacted_by, reason, redact_time))
+	if (scrollback_redact_message (db, sess->channel, msgid, redacted_by,
+	                               reason, redact_time))
 		return;
 
 	/* Original wasn't in the DB — save a notice keyed by NULL msgid so it
@@ -214,8 +215,9 @@ scrollback_remove_reaction_for_session (session *sess, const char *target_msgid,
                                         const char *reaction_text, const char *nick)
 {
 	scrollback_db *db = get_scrollback_db (sess);
-	if (db)
-		scrollback_remove_reaction (db, target_msgid, reaction_text, nick);
+	if (db && sess->channel[0])
+		scrollback_remove_reaction (db, sess->channel, target_msgid,
+		                            reaction_text, nick);
 }
 
 /* IRCv3 replies: persist reply context to scrollback */
@@ -225,8 +227,9 @@ scrollback_save_reply_for_session (session *sess, const char *msgid,
                                    const char *target_preview)
 {
 	scrollback_db *db = get_scrollback_db (sess);
-	if (db)
-		scrollback_save_reply (db, msgid, target_msgid, target_nick, target_preview);
+	if (db && sess->channel[0])
+		scrollback_save_reply (db, sess->channel, msgid, target_msgid,
+		                       target_nick, target_preview);
 }
 
 void
