@@ -9721,6 +9721,41 @@ gtk_xtext_init_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 		ent->indent = MARGIN;	  /* 2 pixels is the left margin */
 }
 
+/* Auto-collapse a multiline message exceeding the threshold.  Shared by
+ * link_entry (live/prepend/insert paths) and virt_materialize_msg so
+ * re-materialized entries collapse the same way live ones do.  Must run
+ * after sublines are computed and before the entry's weight enters the
+ * B-tree. */
+static void
+gtk_xtext_maybe_autocollapse (xtext_buffer *buf, textentry *ent)
+{
+	int sublines, threshold;
+	gboolean should_collapse;
+
+	if (!prefs.hex_gui_collapse_multiline || ent->group_id == 0 || !ent->sublines)
+		return;
+
+	sublines = g_slist_length (ent->sublines);
+	threshold = prefs.hex_gui_collapse_threshold;
+	should_collapse = (sublines > threshold);
+
+	/* Page-adaptive threshold */
+	if (!should_collapse && prefs.hex_gui_collapse_page_divisor > 0 && buf->xtext)
+	{
+		int page_size = gtk_widget_get_height (GTK_WIDGET (buf->xtext)) / buf->xtext->fontsize;
+		int adaptive = page_size / prefs.hex_gui_collapse_page_divisor;
+		if (adaptive > 0 && sublines > adaptive)
+			should_collapse = TRUE;
+	}
+
+	if (should_collapse)
+	{
+		ent->collapsible = TRUE;
+		ent->collapsed = TRUE;
+		ent_update_display_lines (ent);
+	}
+}
+
 /* Link an initialized entry into the buffer's doubly-linked list, compute
  * day boundaries, sublines, auto-collapse, and add to B-tree.
  * Returns the number of display lines added (for scroll adjustment). */
@@ -9767,31 +9802,7 @@ gtk_xtext_link_entry (xtext_buffer *buf, textentry *ent, xtext_link_position pos
 	if (buf->window_width > 0)
 	{
 		gtk_xtext_lines_taken (buf, ent);
-
-		/* Auto-collapse multiline messages exceeding threshold */
-		if (prefs.hex_gui_collapse_multiline && ent->group_id != 0 && ent->sublines)
-		{
-			int sublines = g_slist_length (ent->sublines);
-			int threshold = prefs.hex_gui_collapse_threshold;
-			gboolean should_collapse = (sublines > threshold);
-
-			/* Page-adaptive threshold */
-			if (!should_collapse && prefs.hex_gui_collapse_page_divisor > 0 && buf->xtext)
-			{
-				int page_size = gtk_widget_get_height (GTK_WIDGET (buf->xtext)) / buf->xtext->fontsize;
-				int adaptive = page_size / prefs.hex_gui_collapse_page_divisor;
-				if (adaptive > 0 && sublines > adaptive)
-					should_collapse = TRUE;
-			}
-
-			if (should_collapse)
-			{
-				ent->collapsible = TRUE;
-				ent->collapsed = TRUE;
-				ent_update_display_lines (ent);
-			}
-		}
-
+		gtk_xtext_maybe_autocollapse (buf, ent);
 		new_lines = ENT_DISPLAY_LINES (ent);
 	}
 	else
@@ -11558,10 +11569,22 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	 * regain their reply/react hover buttons. */
 	ent->is_user_msg = msg->is_user_msg ? 1 : 0;
 
+	/* Multiline messages are stored as one row with embedded \n; the live
+	 * path marks the entry via begin_group (a non-zero group_id drives
+	 * auto-collapse and multiline semantics), but a re-materialized entry
+	 * lost that mark and rendered permanently expanded.  A group never
+	 * spans entries, so the entry's own rowid is a stable, unique group
+	 * id across evict/rematerialize cycles and restarts. */
+	if (strchr (msg->text, '\n'))
+		ent->group_id = ent->entry_id;
+
 	/* Compute sublines */
 	ent->sublines = NULL;
 	if (buf->window_width > 0)
+	{
 		gtk_xtext_lines_taken (buf, ent);
+		gtk_xtext_maybe_autocollapse (buf, ent);
+	}
 	else
 		ent->display_lines = 1;
 

@@ -1,10 +1,17 @@
 # Virtual Scrollback: Deferred Items — Scoping
 
 **Status (2026-08-12):** items 5, 6, 7a, and 8 stage 1 landed
-(f1d8c885, 19a6df91, 78afee72, bb6f2366).  Remaining: 1 (per-channel
-msgid uniqueness), 2 (pending-msgid race), 3 (group_id persistence),
-4 (save-file ephemerals), 7b (SQL prefilter — only if needed), and
-8 stage 2 (anchor_to_bottom semantics — scroll-model roadmap).
+(f1d8c885, 19a6df91, 78afee72, bb6f2366).  Items 1, 2, and 3 landed on
+branch `scrollback-deferred` (34276cdf per-channel msgid uniqueness
+incl. reactions/replies keys, 498e1218 pending-msgid race, and the
+group_id commit).  Note on item 3: the scoped `group_leader` column was
+unnecessary — multiline messages are stored as ONE row with embedded
+`\n` and print as ONE entry (`PrintTextRawMultiline`), so grouping was
+lost only because `virt_materialize_msg` never set a group_id or
+applied auto-collapse; fixed FE-side with the entry's own rowid as the
+stable group id.  No schema change.  Remaining: 4 (save-file
+ephemerals), 7b (SQL prefilter — only if needed), and 8 stage 2
+(anchor_to_bottom semantics — scroll-model roadmap).
 
 Date: 2026-08-12
 Companion to [virtual-scrollback-audit.md](virtual-scrollback-audit.md)
