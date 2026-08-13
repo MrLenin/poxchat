@@ -4341,6 +4341,18 @@ gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double event_x, d
 				if (xtext->buffer->entry_tree && zone_ent->display_lines != old_dl)
 					update_weight234 (xtext->buffer->entry_tree, zone_ent,
 					                  zone_ent->display_lines - old_dl);
+
+				/* Remember explicit expansions so evict + rematerialize
+				 * can't silently re-collapse them (session-lifetime). */
+				if (xtext->buffer->user_expanded)
+				{
+					if (zone_ent->collapsed)
+						g_hash_table_remove (xtext->buffer->user_expanded,
+						                     GSIZE_TO_POINTER (zone_ent->entry_id));
+					else
+						g_hash_table_add (xtext->buffer->user_expanded,
+						                  GSIZE_TO_POINTER (zone_ent->entry_id));
+				}
 			}
 			gtk_xtext_calc_lines (xtext->buffer);
 			gtk_xtext_restore_scroll_anchor (xtext->buffer, &anchor);
@@ -7121,6 +7133,7 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
 {
 	textentry *ent;
 	int lines = 0;
+	int norm_lines = 0;
 	int count = 0;
 
 	/* Walk materialized entries.
@@ -7174,6 +7187,23 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
 				update_weight234 (buf->entry_tree, ent, ent->display_lines - old_dl);
 		}
 		lines += ent->display_lines;
+
+		/* For the estimate average, count collapsible entries at their
+		 * COLLAPSED size regardless of current state.  Unmaterialized
+		 * entries materialize collapsed, so that is the honest per-entry
+		 * expectation — and it keeps a user expanding one huge multiline
+		 * message deep in history from inflating lines_after by
+		 * (expansion delta x entries_after): with ~100k entries below
+		 * the window, a 300-line expansion otherwise ballooned adj->upper
+		 * by tens of thousands of phantom lines and broke the thumb. */
+		if (ent->collapsible && !ent->collapsed)
+		{
+			int text_lines = (int)g_slist_length (ent->sublines);
+			norm_lines += MIN (COLLAPSE_PREVIEW_LINES, text_lines) + 1
+				+ ent->extra_lines_above + ent->extra_lines_below;
+		}
+		else
+			norm_lines += ent->display_lines;
 		count++;
 	}
 
@@ -7181,10 +7211,10 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
 	 * BUF_LINES_MAT / BUF_MAT_COUNT macros. The loop's 'lines' and 'count'
 	 * are used below for avg computation and should match tree values. */
 
-	/* Update running average */
+	/* Update running average (collapsed-normalized, see loop above) */
 	if (count > 0)
 	{
-		double new_avg = (double)lines / count;
+		double new_avg = (double)norm_lines / count;
 		if (buf->avg_lines_per_entry <= 0)
 			buf->avg_lines_per_entry = new_avg;
 		else
@@ -7703,45 +7733,13 @@ top_down:
 			ent = ent->next;
 	}
 
-	/* Auto-collapse expanded entries that scrolled off screen */
-	if (prefs.hex_gui_collapse_multiline)
-	{
-		textentry *check;
-		gboolean changed = FALSE;
-		int adj_val = (int)gtk_adjustment_get_value (xtext->adj);
-		int adj_page = (int)gtk_adjustment_get_page_size (xtext->adj);
-		/* adj_val is absolute; text_first sits at LINES_BEFORE_MAT, not 0 —
-		 * without the seed everything in the viewport looks "scrolled off"
-		 * once history extends above the materialized window. */
-		int line_pos = LINES_BEFORE_MAT (xtext->buffer);
-
-		for (check = xtext->buffer->text_first; check; check = check->next)
-		{
-			int ent_lines = ENT_DISPLAY_LINES (check);
-			if (check->collapsible && !check->collapsed)
-			{
-				/* Entry is expanded — check if entirely outside viewport */
-				if (line_pos + ent_lines <= adj_val || line_pos >= adj_val + adj_page)
-				{
-					int old_dl = check->display_lines;
-					check->collapsed = TRUE;
-					ent_update_display_lines (check);
-					if (xtext->buffer->entry_tree && check->display_lines != old_dl)
-						update_weight234 (xtext->buffer->entry_tree, check,
-						                  check->display_lines - old_dl);
-					changed = TRUE;
-				}
-			}
-			line_pos += ent_lines;
-		}
-
-		if (changed)
-		{
-			gtk_xtext_calc_lines (xtext->buffer);
-			gtk_widget_queue_draw (GTK_WIDGET (xtext));
-		}
-	}
-
+	/* The auto-collapse-expanded-entries-that-scrolled-offscreen sweep
+	 * that used to live here was removed (2026-08-13): with re-
+	 * materialized history entries now collapsible, it silently undid
+	 * every expansion the moment the entry left the viewport.  An
+	 * expansion now persists until the user collapses it (and survives
+	 * evict/rematerialize via buf->user_expanded); estimate stability is
+	 * handled by collapsed-normalized avg_lines_per_entry instead. */
 
 	line = (xtext->fontsize * line) - xtext->pixel_offset;
 
@@ -8906,6 +8904,8 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 			g_hash_table_remove_all (buf->entries_by_msgid);
 		if (buf->entries_by_id)
 			g_hash_table_remove_all (buf->entries_by_id);
+		if (buf->user_expanded)
+			g_hash_table_remove_all (buf->user_expanded);
 		display_cache_flush (buf->display_cache, buf);
 
 		/* Recreate the B-tree (old one has stale pointers) */
@@ -9751,7 +9751,15 @@ gtk_xtext_maybe_autocollapse (xtext_buffer *buf, textentry *ent)
 	if (should_collapse)
 	{
 		ent->collapsible = TRUE;
-		ent->collapsed = TRUE;
+		/* Respect an explicit user expansion from earlier this session:
+		 * the entry stays expandable-collapsed by default, but if the
+		 * user opened it, evict + rematerialize must not shut it. */
+		if (buf->user_expanded &&
+		    g_hash_table_contains (buf->user_expanded,
+		                           GSIZE_TO_POINTER (ent->entry_id)))
+			ent->collapsed = FALSE;
+		else
+			ent->collapsed = TRUE;
 		ent_update_display_lines (ent);
 	}
 }
@@ -11334,6 +11342,7 @@ gtk_xtext_buffer_new (GtkXText *xtext)
 
 	/* IRCv3 modernization: entry identification (Phase 1) */
 	buf->entries_by_msgid = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+	buf->user_expanded = g_hash_table_new (g_direct_hash, g_direct_equal);
 	buf->entries_by_id = g_hash_table_new (g_direct_hash, g_direct_equal);
 	/* Start at 1 (so 0 can mean "not set"); init_entry lazily bumps
 	 * to LOCAL_ENTRY_ID_BASE on first local-ID allocation. */
@@ -11394,6 +11403,8 @@ gtk_xtext_buffer_free (xtext_buffer *buf)
 		g_hash_table_destroy (buf->entries_by_msgid);
 	if (buf->entries_by_id)
 		g_hash_table_destroy (buf->entries_by_id);
+	if (buf->user_expanded)
+		g_hash_table_destroy (buf->user_expanded);
 
 	/* Free the B-tree (entries already freed above, tree just has pointers) */
 	if (buf->entry_tree)

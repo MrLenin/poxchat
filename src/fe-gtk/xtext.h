@@ -220,6 +220,8 @@ typedef struct {
 	/* IRCv3 modernization: entry identification (Phase 1) */
 	GHashTable *entries_by_msgid;	/* msgid string → textentry* for O(1) lookup */
 	GHashTable *entries_by_id;		/* entry_id → textentry* for O(1) lookup */
+	GHashTable *user_expanded;		/* entry_id set: multiline entries the user expanded;
+									   survives evict/rematerialize (session-lifetime) */
 	guint64 next_entry_id;			/* monotonic counter for generating entry IDs */
 	guint64 current_group_id;		/* non-zero during multiline output; entries inherit this */
 
