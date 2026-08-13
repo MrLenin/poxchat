@@ -6437,9 +6437,12 @@ mg_setup_pane_layout_dnd (GtkWidget *vpane, gboolean is_left)
 	return overlay;
 }
 
-/* Forward declaration — defined alongside the chanview drag-end below. */
+/* Forward declarations — defined alongside the chanview drag callbacks below. */
+static void mg_userlist_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
+                                       gpointer user_data);
 static void mg_userlist_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
                                      gboolean delete_data, gpointer user_data);
+static void mg_drag_watchdog_arm (GdkDrag *drag);
 
 /* Set up userlist as drag source for layout swapping */
 void
@@ -6450,6 +6453,7 @@ mg_setup_userlist_drag_source (GtkWidget *treeview)
 	source = gtk_drag_source_new ();
 	gtk_drag_source_set_actions (source, GDK_ACTION_MOVE);
 	g_signal_connect (source, "prepare", G_CALLBACK (mg_userlist_drag_prepare_cb), NULL);
+	g_signal_connect (source, "drag-begin", G_CALLBACK (mg_userlist_drag_begin_cb), NULL);
 	g_signal_connect (source, "drag-end", G_CALLBACK (mg_userlist_drag_end_cb), NULL);
 	gtk_widget_add_controller (treeview, GTK_EVENT_CONTROLLER (source));
 }
@@ -6547,7 +6551,9 @@ mg_chanview_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
 	GtkWidget *src_widget;
 	session_gui *gui;
 
-	(void) drag; (void) user_data;
+	(void) user_data;
+
+	mg_drag_watchdog_arm (drag);
 
 	src_widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (source));
 	gui = src_widget ? mg_gui_for_widget (src_widget) : NULL;
@@ -6558,6 +6564,15 @@ mg_chanview_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
 		gtk_widget_set_visible (gui->top_drop_strip, TRUE);
 	if (gui->bottom_drop_strip)
 		gtk_widget_set_visible (gui->bottom_drop_strip, TRUE);
+}
+
+static void
+mg_userlist_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
+                           gpointer user_data)
+{
+	(void) source; (void) user_data;
+
+	mg_drag_watchdog_arm (drag);
 }
 
 /* GDK-Win32 sometimes never finalizes a drag: when the button is
@@ -6612,6 +6627,79 @@ mg_drag_reap_stuck_icon (GdkDrag *drag)
 {
 	if (drag)
 		g_timeout_add (250, mg_drag_reap_stuck_icon_cb, g_object_ref (drag));
+}
+
+/* Belt-and-braces variant armed from drag-BEGIN: the drag-end reaper
+ * above never runs if the stuck drag never emits drag-end at all.  The
+ * watchdog holds only a weak pointer and ticks while the drag object is
+ * alive; once no mouse button is down, the drag has no business still
+ * existing — if its icon surface is still mapped, apply the same
+ * hide + input-nudge treatment, then stand down either way. */
+typedef struct {
+	GdkDrag *drag;	/* weak pointer, NULLed when the drag finalizes */
+} mg_drag_watchdog;
+
+static gboolean
+mg_drag_watchdog_cb (gpointer user_data)
+{
+	mg_drag_watchdog *wd = user_data;
+	gboolean button_down = FALSE;
+
+	if (!wd->drag)
+	{
+		/* Drag finalized normally. */
+		g_free (wd);
+		return G_SOURCE_REMOVE;
+	}
+
+#ifdef G_OS_WIN32
+	button_down = (GetAsyncKeyState (VK_LBUTTON) & 0x8000) != 0 ||
+	              (GetAsyncKeyState (VK_RBUTTON) & 0x8000) != 0;
+#endif
+
+	if (button_down)
+		return G_SOURCE_CONTINUE;	/* drag legitimately in progress */
+
+	{
+		GdkSurface *surface = gdk_drag_get_drag_surface (wd->drag);
+
+		if (surface && gdk_surface_get_mapped (surface))
+		{
+			gdk_surface_hide (surface);
+
+#ifdef G_OS_WIN32
+			{
+				INPUT in[2];
+				memset (in, 0, sizeof (in));
+				in[0].type = INPUT_MOUSE;
+				in[0].mi.dwFlags = MOUSEEVENTF_MOVE;
+				in[0].mi.dx = 1;
+				in[0].mi.dy = 0;
+				in[1] = in[0];
+				in[1].mi.dx = -1;
+				SendInput (2, in, sizeof (INPUT));
+			}
+#endif
+		}
+	}
+
+	g_object_remove_weak_pointer (G_OBJECT (wd->drag), (gpointer *)&wd->drag);
+	g_free (wd);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+mg_drag_watchdog_arm (GdkDrag *drag)
+{
+	mg_drag_watchdog *wd;
+
+	if (!drag)
+		return;
+
+	wd = g_new0 (mg_drag_watchdog, 1);
+	wd->drag = drag;
+	g_object_add_weak_pointer (G_OBJECT (drag), (gpointer *)&wd->drag);
+	g_timeout_add (500, mg_drag_watchdog_cb, wd);
 }
 
 static void
