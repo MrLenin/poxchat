@@ -528,6 +528,8 @@ textentry *gtk_xtext_find_by_msgid (xtext_buffer *buf, const char *msgid);
 textentry *gtk_xtext_find_by_id (xtext_buffer *buf, guint64 entry_id);
 textentry *gtk_xtext_set_msgid (xtext_buffer *buf, textentry *ent, const char *msgid);
 void gtk_xtext_set_is_user_msg (textentry *ent, gboolean is_user_msg);
+void gtk_xtext_resolve_pending_dup (xtext_buffer *buf, guint64 old_id,
+                                    guint64 new_id);
 
 /* Find an entry by msgid, scroll to it, and briefly flash-highlight it.
  * Materializes the entry from the virtual scrollback DB if it has been evicted.

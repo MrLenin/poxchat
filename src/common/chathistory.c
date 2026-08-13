@@ -1695,18 +1695,27 @@ chathistory_is_duplicate_msgid (session *sess, const char *msgid, time_t timesta
 	if (!sess || !msgid || !msgid[0])
 		return FALSE;
 
-	if (!sess->known_msgids)
-		return FALSE;
-
-	if (timestamp > 0)
+	if (sess->known_msgids)
 	{
-		char *key = make_dedup_key (msgid, timestamp);
-		gboolean found = g_hash_table_contains (sess->known_msgids, key);
-		g_free (key);
-		return found;
+		if (timestamp > 0)
+		{
+			char *key = make_dedup_key (msgid, timestamp);
+			gboolean found = g_hash_table_contains (sess->known_msgids, key);
+			g_free (key);
+			if (found)
+				return TRUE;
+		}
+		else if (g_hash_table_contains (sess->known_msgids, msgid))
+			return TRUE;
 	}
 
-	return g_hash_table_contains (sess->known_msgids, msgid);
+	/* Fallback: the hash only seeds from the initially-loaded window
+	 * (and this session's traffic), so a replay overlapping older
+	 * history slips past it — the source of duplicate own-message rows
+	 * when chathistory races the echo confirm.  The DB check is one
+	 * indexed lookup on (channel_id, msgid), timestamp-matched to guard
+	 * against servers that reuse msgids after restarts. */
+	return scrollback_session_has_msgid (sess, msgid, timestamp);
 }
 
 gboolean

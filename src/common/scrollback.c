@@ -461,9 +461,13 @@ prepare_statements (scrollback_db *sdb)
 	if (rc != SQLITE_OK) goto fail;
 
 	/* Check msgid exists (channel-scoped: msgids are only unique per
-	 * channel — a multi-target message shares one msgid across targets) */
+	 * channel — a multi-target message shares one msgid across targets).
+	 * Optional timestamp match (?3 = 0 skips it) mirrors the chathistory
+	 * dedup key, guarding against servers that reuse msgids after a
+	 * restart. */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"SELECT 1 FROM messages WHERE channel_id = ? AND msgid = ? LIMIT 1",
+		"SELECT 1 FROM messages WHERE channel_id = ?1 AND msgid = ?2 "
+		"AND (?3 = 0 OR timestamp = ?3) LIMIT 1",
 		-1, &sdb->stmt_has_msgid, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
@@ -1003,7 +1007,8 @@ scrollback_get_newest_time (scrollback_db *db, const char *channel)
 }
 
 gboolean
-scrollback_has_msgid (scrollback_db *db, const char *channel, const char *msgid)
+scrollback_has_msgid (scrollback_db *db, const char *channel,
+                      const char *msgid, time_t timestamp)
 {
 	int rc;
 	gint64 channel_id;
@@ -1018,9 +1023,34 @@ scrollback_has_msgid (scrollback_db *db, const char *channel, const char *msgid)
 	sqlite3_reset (db->stmt_has_msgid);
 	sqlite3_bind_int64 (db->stmt_has_msgid, 1, channel_id);
 	sqlite3_bind_text (db->stmt_has_msgid, 2, msgid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int64 (db->stmt_has_msgid, 3, (sqlite3_int64) timestamp);
 
 	rc = sqlite3_step (db->stmt_has_msgid);
 	return (rc == SQLITE_ROW);
+}
+
+/* Delete a single message row by rowid.  Used to drop a pending
+ * placeholder that lost the echo-vs-chathistory race (the replayed row
+ * with the real msgid survives).  Pending rows have no reaction/reply
+ * dependents — those are keyed by real msgids. */
+gboolean
+scrollback_delete_by_rowid (scrollback_db *db, gint64 rowid)
+{
+	sqlite3_stmt *stmt;
+	int rc;
+
+	if (!db || rowid <= 0)
+		return FALSE;
+
+	if (sqlite3_prepare_v2 (db->db,
+		"DELETE FROM messages WHERE id = ?",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return FALSE;
+
+	sqlite3_bind_int64 (stmt, 1, rowid);
+	rc = sqlite3_step (stmt);
+	sqlite3_finalize (stmt);
+	return (rc == SQLITE_DONE && sqlite3_changes (db->db) > 0);
 }
 
 gboolean

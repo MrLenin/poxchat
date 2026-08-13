@@ -240,6 +240,11 @@ void fe_scrollback_extras_done (struct session *sess);
 void fe_scrollback_set_virtual (struct session *sess, void *db, const char *channel,
                                 int total_entries, gint64 max_rowid);
 void fe_set_pending_db_rowid (struct session *sess, gint64 rowid);
+/* Echo-vs-chathistory race resolution: the pending row old_rowid was
+ * deleted from the DB; new_rowid is the surviving replayed row for the
+ * same message.  Re-key (or drop) the FE entry accordingly. */
+void fe_resolve_pending_dup (struct session *sess, gint64 old_rowid,
+                             gint64 new_rowid);
 void fe_set_batch_mode (struct session *sess, gboolean on);
 
 #endif

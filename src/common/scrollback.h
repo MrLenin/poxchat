@@ -118,10 +118,20 @@ time_t scrollback_get_newest_time (scrollback_db *db, const char *channel);
  * @param db Database handle
  * @param channel Channel name
  * @param msgid Message ID to check
+ * @param timestamp Require an exact timestamp match too (0 = msgid alone);
+ *                  guards against servers that reuse msgids after restarts
  * @return TRUE if msgid exists in that channel
  */
 gboolean scrollback_has_msgid (scrollback_db *db, const char *channel,
-                               const char *msgid);
+                               const char *msgid, time_t timestamp);
+
+/**
+ * Delete a single message row by rowid.  Used to drop a pending
+ * placeholder row that lost the echo-vs-chathistory race.
+ *
+ * @return TRUE if a row was deleted
+ */
+gboolean scrollback_delete_by_rowid (scrollback_db *db, gint64 rowid);
 
 /**
  * Update a pending placeholder msgid to the real server-assigned msgid.

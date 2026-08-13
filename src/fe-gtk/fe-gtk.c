@@ -2675,6 +2675,14 @@ fe_set_pending_db_rowid (session *sess, gint64 rowid)
 }
 
 void
+fe_resolve_pending_dup (session *sess, gint64 old_rowid, gint64 new_rowid)
+{
+	if (sess && sess->res && sess->res->buffer)
+		gtk_xtext_resolve_pending_dup ((xtext_buffer *) sess->res->buffer,
+		                               (guint64) old_rowid, (guint64) new_rowid);
+}
+
+void
 fe_set_batch_mode (session *sess, gboolean on)
 {
 	xtext_buffer *buf;

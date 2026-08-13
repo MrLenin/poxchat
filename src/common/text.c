@@ -153,9 +153,50 @@ scrollback_confirm_pending (session *sess, const char *label, const char *real_m
 
 	pending_key = g_strdup_printf ("pending:%s", label);
 	if (!scrollback_update_pending_msgid (db, sess->channel, pending_key, real_msgid))
-		g_warning ("scrollback_confirm_pending: UPDATE failed for %s -> %s (channel %s)",
-		           pending_key, real_msgid, sess->channel);
+	{
+		/* A chathistory replay stored the real msgid before this echo
+		 * confirm arrived, so the UPDATE hit UNIQUE(channel_id, msgid).
+		 * The replayed row is authoritative: drop the pending row and
+		 * re-key (or drop) the FE entry keyed by the pending rowid.
+		 * Without this the pending row survives the whole session — both
+		 * copies materialize after eviction (duplicate display) and the
+		 * message loses its real msgid across a restart. */
+		gint64 real_rowid = scrollback_get_rowid_by_msgid (db, sess->channel,
+		                                                   real_msgid);
+		gint64 pending_rowid = scrollback_get_rowid_by_msgid (db, sess->channel,
+		                                                      pending_key);
+
+		if (real_rowid > 0 && pending_rowid > 0 &&
+		    scrollback_delete_by_rowid (db, pending_rowid))
+		{
+			fe_resolve_pending_dup (sess, pending_rowid, real_rowid);
+		}
+		else
+		{
+			g_warning ("scrollback_confirm_pending: UPDATE failed for %s -> %s (channel %s)",
+			           pending_key, real_msgid, sess->channel);
+		}
+	}
 	g_free (pending_key);
+}
+
+/* Channel-scoped msgid existence check against the scrollback DB.
+ * Used by chathistory dedup as a fallback behind the in-memory
+ * known_msgids hash, which only seeds from the initially-loaded
+ * window. */
+gboolean
+scrollback_session_has_msgid (session *sess, const char *msgid, time_t timestamp)
+{
+	scrollback_db *db;
+
+	if (!sess || !sess->channel[0] || !msgid || !msgid[0])
+		return FALSE;
+
+	db = get_scrollback_db (sess);
+	if (!db)
+		return FALSE;
+
+	return scrollback_has_msgid (db, sess->channel, msgid, timestamp);
 }
 
 /* IRCv3 redaction: mark message as redacted in scrollback.

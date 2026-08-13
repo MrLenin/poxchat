@@ -12340,6 +12340,135 @@ gtk_xtext_set_is_user_msg (textentry *ent, gboolean is_user_msg)
 		ent->is_user_msg = is_user_msg ? 1 : 0;
 }
 
+/* Echo-vs-chathistory race resolution.  Our own message was saved with a
+ * pending placeholder msgid (rowid old_id); before the echo confirm
+ * arrived, a chathistory replay stored the same message under its real
+ * msgid (rowid new_id).  The caller has already deleted the pending DB
+ * row — the replayed row is authoritative.  Fix the FE to match:
+ *
+ *   - pending entry materialized, replayed row not: adopt new_id in
+ *     place (keeps the user's view stable);
+ *   - both materialized: ours is the visible duplicate — kill it;
+ *   - neither: only the bookkeeping shrinks.
+ *
+ * Either way one DB row is gone, so total_entries sheds one. */
+void
+gtk_xtext_resolve_pending_dup (xtext_buffer *buf, guint64 old_id, guint64 new_id)
+{
+	textentry *old_ent, *new_ent;
+
+	if (!buf || old_id == 0 || new_id == 0)
+		return;
+
+	if (HAS_VIRT_DB (buf) && buf->total_entries > 0)
+		buf->total_entries--;
+
+	old_ent = gtk_xtext_find_by_id (buf, old_id);
+	new_ent = gtk_xtext_find_by_id (buf, new_id);
+
+	if (!old_ent)
+		return;	/* pending entry not materialized — the DB fix sufficed */
+
+	if (!new_ent)
+	{
+		/* Adopt the surviving rowid in place. */
+		if (buf->entry_tree)
+			del234 (buf->entry_tree, old_ent);
+		g_hash_table_remove (buf->entries_by_id,
+		                     GSIZE_TO_POINTER (old_ent->entry_id));
+		display_cache_remove (buf->display_cache, old_ent->entry_id);
+		old_ent->entry_id = new_id;
+		old_ent->has_db_row = 1;
+		g_hash_table_insert (buf->entries_by_id,
+		                     GSIZE_TO_POINTER (new_id), old_ent);
+
+		/* entry_id is the (stamp, id) tiebreak, so the new id can order
+		 * differently against same-stamp neighbors.  Relocate within the
+		 * list so it agrees with the tree (usually a no-op; ties only). */
+		{
+			textentry *before, *after;
+
+			if (old_ent->prev)
+				old_ent->prev->next = old_ent->next;
+			else
+				buf->text_first = old_ent->next;
+			if (old_ent->next)
+				old_ent->next->prev = old_ent->prev;
+			else
+				buf->text_last = old_ent->prev;
+
+			before = old_ent->prev;
+			while (before && entry_stamp_cmp (old_ent, before) < 0)
+				before = before->prev;
+			after = before ? before->next : buf->text_first;
+			while (after && entry_stamp_cmp (after, old_ent) < 0)
+			{
+				before = after;
+				after = after->next;
+			}
+
+			old_ent->prev = before;
+			old_ent->next = after;
+			if (before)
+				before->next = old_ent;
+			else
+				buf->text_first = old_ent;
+			if (after)
+				after->prev = old_ent;
+			else
+				buf->text_last = old_ent;
+		}
+		if (buf->entry_tree)
+			add234 (buf->entry_tree, old_ent);
+
+		/* Chase stale references to the old id. */
+		if (buf->marker_pos_id == old_id)
+			buf->marker_pos_id = new_id;
+		if (buf->scroll_anchor.anchor_entry_id == old_id)
+			buf->scroll_anchor.anchor_entry_id = new_id;
+		if (buf->last_ent_start_id == old_id)
+			buf->last_ent_start_id = new_id;
+		if (buf->last_ent_end_id == old_id)
+			buf->last_ent_end_id = new_id;
+		if (buf->sel_pin_start_id == old_id)
+			buf->sel_pin_start_id = new_id;
+		if (buf->sel_pin_end_id == old_id)
+			buf->sel_pin_end_id = new_id;
+		return;
+	}
+
+	/* Both copies materialized — ours is the visible duplicate. */
+	{
+		const char *survivor_msgid = new_ent->msgid;
+
+		if (old_ent->prev)
+			old_ent->prev->next = old_ent->next;
+		else
+			buf->text_first = old_ent->next;
+		if (old_ent->next)
+			old_ent->next->prev = old_ent->prev;
+		else
+			buf->text_last = old_ent->prev;
+		buf->num_lines -= ENT_DISPLAY_LINES (old_ent);
+
+		gtk_xtext_kill_ent (buf, old_ent);
+
+		/* Both entries carried the real msgid after the echo confirm;
+		 * kill_ent removed the mapping by key, orphaning the survivor.
+		 * Restore it. */
+		if (survivor_msgid && buf->entries_by_msgid)
+			g_hash_table_insert (buf->entries_by_msgid,
+			                     g_strdup (survivor_msgid), new_ent);
+
+		/* If ours was the tail, its removal may expose a day separator. */
+		buf->num_lines -= gtk_xtext_drop_edge_day_sep (buf, FALSE);
+
+		gtk_xtext_calc_lines (buf);
+		if (buf->xtext && buf->xtext->buffer == buf)
+			gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
+	}
+}
+
 void
 gtk_xtext_begin_group (xtext_buffer *buf)
 {
