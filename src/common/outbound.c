@@ -5889,6 +5889,21 @@ typing_indicator_keystroke (session *sess)
 			typing_indicator_cancel (sess);
 			return;
 		}
+
+		/* Composing a command, not a message to this tab's target — don't
+		 * announce typing (observed: writing "/msg #other,... hi" in a
+		 * channel tab sent +typing=active to that channel).  Two inputs
+		 * still count as message composition: "//" escapes a literal
+		 * leading slash, and "/me" composes an ACTION to this target.
+		 * Cancel rather than just skip, so an indicator already sent
+		 * (e.g. "hello" rewritten into "/msg ...") is retracted. */
+		if (text[0] == prefs.hex_input_command_char[0] &&
+		    text[1] != prefs.hex_input_command_char[0] &&
+		    g_ascii_strncasecmp (text + 1, "me ", 3) != 0)
+		{
+			typing_indicator_cancel (sess);
+			return;
+		}
 	}
 
 	now = g_get_monotonic_time ();
