@@ -6637,6 +6637,7 @@ mg_drag_reap_stuck_icon (GdkDrag *drag)
  * hide + input-nudge treatment, then stand down either way. */
 typedef struct {
 	GdkDrag *drag;	/* weak pointer, NULLed when the drag finalizes */
+	int stuck_ticks;	/* ticks seen with button up but drag still alive */
 } mg_drag_watchdog;
 
 static gboolean
@@ -6644,10 +6645,15 @@ mg_drag_watchdog_cb (gpointer user_data)
 {
 	mg_drag_watchdog *wd = user_data;
 	gboolean button_down = FALSE;
+	GdkSurface *surface;
+	gboolean mapped;
 
 	if (!wd->drag)
 	{
-		/* Drag finalized normally. */
+		/* Drag finalized normally (or after a successful nudge). */
+		if (wd->stuck_ticks > 0)
+			poxchat_timing_log ("drag-watchdog: drag finalized after %d stuck tick(s)",
+			                    wd->stuck_ticks);
 		g_free (wd);
 		return G_SOURCE_REMOVE;
 	}
@@ -6660,32 +6666,47 @@ mg_drag_watchdog_cb (gpointer user_data)
 	if (button_down)
 		return G_SOURCE_CONTINUE;	/* drag legitimately in progress */
 
-	{
-		GdkSurface *surface = gdk_drag_get_drag_surface (wd->drag);
+	/* Button is up but the drag object is still alive: stuck (or in its
+	 * last moments of normal teardown — the first tick tolerates that). */
+	wd->stuck_ticks++;
 
-		if (surface && gdk_surface_get_mapped (surface))
-		{
-			gdk_surface_hide (surface);
+	surface = gdk_drag_get_drag_surface (wd->drag);
+	mapped = (surface && gdk_surface_get_mapped (surface));
+	if (mapped)
+		gdk_surface_hide (surface);
 
 #ifdef G_OS_WIN32
-			{
-				INPUT in[2];
-				memset (in, 0, sizeof (in));
-				in[0].type = INPUT_MOUSE;
-				in[0].mi.dwFlags = MOUSEEVENTF_MOVE;
-				in[0].mi.dx = 1;
-				in[0].mi.dy = 0;
-				in[1] = in[0];
-				in[1].mi.dx = -1;
-				SendInput (2, in, sizeof (INPUT));
-			}
-#endif
-		}
+	/* Nudge regardless of the GDK-side mapped state: in the stuck case
+	 * GDK may have already marked the surface unmapped while the native
+	 * window and the OLE DoDragDrop loop live on.  The loop only
+	 * re-evaluates QueryContinueDrag on input. */
+	{
+		INPUT in[2];
+		memset (in, 0, sizeof (in));
+		in[0].type = INPUT_MOUSE;
+		in[0].mi.dwFlags = MOUSEEVENTF_MOVE;
+		in[0].mi.dx = 1;
+		in[0].mi.dy = 0;
+		in[1] = in[0];
+		in[1].mi.dx = -1;
+		SendInput (2, in, sizeof (INPUT));
 	}
+#endif
 
-	g_object_remove_weak_pointer (G_OBJECT (wd->drag), (gpointer *)&wd->drag);
-	g_free (wd);
-	return G_SOURCE_REMOVE;
+	poxchat_timing_log ("drag-watchdog: stuck tick %d, surface=%s mapped=%d — nudged",
+	                    wd->stuck_ticks, surface ? "yes" : "no", mapped);
+
+	/* Keep watching so a successful nudge is observed (drag finalizes →
+	 * next tick logs and stands down).  Cap the attempts so a truly
+	 * immortal drag doesn't jiggle the mouse forever. */
+	if (wd->stuck_ticks >= 6)
+	{
+		poxchat_timing_log ("drag-watchdog: giving up — drag object still alive");
+		g_object_remove_weak_pointer (G_OBJECT (wd->drag), (gpointer *)&wd->drag);
+		g_free (wd);
+		return G_SOURCE_REMOVE;
+	}
+	return G_SOURCE_CONTINUE;
 }
 
 static void
