@@ -5788,22 +5788,14 @@ fe_session_callback (session *sess)
  * 2. Layout swapping by dragging userlist/chanview to scrollbar positions
  */
 
-/* File drop handler for xtext (DCC send to current channel/dialog) */
-static gboolean
-mg_xtext_file_drop_cb (GtkDropTarget *target, const GValue *value,
-                       double x, double y, gpointer user_data)
+/* Offer one dropped file to the current session (DCC send in dialogs). */
+static void
+mg_xtext_offer_dropped_file (GFile *file)
 {
-	GFile *file;
 	char *uri;
 
-	(void)target; (void)x; (void)y; (void)user_data;
-
-	if (!G_VALUE_HOLDS (value, G_TYPE_FILE))
-		return FALSE;
-
-	file = g_value_get_object (value);
 	if (!file)
-		return FALSE;
+		return;
 
 	uri = g_file_get_uri (file);
 	if (uri)
@@ -5820,7 +5812,31 @@ mg_xtext_file_drop_cb (GtkDropTarget *target, const GValue *value,
 		}
 		g_free (uri);
 	}
+}
 
+static gboolean
+mg_xtext_file_drop_cb (GtkDropTarget *target, const GValue *value,
+                       double x, double y, gpointer user_data)
+{
+	(void)target; (void)x; (void)y; (void)user_data;
+
+	/* Windows shell drags (CF_HDROP) arrive as a GdkFileList — a target
+	 * typed only G_TYPE_FILE never matches the offer, so Explorer drags
+	 * saw no drop target at all. */
+	if (G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST))
+	{
+		GSList *files = gdk_file_list_get_files (g_value_get_boxed (value));
+		GSList *l;
+		for (l = files; l; l = l->next)
+			mg_xtext_offer_dropped_file (l->data);
+		g_slist_free (files);
+		return TRUE;
+	}
+
+	if (!G_VALUE_HOLDS (value, G_TYPE_FILE))
+		return FALSE;
+
+	mg_xtext_offer_dropped_file (g_value_get_object (value));
 	return TRUE;
 }
 
@@ -6407,8 +6423,10 @@ void
 mg_setup_xtext_dnd (GtkWidget *xtext)
 {
 	GtkDropTarget *target;
+	GType file_types[2] = { GDK_TYPE_FILE_LIST, G_TYPE_FILE };
 
-	target = gtk_drop_target_new (G_TYPE_FILE, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+	target = gtk_drop_target_new (G_TYPE_INVALID, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+	gtk_drop_target_set_gtypes (target, file_types, G_N_ELEMENTS (file_types));
 	g_signal_connect (target, "drop", G_CALLBACK (mg_xtext_file_drop_cb), NULL);
 	gtk_widget_add_controller (xtext, GTK_EVENT_CONTROLLER (target));
 

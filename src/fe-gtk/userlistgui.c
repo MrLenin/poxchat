@@ -466,19 +466,44 @@ userlist_file_drop_cb (GtkDropTarget *target, const GValue *value,
 	(void)x;
 	(void)y;
 
-	if (!G_VALUE_HOLDS (value, G_TYPE_FILE))
-		return FALSE;
-
-	file = g_value_get_object (value);
-	if (!file)
-		return FALSE;
-
 	/* Get currently selected user */
 	item = hc_selection_model_get_selected_item (sel_model);
 	if (!item || !item->user)
 	{
 		if (item)
 			g_object_unref (item);
+		return FALSE;
+	}
+
+	/* Windows shell drags (CF_HDROP) arrive as a GdkFileList */
+	if (G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST))
+	{
+		GSList *files = gdk_file_list_get_files (g_value_get_boxed (value));
+		GSList *l;
+		for (l = files; l; l = l->next)
+		{
+			uri = g_file_get_uri (G_FILE (l->data));
+			if (uri)
+			{
+				mg_dnd_drop_file (current_sess, item->user->nick, uri);
+				g_free (uri);
+			}
+		}
+		g_slist_free (files);
+		g_object_unref (item);
+		return TRUE;
+	}
+
+	if (!G_VALUE_HOLDS (value, G_TYPE_FILE))
+	{
+		g_object_unref (item);
+		return FALSE;
+	}
+
+	file = g_value_get_object (value);
+	if (!file)
+	{
+		g_object_unref (item);
 		return FALSE;
 	}
 
@@ -1288,8 +1313,14 @@ userlist_create (GtkWidget *box)
 	gtk_column_view_column_set_visible (col, prefs.hex_gui_ulist_show_hosts);
 	g_object_set_data (G_OBJECT (view), "host-column", col);
 
-	/* DND: File drops for DCC (drop file on user to send) */
-	drop_target = gtk_drop_target_new (G_TYPE_FILE, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+	/* DND: File drops for DCC (drop file on user to send).  Accept
+	 * GdkFileList too — Windows shell drags (CF_HDROP) arrive as a file
+	 * list, and a G_TYPE_FILE-only target never matches that offer. */
+	{
+		GType file_types[2] = { GDK_TYPE_FILE_LIST, G_TYPE_FILE };
+		drop_target = gtk_drop_target_new (G_TYPE_INVALID, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+		gtk_drop_target_set_gtypes (drop_target, file_types, G_N_ELEMENTS (file_types));
+	}
 	g_signal_connect (drop_target, "drop", G_CALLBACK (userlist_file_drop_cb), view);
 	g_signal_connect (drop_target, "motion", G_CALLBACK (userlist_drop_motion_cb), view);
 	g_signal_connect (drop_target, "leave", G_CALLBACK (userlist_drop_leave_cb), view);
