@@ -134,6 +134,8 @@ cmd_geom (const char *path)	/* plain read-only open of the OUTER db */
 			meta_count = atoi ((const char *) sqlite3_column_text (st, 0));
 		sqlite3_finalize (st);
 	}
+	else
+		printf ("geom: outer not readable via read-only open (a pending WAL after kill is normal)\n");
 	if (sqlite3_prepare_v2 (db, "SELECT MAX(pgno) FROM pages", -1, &st, NULL) == SQLITE_OK)
 	{
 		if (sqlite3_step (st) == SQLITE_ROW)

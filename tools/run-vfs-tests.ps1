@@ -24,20 +24,39 @@ function AssertRows($name, $out, $expected) {
 
 # 1. clean lifecycle
 Step 'fill-clean' @('fill','500') 0
+if (Test-Path "$db-wal") { throw 'FAIL fill-clean: -wal left behind after clean close' }
 Step 'check-clean' @('check') 0
 
 # 2. commit + process death (the field failure: kill the app, reopen)
 & $exe $db kill 500 | Write-Host
 if ($LASTEXITCODE -ne 9) { throw "FAIL kill: exit $LASTEXITCODE, expected 9" }
+if (-not $ExpectKillFail -and -not (Test-Path "$db-wal")) {
+  throw 'FAIL kill: no -wal after kill -- outer DB is not actually in WAL mode'
+}
 & $exe $db geom | Write-Host
 $killExpect = if ($ExpectKillFail) { 1 } else { 0 }
-$killOut = Step 'check-after-kill' @('check') $killExpect
+# Captured with stderr merged (not via Step): the WAL-replay diagnostic is a
+# g_message, and GLib routes g_message/g_warning to stderr in this
+# environment, which a plain `$out = & $exe ...` capture (as Step uses)
+# would silently drop.
+$killOut = & $exe $db check 2>&1 | Out-String
+Write-Host $killOut
+if ($LASTEXITCODE -ne $killExpect) { throw "FAIL check-after-kill: exit $LASTEXITCODE, expected $killExpect" }
+Write-Host 'PASS: check-after-kill'
 if (-not $ExpectKillFail) {
   # The kill leg only regression-tests the geometry self-heal if recovery
   # actually finds all the rows -- a VFS bug that presents a populated DB
   # as an empty-but-valid one would still print "quick_check: ok" and exit
   # 0, so the row count must be asserted explicitly.
   AssertRows 'check-after-kill' $killOut 'rows: 1000'
+  # The tail rows live in the -wal until this reopen; the open must log the
+  # replay diagnostic, and the clean close must checkpoint the -wal away.
+  if (-not ($killOut -match 'WAL sidecar present')) {
+    throw 'FAIL check-after-kill: WAL-replay diagnostic not logged at open'
+  }
+  if (Test-Path "$db-wal") {
+    throw 'FAIL check-after-kill: -wal not checkpointed away on clean close'
+  }
 }
 
 # 2b. stale-meta self-heal: sabotage meta.page_count directly (simulating a
@@ -76,5 +95,5 @@ Write-Host 'PASS: busy-check'
 $hold.WaitForExit()
 if (-not $ExpectKillFail) { Step 'check-after-hold' @('check') 0 }
 
-Remove-Item $db -ErrorAction SilentlyContinue
+Remove-Item "$db*" -ErrorAction SilentlyContinue
 Write-Host 'ALL PASS'

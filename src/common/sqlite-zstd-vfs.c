@@ -96,8 +96,17 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 {
 	int rc;
 	char *errmsg = NULL;
+	char *wal_path;
 
 	f->outer_path = g_strdup (path);
+
+	/* A -wal sidecar at open means the previous session did not close
+	 * cleanly (a clean close checkpoints and removes it); SQLite replays
+	 * it below.  Log it so unclean exits stay diagnosable. */
+	wal_path = g_strdup_printf ("%s-wal", path);
+	if (g_file_test (wal_path, G_FILE_TEST_EXISTS))
+		g_message ("zstd-vfs: WAL sidecar present at open (unclean previous exit), replaying: %s", path);
+	g_free (wal_path);
 
 	/* Open outer DB using the real (OS) VFS — avoids recursion */
 	rc = sqlite3_open_v2 (path, &f->outer_db,
@@ -105,9 +114,25 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 	if (rc != SQLITE_OK)
 		return rc;
 
-	/* Outer DB pragmas */
-	sqlite3_exec (f->outer_db, "PRAGMA journal_mode=DELETE;", NULL, NULL, NULL);
+	/* Outer DB pragmas.  Order matters: locking_mode=EXCLUSIVE must be in
+	 * effect before the first WAL-mode access so SQLite uses a heap
+	 * wal-index and never needs a -shm file (single-process access is our
+	 * model; see docs/design/2026-08-12-outer-wal-design.md). */
 	sqlite3_exec (f->outer_db, "PRAGMA locking_mode=EXCLUSIVE;", NULL, NULL, NULL);
+	{
+		sqlite3_stmt *st;
+		if (sqlite3_prepare_v2 (f->outer_db, "PRAGMA journal_mode=WAL;", -1, &st, NULL) == SQLITE_OK)
+		{
+			if (sqlite3_step (st) == SQLITE_ROW)
+			{
+				const char *mode = (const char *) sqlite3_column_text (st, 0);
+				if (!mode || g_ascii_strcasecmp (mode, "wal") != 0)
+					g_warning ("zstd-vfs: outer DB refused WAL, running journal_mode=%s: %s",
+					           mode ? mode : "(null)", path);
+			}
+			sqlite3_finalize (st);
+		}
+	}
 	sqlite3_exec (f->outer_db, "PRAGMA synchronous=NORMAL;", NULL, NULL, NULL);
 
 	/* Create schema */
@@ -935,6 +960,20 @@ static int pt_device_chars (sqlite3_file *file)
 /*  sqlite3_vfs methods                                                */
 /* ------------------------------------------------------------------ */
 
+/* The inner logical DB shares its on-disk path with the outer container.
+ * Sidecar files at that path (-wal/-journal/-shm) therefore belong to the
+ * OUTER connection, never to the inner pager: the inner is pinned to
+ * journal_mode=MEMORY and must not detect, open, or delete sidecars that
+ * are really the outer's (its unconditional hot-WAL/hot-journal probes
+ * would otherwise fight the outer's live, exclusively-locked WAL). */
+static int
+is_sidecar_name (const char *zName)
+{
+	return g_str_has_suffix (zName, "-wal")
+	    || g_str_has_suffix (zName, "-journal")
+	    || g_str_has_suffix (zName, "-shm");
+}
+
 static int
 zvfs_open (sqlite3_vfs *vfs, const char *zName,
            sqlite3_file *file, int flags, int *pOutFlags)
@@ -965,8 +1004,20 @@ zvfs_open (sqlite3_vfs *vfs, const char *zName,
 	}
 	else
 	{
-		/* Passthrough for journal, temp, WAL, etc. */
+		/* Passthrough for temp/subjournal files.  The inner DB's own
+		 * journal or WAL must never materialize on disk: the inner is
+		 * pinned to journal_mode=MEMORY, and a real file here would sit
+		 * at the outer DB's sidecar path.  Refuse loudly rather than
+		 * corrupt. */
 		zstd_vfs_passthru *p = (zstd_vfs_passthru *)file;
+
+		if (flags & (SQLITE_OPEN_MAIN_JOURNAL | SQLITE_OPEN_WAL))
+		{
+			g_warning ("zstd-vfs: refusing to open inner sidecar %s (flags 0x%x)",
+			           zName ? zName : "(null)", flags);
+			return SQLITE_CANTOPEN;
+		}
+
 		memset (p, 0, sizeof (*p));
 
 		p->real_file = g_malloc0 (zvfs->real_vfs->szOsFile);
@@ -988,6 +1039,13 @@ static int
 zvfs_delete (sqlite3_vfs *vfs, const char *zName, int syncDir)
 {
 	zstd_vfs *zvfs = (zstd_vfs *)vfs;
+
+	/* e.g. the inner's journal_mode=MEMORY transition deletes
+	 * "<db>-journal" unconditionally; under WAL such names are the outer's
+	 * live sidecars.  Report success without touching disk — there is
+	 * never an inner sidecar to delete. */
+	if (zName && is_sidecar_name (zName))
+		return SQLITE_OK;
 	return zvfs->real_vfs->xDelete (zvfs->real_vfs, zName, syncDir);
 }
 
@@ -995,6 +1053,14 @@ static int
 zvfs_access (sqlite3_vfs *vfs, const char *zName, int flags, int *pResOut)
 {
 	zstd_vfs *zvfs = (zstd_vfs *)vfs;
+
+	/* Hide outer-DB sidecars from the inner pager's hot-WAL/hot-journal
+	 * probes: to the inner logical database these files do not exist. */
+	if (zName && is_sidecar_name (zName))
+	{
+		*pResOut = 0;
+		return SQLITE_OK;
+	}
 	return zvfs->real_vfs->xAccess (zvfs->real_vfs, zName, flags, pResOut);
 }
 
