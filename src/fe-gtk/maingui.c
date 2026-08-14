@@ -6201,7 +6201,11 @@ mg_xtext_layout_drop_cb (GtkDropTarget *target, const GValue *value,
 	/* Use the same paneless detector as the motion handler so drops
 	 * land on the side the user saw highlighted. */
 	if (!mg_xtext_drop_is_active (&paneless_left))
+	{
+		poxchat_timing_log ("xtext-drop drop: rejected (no paneless side), type=%s",
+		                    drop_type);
 		return FALSE;
+	}
 
 	widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
 	height = gtk_widget_get_height (widget);
@@ -6211,6 +6215,7 @@ mg_xtext_layout_drop_cb (GtkDropTarget *target, const GValue *value,
 	else
 		pos = (y < height / 2) ? 3 : 4;
 
+	poxchat_timing_log ("xtext-drop drop: type=%s pos=%d", drop_type, pos);
 	mg_apply_layout_drop (drop_type, pos);
 	return TRUE;
 }
@@ -6311,6 +6316,27 @@ mg_chanview_drag_prepare_cb (GtkDragSource *source, double x, double y, gpointer
 	return gdk_content_provider_new_typed (G_TYPE_STRING, DND_TARGET_CHANVIEW);
 }
 
+/* Diagnostic (POXCHAT_TIMING): log whether the layout-swap drop target
+ * engaged when a drag enters the xtext, and what the paneless detector
+ * concluded from the current positions. */
+static GdkDragAction
+mg_xtext_layout_enter_cb (GtkDropTarget *target, double x, double y,
+                          gpointer user_data)
+{
+	gboolean paneless_left = FALSE;
+	gboolean active = mg_xtext_drop_is_active (&paneless_left);
+
+	(void) target; (void) x; (void) y; (void) user_data;
+
+	poxchat_timing_log ("xtext-drop enter: active=%d paneless_left=%d "
+	                    "tab_pos=%d ulist_pos=%d ulist_hide=%d",
+	                    active, paneless_left,
+	                    prefs.hex_gui_tab_pos, prefs.hex_gui_ulist_pos,
+	                    prefs.hex_gui_ulist_hide);
+
+	return active ? GDK_ACTION_MOVE : 0;
+}
+
 /* Set up drop targets on the xtext widget: G_TYPE_FILE for DCC file
  * drops and G_TYPE_STRING for layout-swap drops when one side is
  * paneless. Two separate GtkDropTarget controllers because a single
@@ -6326,9 +6352,22 @@ mg_setup_xtext_dnd (GtkWidget *xtext)
 
 	target = gtk_drop_target_new (G_TYPE_STRING, GDK_ACTION_MOVE);
 	g_signal_connect (target, "drop", G_CALLBACK (mg_xtext_layout_drop_cb), NULL);
+	g_signal_connect (target, "enter", G_CALLBACK (mg_xtext_layout_enter_cb), NULL);
 	g_signal_connect (target, "motion", G_CALLBACK (mg_xtext_layout_motion_cb), NULL);
 	g_signal_connect (target, "leave", G_CALLBACK (mg_xtext_layout_leave_cb), NULL);
 	gtk_widget_add_controller (xtext, GTK_EVENT_CONTROLLER (target));
+}
+
+/* Diagnostic: log when a layout drag enters a vpane drop target. */
+static GdkDragAction
+mg_pane_layout_enter_cb (GtkDropTarget *target, double x, double y,
+                         gpointer user_data)
+{
+	(void) target; (void) x; (void) y;
+
+	poxchat_timing_log ("vpane-drop enter: is_left=%d",
+	                    GPOINTER_TO_INT (user_data));
+	return GDK_ACTION_MOVE;
 }
 
 /* Motion handler: toggle hover CSS classes on the stashed top/bottom
@@ -6430,6 +6469,8 @@ mg_setup_pane_layout_dnd (GtkWidget *vpane, gboolean is_left)
 	target = gtk_drop_target_new (G_TYPE_STRING, GDK_ACTION_MOVE);
 	g_signal_connect (target, "drop", G_CALLBACK (mg_pane_layout_drop_cb),
 	                  GINT_TO_POINTER (is_left));
+	g_signal_connect (target, "enter", G_CALLBACK (mg_pane_layout_enter_cb),
+	                  GINT_TO_POINTER (is_left));
 	g_signal_connect (target, "motion", G_CALLBACK (mg_pane_layout_motion_cb), NULL);
 	g_signal_connect (target, "leave", G_CALLBACK (mg_pane_layout_leave_cb), NULL);
 	gtk_widget_add_controller (vpane, GTK_EVENT_CONTROLLER (target));
@@ -6442,6 +6483,8 @@ static void mg_userlist_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
                                        gpointer user_data);
 static void mg_userlist_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
                                      gboolean delete_data, gpointer user_data);
+static gboolean mg_drag_cancel_cb (GtkDragSource *source, GdkDrag *drag,
+                                   GdkDragCancelReason reason, gpointer user_data);
 static void mg_drag_watchdog_arm (GdkDrag *drag);
 
 /* Set up userlist as drag source for layout swapping */
@@ -6454,6 +6497,7 @@ mg_setup_userlist_drag_source (GtkWidget *treeview)
 	gtk_drag_source_set_actions (source, GDK_ACTION_MOVE);
 	g_signal_connect (source, "prepare", G_CALLBACK (mg_userlist_drag_prepare_cb), NULL);
 	g_signal_connect (source, "drag-begin", G_CALLBACK (mg_userlist_drag_begin_cb), NULL);
+	g_signal_connect (source, "drag-cancel", G_CALLBACK (mg_drag_cancel_cb), NULL);
 	g_signal_connect (source, "drag-end", G_CALLBACK (mg_userlist_drag_end_cb), NULL);
 	gtk_widget_add_controller (treeview, GTK_EVENT_CONTROLLER (source));
 }
@@ -6553,6 +6597,7 @@ mg_chanview_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
 
 	(void) user_data;
 
+	poxchat_timing_log ("drag-begin: chanview drag=%p", (void *)drag);
 	mg_drag_watchdog_arm (drag);
 
 	src_widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (source));
@@ -6572,7 +6617,28 @@ mg_userlist_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
 {
 	(void) source; (void) user_data;
 
+	poxchat_timing_log ("drag-begin: userlist drag=%p", (void *)drag);
 	mg_drag_watchdog_arm (drag);
+}
+
+/* Diagnostic: log drag cancellations with GDK's reason.  Shared by both
+ * layout drag sources; returning FALSE keeps default handling. */
+static gboolean
+mg_drag_cancel_cb (GtkDragSource *source, GdkDrag *drag,
+                   GdkDragCancelReason reason, gpointer user_data)
+{
+	const char *why = "?";
+
+	(void) source; (void) user_data;
+
+	switch (reason)
+	{
+	case GDK_DRAG_CANCEL_NO_TARGET: why = "no-target"; break;
+	case GDK_DRAG_CANCEL_USER_CANCELLED: why = "user-cancelled"; break;
+	case GDK_DRAG_CANCEL_ERROR: why = "error"; break;
+	}
+	poxchat_timing_log ("drag-cancel: drag=%p reason=%s", (void *)drag, why);
+	return FALSE;
 }
 
 /* GDK-Win32 sometimes never finalizes a drag: when the button is
@@ -6729,6 +6795,8 @@ mg_chanview_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
 {
 	(void) delete_data; (void) user_data;
 
+	poxchat_timing_log ("drag-end: chanview drag=%p", (void *)drag);
+
 	/* Reset the drag source gesture so its internal sequence state is
 	 * clean for the next drag. Without this, in-app drops that reparent
 	 * the drag source widget (our layout swap does exactly that) can
@@ -6746,6 +6814,8 @@ mg_userlist_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
                          gboolean delete_data, gpointer user_data)
 {
 	(void) delete_data; (void) user_data;
+
+	poxchat_timing_log ("drag-end: userlist drag=%p", (void *)drag);
 
 	if (source)
 		gtk_event_controller_reset (GTK_EVENT_CONTROLLER (source));
@@ -6766,6 +6836,7 @@ mg_setup_chanview_drag_source (GtkWidget *widget)
 	/* Reveal tabs-mode drop strips during the drag so the user can
 	 * target POS_TOP / POS_BOTTOM. Hidden again on drag-end. */
 	g_signal_connect (source, "drag-begin", G_CALLBACK (mg_chanview_drag_begin_cb), NULL);
+	g_signal_connect (source, "drag-cancel", G_CALLBACK (mg_drag_cancel_cb), NULL);
 	g_signal_connect (source, "drag-end", G_CALLBACK (mg_chanview_drag_end_cb), NULL);
 	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (source));
 }
