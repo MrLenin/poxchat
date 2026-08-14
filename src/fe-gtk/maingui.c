@@ -6309,6 +6309,32 @@ mg_drag_set_snapshot_icon (GtkDragSource *source, double x, double y, double sca
 
 static gint64 mg_drag_last_end_us;
 
+/* The layout drag currently in flight (set at drag-begin, cleared at
+ * drag-end).  Lets the drop-target enter handlers recognize the fatal
+ * GDK-Win32 race: an enter delivered a few ms AFTER its drag was
+ * cancelled.  That orphaned enter never gets a leave, permanently
+ * occupies the toplevel's drop slot, and kills every drop zone until
+ * restart.  Since our layout targets only ever matter during our own
+ * drags, an enter with no active source drag is stale by definition —
+ * finish its GdkDrop on the spot to release the slot. */
+static GdkDrag *mg_active_source_drag;
+
+static gboolean
+mg_drop_enter_is_stale (GtkDropTarget *target, const char *where)
+{
+	GdkDrop *drop;
+
+	if (mg_active_source_drag != NULL)
+		return FALSE;	/* one of our drags is genuinely in flight */
+
+	drop = gtk_drop_target_get_current_drop (target);
+	poxchat_timing_log ("%s enter with no active source drag — finishing stale drop %p",
+	                    where, (void *)drop);
+	if (drop)
+		gdk_drop_finish (drop, 0);
+	return TRUE;
+}
+
 static gboolean
 mg_drag_in_cooldown (void)
 {
@@ -6355,9 +6381,14 @@ mg_xtext_layout_enter_cb (GtkDropTarget *target, double x, double y,
                           gpointer user_data)
 {
 	gboolean paneless_left = FALSE;
-	gboolean active = mg_xtext_drop_is_active (&paneless_left);
+	gboolean active;
 
-	(void) target; (void) x; (void) y; (void) user_data;
+	(void) x; (void) y; (void) user_data;
+
+	if (mg_drop_enter_is_stale (target, "xtext-drop"))
+		return 0;
+
+	active = mg_xtext_drop_is_active (&paneless_left);
 
 	poxchat_timing_log ("xtext-drop enter: active=%d paneless_left=%d "
 	                    "tab_pos=%d ulist_pos=%d ulist_hide=%d",
@@ -6394,7 +6425,10 @@ static GdkDragAction
 mg_pane_layout_enter_cb (GtkDropTarget *target, double x, double y,
                          gpointer user_data)
 {
-	(void) target; (void) x; (void) y;
+	(void) x; (void) y;
+
+	if (mg_drop_enter_is_stale (target, "vpane-drop"))
+		return 0;
 
 	poxchat_timing_log ("vpane-drop enter: is_left=%d",
 	                    GPOINTER_TO_INT (user_data));
@@ -6629,6 +6663,7 @@ mg_chanview_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
 	(void) user_data;
 
 	poxchat_timing_log ("drag-begin: chanview drag=%p", (void *)drag);
+	mg_active_source_drag = drag;
 	mg_drag_watchdog_arm (drag);
 
 	src_widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (source));
@@ -6649,6 +6684,7 @@ mg_userlist_drag_begin_cb (GtkDragSource *source, GdkDrag *drag,
 	(void) source; (void) user_data;
 
 	poxchat_timing_log ("drag-begin: userlist drag=%p", (void *)drag);
+	mg_active_source_drag = drag;
 	mg_drag_watchdog_arm (drag);
 }
 
@@ -6828,6 +6864,8 @@ mg_chanview_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
 
 	poxchat_timing_log ("drag-end: chanview drag=%p", (void *)drag);
 	mg_drag_last_end_us = g_get_monotonic_time ();
+	if (mg_active_source_drag == drag)
+		mg_active_source_drag = NULL;
 
 	/* Reset the drag source gesture so its internal sequence state is
 	 * clean for the next drag. Without this, in-app drops that reparent
@@ -6849,6 +6887,8 @@ mg_userlist_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
 
 	poxchat_timing_log ("drag-end: userlist drag=%p", (void *)drag);
 	mg_drag_last_end_us = g_get_monotonic_time ();
+	if (mg_active_source_drag == drag)
+		mg_active_source_drag = NULL;
 
 	if (source)
 		gtk_event_controller_reset (GTK_EVENT_CONTROLLER (source));
