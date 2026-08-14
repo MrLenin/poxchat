@@ -289,12 +289,8 @@ poxchat_timing_log (const char *fmt, ...)
 	va_list ap;
 	gint64 now = g_get_monotonic_time ();
 
-	/* Soak-branch default: ON unless opted out.  The env-var-to-enable
-	 * gate kept costing repro data (user forgets to set it, the session's
-	 * evidence is gone).  TODO: flip back to opt-in (POXCHAT_TIMING) or
-	 * remove before merging to master. */
 	if (enabled < 0)
-		enabled = (g_getenv ("POXCHAT_NO_TIMING") == NULL);
+		enabled = (g_getenv ("POXCHAT_TIMING") != NULL);
 	if (!enabled)
 		return;
 
