@@ -57,9 +57,13 @@ def read_outer(path, readonly=False):
         wal = path + "-wal"
         if os.path.exists(wal):
             # A -wal sidecar can hold committed pages the main file lacks,
-            # and SQLite cannot replay a WAL through a mode=ro open
-            # (recovery needs write access).  Read a throwaway copy of the
-            # pair instead -- the irreplaceable original stays untouched.
+            # so it must be read, not skipped.  But a plain mode=ro open of
+            # a WAL database still creates and leaves behind a -shm file
+            # next to it (needed for the wal-index) -- i.e. it MUTATES the
+            # backup's directory, which is exactly what must never happen
+            # to an irreplaceable source.  Read a throwaway copy of the pair
+            # instead -- any -shm that read leaves behind lands in the temp
+            # dir, and the original stays untouched.
             tmpdir = tempfile.mkdtemp(prefix="salvage-wal-ro-")
             try:
                 tmp = os.path.join(tmpdir, os.path.basename(path))
@@ -471,18 +475,22 @@ def salvage_network(live_path, backups, apply_changes, workdir):
         return
 
     if apply_changes:
-        write_outer(live_img, live_path, dict_bytes)
         # Any -journal/-wal/-shm here belonged to the pre-salvage generation
         # of this file (already preserved above, sidecars included, by
-        # copy_with_sidecars) and is stale w.r.t. the content just written.
-        # A stale -wal isn't just tidiness to skip -- it would be *replayed*
-        # into the freshly written outer file by its next opener, silently
-        # reintroducing pre-salvage (or worse, mismatched) pages, so removing
-        # the sidecars here is a correctness requirement.
+        # copy_with_sidecars) and would be stale w.r.t. the content about to
+        # be written.  A stale -wal isn't just tidiness to skip -- it would
+        # be *replayed* into the freshly written outer file by its next
+        # opener, silently reintroducing pre-salvage (or worse, mismatched)
+        # pages, so clearing the sidecars is a correctness requirement.  It
+        # runs BEFORE write_outer's atomic os.replace (not after) so there
+        # is never a window where the just-written main file sits next to a
+        # stale sidecar -- a crash or a locked os.remove() between the two
+        # steps can no longer leave that pairing on disk.
         for suffix in ("-journal", "-wal", "-shm"):
             stale = live_path + suffix
             if os.path.exists(stale):
                 os.remove(stale)
+        write_outer(live_img, live_path, dict_bytes)
         print(f"  wrote {name}")
     else:
         print("  (dry run — use --apply to write)")
@@ -498,6 +506,14 @@ def main():
 
     by_network = {}
     for bk in glob.glob(os.path.join(args.scrollback_dir, "*.corrupt.*")):
+        if bk.endswith(("-wal", "-journal", "-shm")):
+            # A backup's own -wal/-journal/-shm sidecars match this glob too
+            # (they live right beside <db>.corrupt.<ts>) but are not backups
+            # themselves -- copy_with_sidecars/reconstruct pick them up via
+            # the main backup path, so listing them here would double-count
+            # the network and feed a sidecar straight into reconstruct() as
+            # if it were a standalone outer DB.
+            continue
         base = bk[:bk.index(".corrupt.")]
         by_network.setdefault(base, []).append(bk)
     if not by_network:
