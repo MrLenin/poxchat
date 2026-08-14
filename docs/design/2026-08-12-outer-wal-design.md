@@ -1,7 +1,7 @@
 # Outer-DB WAL — Design
 
 **Date:** 2026-08-12
-**Status:** Proposed. Follow-up to `2026-08-10-zstd-vfs-resilience-design.md`.
+**Status:** Implemented 2026-08-14 (with §1b added during implementation). Follow-up to `2026-08-10-zstd-vfs-resilience-design.md`.
 
 That document's "no WAL migration" note rejected *replacing the compression
 VFS with a plain SQLite database in WAL mode* — a storage-engine swap. This
