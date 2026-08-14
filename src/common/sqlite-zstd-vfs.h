@@ -28,7 +28,10 @@ void zstd_vfs_shutdown (void);
  * SQLite into whatever database is created there next, corrupting it —
  * and a backup without its -wal silently loses the un-checkpointed tail.
  * A -shm sidecar is deleted (reconstructible cache, never valid to move).
- * Returns 0 on success, -1 if the main rename failed. */
+ * Returns 0 on success.  Returns -1 on failure — either the main rename
+ * failed (nothing was moved), or the -wal could neither be moved nor
+ * deleted (the main rename is backed out so the pair stays together).
+ * On -1 the caller must NOT create a database at path. */
 int zstd_vfs_backup_db (const char *path, const char *backup_path);
 
 #endif /* SQLITE_ZSTD_VFS_H */

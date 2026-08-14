@@ -657,16 +657,20 @@ scrollback_check_integrity (sqlite3 *db)
 }
 
 /* Back up a corrupt DB file (together with its -wal sidecar) by renaming
- * it with a timestamp suffix. */
-static void
+ * it with a timestamp suffix.  Returns FALSE if the path is not safe to
+ * recreate a database at (backup failed, or a stale -wal is stranded). */
+static gboolean
 scrollback_backup_corrupt (const char *path)
 {
 	char *backup_path;
+	gboolean ok;
 
 	backup_path = g_strdup_printf ("%s.corrupt.%" G_GINT64_FORMAT, path, (gint64)time (NULL));
-	if (zstd_vfs_backup_db (path, backup_path) != 0)
+	ok = zstd_vfs_backup_db (path, backup_path) == 0;
+	if (!ok)
 		g_warning ("Failed to move corrupt scrollback DB aside: %s", path);
 	g_free (backup_path);
+	return ok;
 }
 
 scrollback_db *
@@ -746,7 +750,18 @@ scrollback_open (const char *network)
 		{
 			g_warning ("Scrollback database corrupt for %s — backing up and recreating", network);
 			sqlite3_close (sdb->db);
-			scrollback_backup_corrupt (path);
+			if (!scrollback_backup_corrupt (path))
+			{
+				/* The path still holds the old DB (or a stranded -wal):
+				 * creating a fresh database here would replay stale WAL
+				 * into it.  Treat like a transient error — retry next
+				 * session. */
+				g_free (path);
+				g_free (sdb->network);
+				g_hash_table_insert (open_dbs, g_strdup (network), SCROLLBACK_FAILED_SENTINEL);
+				g_free (sdb);
+				return NULL;
+			}
 
 			/* Re-open — creates a fresh empty database */
 			rc = sqlite3_open_v2 (path, &sdb->db,

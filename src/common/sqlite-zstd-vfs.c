@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <sqlite3.h>
 #include <zstd.h>
 #include <zdict.h>
@@ -1159,6 +1160,7 @@ int
 zstd_vfs_backup_db (const char *path, const char *backup_path)
 {
 	char *wal_path, *shm_path;
+	int ret = 0;
 
 	if (g_rename (path, backup_path) != 0)
 		return -1;
@@ -1171,20 +1173,34 @@ zstd_vfs_backup_db (const char *path, const char *backup_path)
 		{
 			/* Losing the un-checkpointed tail is recoverable; letting the
 			 * next DB created at this path replay a stale WAL is not. */
-			g_warning ("zstd-vfs: could not move %s with its database; deleting it",
-			           wal_path);
-			g_unlink (wal_path);
+			g_warning ("zstd-vfs: could not move %s with its database (%s); deleting it",
+			           wal_path, g_strerror (errno));
+			if (g_unlink (wal_path) != 0)
+			{
+				/* Neither move nor delete worked: the stale WAL is
+				 * stranded where SQLite would replay it into whatever
+				 * database is created at this path next.  Undo the main
+				 * rename so the pair at least stays together, and report
+				 * failure — the caller must not create a DB here. */
+				g_warning ("zstd-vfs: -wal stranded at %s (%s); backing out backup rename",
+				           wal_path, g_strerror (errno));
+				g_rename (backup_path, path);
+				ret = -1;
+			}
 		}
 		g_free (wal_backup);
 	}
 	g_free (wal_path);
 
-	shm_path = g_strdup_printf ("%s-shm", path);
-	if (g_file_test (shm_path, G_FILE_TEST_EXISTS))
-		g_unlink (shm_path);
-	g_free (shm_path);
+	if (ret == 0)
+	{
+		shm_path = g_strdup_printf ("%s-shm", path);
+		if (g_file_test (shm_path, G_FILE_TEST_EXISTS))
+			g_unlink (shm_path);
+		g_free (shm_path);
+	}
 
-	return 0;
+	return ret;
 }
 
 int
