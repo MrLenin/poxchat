@@ -6296,11 +6296,39 @@ mg_drag_set_snapshot_icon (GtkDragSource *source, double x, double y, double sca
 
 #define MG_DRAG_ICON_SCALE 0.5
 
+/* Cooldown between layout drags.  Rapid back-to-back drags overlap the
+ * previous drag's teardown, and the trace of a wedged session shows the
+ * fatal race directly: a drop-target enter delivered ~3 ms AFTER its
+ * drag was cancelled.  That enter's leave never arrives, the toplevel's
+ * drop state stays occupied, and every later drag gets begin/cancel
+ * with no target enters at all — all drop zones dead until restart
+ * (plus zombie GdkDrags that never finalize).  Refusing to start a new
+ * drag until the previous one has been over for a beat prevents the
+ * overlap; deliberate layout drags never notice. */
+#define MG_DRAG_COOLDOWN_US (400 * 1000)
+
+static gint64 mg_drag_last_end_us;
+
+static gboolean
+mg_drag_in_cooldown (void)
+{
+	if (mg_drag_last_end_us != 0 &&
+	    g_get_monotonic_time () - mg_drag_last_end_us < MG_DRAG_COOLDOWN_US)
+	{
+		poxchat_timing_log ("drag suppressed: within cooldown of previous drag-end");
+		return TRUE;
+	}
+	return FALSE;
+}
+
 /* Prepare callback for userlist drag source */
 static GdkContentProvider *
 mg_userlist_drag_prepare_cb (GtkDragSource *source, double x, double y, gpointer user_data)
 {
 	(void)user_data;
+
+	if (mg_drag_in_cooldown ())
+		return NULL;
 
 	mg_drag_set_snapshot_icon (source, x, y, MG_DRAG_ICON_SCALE);
 	return gdk_content_provider_new_typed (G_TYPE_STRING, DND_TARGET_USERLIST);
@@ -6311,6 +6339,9 @@ static GdkContentProvider *
 mg_chanview_drag_prepare_cb (GtkDragSource *source, double x, double y, gpointer user_data)
 {
 	(void)user_data;
+
+	if (mg_drag_in_cooldown ())
+		return NULL;
 
 	mg_drag_set_snapshot_icon (source, x, y, MG_DRAG_ICON_SCALE);
 	return gdk_content_provider_new_typed (G_TYPE_STRING, DND_TARGET_CHANVIEW);
@@ -6796,6 +6827,7 @@ mg_chanview_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
 	(void) delete_data; (void) user_data;
 
 	poxchat_timing_log ("drag-end: chanview drag=%p", (void *)drag);
+	mg_drag_last_end_us = g_get_monotonic_time ();
 
 	/* Reset the drag source gesture so its internal sequence state is
 	 * clean for the next drag. Without this, in-app drops that reparent
@@ -6816,6 +6848,7 @@ mg_userlist_drag_end_cb (GtkDragSource *source, GdkDrag *drag,
 	(void) delete_data; (void) user_data;
 
 	poxchat_timing_log ("drag-end: userlist drag=%p", (void *)drag);
+	mg_drag_last_end_us = g_get_monotonic_time ();
 
 	if (source)
 		gtk_event_controller_reset (GTK_EVENT_CONTROLLER (source));
