@@ -680,6 +680,7 @@ scrollback_open (const char *network)
 	scrollback_db *sdb;
 	char *path;
 	int rc;
+	gboolean dirty_exit;
 
 	if (!network || !network[0])
 		return NULL;
@@ -712,6 +713,23 @@ scrollback_open (const char *network)
 	sdb->network = g_strdup (network);
 
 	path = get_db_path (network);
+
+	/* Clean-shutdown fast path.  The outer DB runs in WAL mode; on a
+	 * clean close SQLite checkpoints and deletes the -wal sidecar, so a
+	 * lingering -wal is itself the marker of an unclean previous exit
+	 * (docs/design/2026-08-12-outer-wal-design.md).  Only pay the
+	 * whole-DB quick_check when that marker is present: the scan
+	 * decompresses essentially every page through the zstd VFS and was
+	 * the largest fixed cost on the connect path (~242 ms warm on a
+	 * 190k-row DB; disk-bound and worse on a cold cache).  Sampled
+	 * before sqlite3_open_v2 so the file state still reflects the
+	 * previous session, not this connection. */
+	{
+		char *wal_path = g_strdup_printf ("%s-wal", path);
+		dirty_exit = g_file_test (wal_path, G_FILE_TEST_EXISTS);
+		g_free (wal_path);
+	}
+
 	rc = sqlite3_open_v2 (path, &sdb->db,
 	                      SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, "zstd");
 
@@ -726,10 +744,20 @@ scrollback_open (const char *network)
 		return NULL;
 	}
 
+	if (!dirty_exit)
+	{
+		poxchat_timing_log ("scrollback_open %s: clean shutdown — integrity check skipped",
+		                    network);
+	}
+	else
 	/* Check for corruption before using the database */
 	{
 		gint64 t_integ = g_get_monotonic_time ();
-		sb_integrity integ = scrollback_check_integrity (sdb->db);
+		sb_integrity integ;
+
+		g_message ("scrollback: unclean previous exit for %s — verifying integrity",
+		           network);
+		integ = scrollback_check_integrity (sdb->db);
 
 		poxchat_timing_log ("scrollback_open %s: integrity quick_check %.1f ms",
 		                    network, (g_get_monotonic_time () - t_integ) / 1000.0);
