@@ -119,6 +119,7 @@ rows = db.execute("SELECT COUNT(*) FROM t").fetchone()[0]
 db.close()
 assert rows == 1500, f"readonly reconstruct rows: {rows} (missing WAL tail)"
 assert os.path.exists(bk + "-wal"), "readonly reconstruct consumed the backup's -wal"
+assert not os.path.exists(bk + "-shm"), "readonly reconstruct left a -shm beside the backup"
 
 # 2: the probe/pre-salvage copy helper must carry the -wal sidecar
 probe = os.path.join(work, "probe.db")
