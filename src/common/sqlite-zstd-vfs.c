@@ -1010,6 +1010,7 @@ zvfs_open (sqlite3_vfs *vfs, const char *zName,
 		 * at the outer DB's sidecar path.  Refuse loudly rather than
 		 * corrupt. */
 		zstd_vfs_passthru *p = (zstd_vfs_passthru *)file;
+		memset (p, 0, sizeof (*p));
 
 		if (flags & (SQLITE_OPEN_MAIN_JOURNAL | SQLITE_OPEN_WAL))
 		{
@@ -1017,8 +1018,6 @@ zvfs_open (sqlite3_vfs *vfs, const char *zName,
 			           zName ? zName : "(null)", flags);
 			return SQLITE_CANTOPEN;
 		}
-
-		memset (p, 0, sizeof (*p));
 
 		p->real_file = g_malloc0 (zvfs->real_vfs->szOsFile);
 		rc = zvfs->real_vfs->xOpen (zvfs->real_vfs, zName,
