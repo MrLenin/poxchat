@@ -148,6 +148,15 @@ cmd_geom (const char *path)	/* plain read-only open of the OUTER db */
 }
 
 static int
+cmd_backup (const char *path, const char *dest)
+{
+	/* Deliberately no VFS open first: this exercises the corrupt-DB backup
+	 * path where the file was never (or not cleanly) closed and the -wal
+	 * still holds the un-checkpointed tail. */
+	return zstd_vfs_backup_db (path, dest) == 0 ? 0 : 2;
+}
+
+static int
 cmd_hold (const char *path, int seconds)	/* hold outer lock for busy tests */
 {
 	sqlite3 *db;
@@ -181,7 +190,9 @@ main (int argc, char **argv)
 		return cmd_geom (argv[1]);
 	if (argc >= 4 && strcmp (argv[2], "hold") == 0)
 		return cmd_hold (argv[1], atoi (argv[3]));
-	fprintf (stderr, "usage: %s <db> fill N | kill N | check | geom | hold SECONDS\n",
+	if (argc >= 4 && strcmp (argv[2], "backup") == 0)
+		return cmd_backup (argv[1], argv[3]);
+	fprintf (stderr, "usage: %s <db> fill N | kill N | check | geom | hold SECONDS | backup DEST\n",
 	         argv[0]);
 	return 3;
 }

@@ -656,27 +656,17 @@ scrollback_check_integrity (sqlite3 *db)
 	return result;
 }
 
-/* Back up a corrupt DB file by renaming it with a timestamp suffix. */
+/* Back up a corrupt DB file (together with its -wal sidecar) by renaming
+ * it with a timestamp suffix. */
 static void
 scrollback_backup_corrupt (const char *path)
 {
 	char *backup_path;
-	char *wal_path, *shm_path;
 
 	backup_path = g_strdup_printf ("%s.corrupt.%" G_GINT64_FORMAT, path, (gint64)time (NULL));
-	g_rename (path, backup_path);
+	if (zstd_vfs_backup_db (path, backup_path) != 0)
+		g_warning ("Failed to move corrupt scrollback DB aside: %s", path);
 	g_free (backup_path);
-
-	/* Also move any leftover WAL/SHM files */
-	wal_path = g_strdup_printf ("%s-wal", path);
-	if (g_file_test (wal_path, G_FILE_TEST_EXISTS))
-		g_unlink (wal_path);
-	g_free (wal_path);
-
-	shm_path = g_strdup_printf ("%s-shm", path);
-	if (g_file_test (shm_path, G_FILE_TEST_EXISTS))
-		g_unlink (shm_path);
-	g_free (shm_path);
 }
 
 scrollback_db *

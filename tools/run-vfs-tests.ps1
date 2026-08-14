@@ -83,6 +83,29 @@ db.close()
   AssertRows 'stale-meta-self-heal' $staleOut 'rows: 1000'
 }
 
+# 2c. backup-carries-WAL: after a kill the un-checkpointed tail lives in the
+#     -wal sidecar.  Moving a DB aside (the scrollback_backup_corrupt path)
+#     must move the PAIR: renaming only the main file would strand a -wal
+#     that SQLite replays into the next database created at that path
+#     (corrupting it), and the backup would silently lose the tail.
+if (-not $ExpectKillFail) {
+  & $exe $db kill 500 | Write-Host
+  if ($LASTEXITCODE -ne 9) { throw "FAIL backup-leg kill: exit $LASTEXITCODE, expected 9" }
+  if (-not (Test-Path "$db-wal")) { throw 'FAIL backup-leg: no -wal after kill' }
+  $bk = "$db.corrupt.test"
+  Step 'backup-pair' @('backup', $bk) 0
+  if (Test-Path $db) { throw 'FAIL backup-pair: original DB still present' }
+  if (Test-Path "$db-wal") { throw 'FAIL backup-pair: -wal stranded at original path' }
+  if (-not (Test-Path $bk)) { throw 'FAIL backup-pair: backup missing' }
+  if (-not (Test-Path "$bk-wal")) { throw 'FAIL backup-pair: backup -wal sidecar missing' }
+  $bkOut = & $exe $bk check
+  $bkOut | Write-Host
+  if ($LASTEXITCODE -ne 0) { throw "FAIL check-backup: exit $LASTEXITCODE, expected 0" }
+  AssertRows 'check-backup' $bkOut 'rows: 1500'
+  if (Test-Path "$bk-wal") { throw 'FAIL check-backup: backup -wal not checkpointed away on clean close' }
+  Remove-Item "$bk*" -ErrorAction SilentlyContinue
+}
+
 # 3. busy: another process holds the outer DB -> must be error(2), never corrupt(1)
 if (-not $ExpectKillFail) {
   Step 'reset-fill' @('fill','10') 0   # ensure db is healthy for the busy test

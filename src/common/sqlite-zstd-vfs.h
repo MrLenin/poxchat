@@ -23,4 +23,12 @@ int zstd_vfs_register (const char *vfs_name);
 /* Unregister and free the VFS.  Call after all databases are closed. */
 void zstd_vfs_shutdown (void);
 
+/* Move an outer database aside together with its -wal sidecar.  The pair
+ * is one unit: a -wal left behind at the old path would be replayed by
+ * SQLite into whatever database is created there next, corrupting it —
+ * and a backup without its -wal silently loses the un-checkpointed tail.
+ * A -shm sidecar is deleted (reconstructible cache, never valid to move).
+ * Returns 0 on success, -1 if the main rename failed. */
+int zstd_vfs_backup_db (const char *path, const char *backup_path);
+
 #endif /* SQLITE_ZSTD_VFS_H */

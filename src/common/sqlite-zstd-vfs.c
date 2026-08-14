@@ -15,6 +15,7 @@
 #include <zstd.h>
 #include <zdict.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 
 #include "sqlite-zstd-vfs.h"
 
@@ -1153,6 +1154,38 @@ static sqlite3_io_methods zstd_vfs_passthru_methods = {
 /* ------------------------------------------------------------------ */
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
+
+int
+zstd_vfs_backup_db (const char *path, const char *backup_path)
+{
+	char *wal_path, *shm_path;
+
+	if (g_rename (path, backup_path) != 0)
+		return -1;
+
+	wal_path = g_strdup_printf ("%s-wal", path);
+	if (g_file_test (wal_path, G_FILE_TEST_EXISTS))
+	{
+		char *wal_backup = g_strdup_printf ("%s-wal", backup_path);
+		if (g_rename (wal_path, wal_backup) != 0)
+		{
+			/* Losing the un-checkpointed tail is recoverable; letting the
+			 * next DB created at this path replay a stale WAL is not. */
+			g_warning ("zstd-vfs: could not move %s with its database; deleting it",
+			           wal_path);
+			g_unlink (wal_path);
+		}
+		g_free (wal_backup);
+	}
+	g_free (wal_path);
+
+	shm_path = g_strdup_printf ("%s-shm", path);
+	if (g_file_test (shm_path, G_FILE_TEST_EXISTS))
+		g_unlink (shm_path);
+	g_free (shm_path);
+
+	return 0;
+}
 
 int
 zstd_vfs_register (const char *vfs_name)
