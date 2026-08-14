@@ -54,6 +54,19 @@ RAW, ZSTD, ZSTD_DICT = 0, 1, 2
 def read_outer(path, readonly=False):
     """Return (page_size, header_count, header_trustworthy, {pgno: page_bytes}, dict_bytes)."""
     if readonly:
+        wal = path + "-wal"
+        if os.path.exists(wal):
+            # A -wal sidecar can hold committed pages the main file lacks,
+            # and SQLite cannot replay a WAL through a mode=ro open
+            # (recovery needs write access).  Read a throwaway copy of the
+            # pair instead -- the irreplaceable original stays untouched.
+            tmpdir = tempfile.mkdtemp(prefix="salvage-wal-ro-")
+            try:
+                tmp = os.path.join(tmpdir, os.path.basename(path))
+                copy_with_sidecars(path, tmp)
+                return read_outer(tmp, readonly=False)
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
         # Backups are irreplaceable sources: open strictly read-only so this
         # tool is physically unable to mutate them, and so a typo'd path
         # raises immediately instead of silently creating an empty DB.
@@ -365,15 +378,19 @@ def write_outer(image_path, out_path, dict_bytes):
     os.replace(tmp_path, out_path)
 
 
-def copy_with_journal(src, dst):
-    """Copy src (+ its -journal sidecar, if present) to dst (+ dst-journal).
-    Returns True if a journal was copied."""
+def copy_with_sidecars(src, dst):
+    """Copy src plus any -journal/-wal sidecars to dst (+ matching names).
+    A -journal holds the rollback of a torn commit; a -wal holds committed
+    pages the main file may lack.  -shm is skipped: it is reconstructible
+    cache and never valid for a different path.  Returns the list of
+    sidecar suffixes copied."""
     shutil.copy2(src, dst)
-    journal = src + "-journal"
-    has_journal = os.path.exists(journal)
-    if has_journal:
-        shutil.copy2(journal, dst + "-journal")
-    return has_journal
+    copied = []
+    for suffix in ("-journal", "-wal"):
+        if os.path.exists(src + suffix):
+            shutil.copy2(src + suffix, dst + suffix)
+            copied.append(suffix)
+    return copied
 
 
 def salvage_network(live_path, backups, apply_changes, workdir):
@@ -383,21 +400,21 @@ def salvage_network(live_path, backups, apply_changes, workdir):
     dict_bytes = None
     if os.path.exists(live_path):
         if apply_changes:
-            # Snapshot the live file (and any hot -journal) BEFORE the very
-            # first read-write open below, which may roll a hot journal
+            # Snapshot the live file (and any hot -journal / -wal) BEFORE the
+            # very first read-write open below, which may roll a hot journal
             # forward and delete it -- this is the only chance to keep a
             # truly pre-recovery copy.
             keep = f"{live_path}.pre-salvage.{int(time.time())}"
-            had_journal = copy_with_journal(live_path, keep)
+            sidecars = copy_with_sidecars(live_path, keep)
             print(f"  saved {os.path.basename(keep)}"
-                  + (" (+ journal)" if had_journal else ""))
+                  + (f" (+ {', '.join(s.lstrip('-') for s in sidecars)})" if sidecars else ""))
             read_target = live_path
         else:
             # Dry run must never mutate the real live file -- reconstruct()
             # opens read-write specifically so it can roll a hot journal
             # forward, so operate on a throwaway copy instead.
             read_target = os.path.join(workdir, name + ".live-probe")
-            copy_with_journal(live_path, read_target)
+            copy_with_sidecars(live_path, read_target)
         count, verdict, dict_bytes, note = reconstruct(read_target, live_img)
         if note:
             print(f"  {note}")
@@ -455,13 +472,17 @@ def salvage_network(live_path, backups, apply_changes, workdir):
 
     if apply_changes:
         write_outer(live_img, live_path, dict_bytes)
-        # Any -journal here belonged to the pre-salvage generation of this
-        # file (already preserved above) and is stale w.r.t. the content
-        # just written -- remove it so nothing is left for a future opener
-        # to puzzle over.
-        stale_journal = live_path + "-journal"
-        if os.path.exists(stale_journal):
-            os.remove(stale_journal)
+        # Any -journal/-wal/-shm here belonged to the pre-salvage generation
+        # of this file (already preserved above, sidecars included, by
+        # copy_with_sidecars) and is stale w.r.t. the content just written.
+        # A stale -wal isn't just tidiness to skip -- it would be *replayed*
+        # into the freshly written outer file by its next opener, silently
+        # reintroducing pre-salvage (or worse, mismatched) pages, so removing
+        # the sidecars here is a correctness requirement.
+        for suffix in ("-journal", "-wal", "-shm"):
+            stale = live_path + suffix
+            if os.path.exists(stale):
+                os.remove(stale)
         print(f"  wrote {name}")
     else:
         print("  (dry run — use --apply to write)")

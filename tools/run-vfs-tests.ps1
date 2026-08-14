@@ -98,6 +98,46 @@ if (-not $ExpectKillFail) {
   if (Test-Path "$db-wal") { throw 'FAIL backup-pair: -wal stranded at original path' }
   if (-not (Test-Path $bk)) { throw 'FAIL backup-pair: backup missing' }
   if (-not (Test-Path "$bk-wal")) { throw 'FAIL backup-pair: backup -wal sidecar missing' }
+  # Salvage must see the tail rows through the -wal sidecar, and must not
+  # mutate the backup pair (its readonly path works on a temp copy).
+  $pyScript = Join-Path $env:TEMP ("vfs-salvage-wal-{0}.py" -f [guid]::NewGuid())
+  $salvage = Join-Path $repo 'tools\scrollback-salvage.py'
+  @"
+import importlib.util, os, sqlite3, sys, tempfile
+spec = importlib.util.spec_from_file_location("salvage", r'$salvage')
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+bk = r'$bk'
+work = tempfile.mkdtemp(prefix="vfs-salvage-wal-")
+
+# 1: read-only reconstruct of a backup pair must include the -wal tail
+img = os.path.join(work, "ro.img")
+count, verdict, dict_bytes, note = m.reconstruct(bk, img, readonly=True)
+assert verdict == "ok", f"readonly reconstruct integrity: {verdict}"
+db = sqlite3.connect(img)
+rows = db.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+db.close()
+assert rows == 1500, f"readonly reconstruct rows: {rows} (missing WAL tail)"
+assert os.path.exists(bk + "-wal"), "readonly reconstruct consumed the backup's -wal"
+
+# 2: the probe/pre-salvage copy helper must carry the -wal sidecar
+probe = os.path.join(work, "probe.db")
+m.copy_with_sidecars(bk, probe)
+assert os.path.exists(probe + "-wal"), "copy_with_sidecars dropped the -wal"
+img2 = os.path.join(work, "probe.img")
+count2, verdict2, _, _ = m.reconstruct(probe, img2)
+assert verdict2 == "ok", f"probe reconstruct integrity: {verdict2}"
+db = sqlite3.connect(img2)
+rows2 = db.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+db.close()
+assert rows2 == 1500, f"probe reconstruct rows: {rows2} (missing WAL tail)"
+print(f"salvage-wal ok: ro={rows}, probe={rows2}")
+"@ | Set-Content -Path $pyScript -Encoding ASCII
+  & python $pyScript
+  $pyExit = $LASTEXITCODE
+  Remove-Item $pyScript -ErrorAction SilentlyContinue
+  if ($pyExit -ne 0) { throw "FAIL salvage-wal: python leg exited $pyExit" }
+  Write-Host 'PASS: salvage-wal'
   $bkOut = & $exe $bk check
   $bkOut | Write-Host
   if ($LASTEXITCODE -ne 0) { throw "FAIL check-backup: exit $LASTEXITCODE, expected 0" }
