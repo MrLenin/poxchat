@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sqlite3.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include "../src/common/sqlite-zstd-vfs.h"
 
 static sqlite3 *
@@ -31,16 +32,18 @@ open_inner (const char *path)
 	return db;
 }
 
+/* One BEGIN..COMMIT transaction appending n rows to table t.
+ * random_payload writes ~incompressible text: the fox sentence compresses
+ * ~40:1 under the VFS's zstd, so a "big" fill of it dirties only a handful
+ * of OUTER pages and never crosses the WAL auto-checkpoint threshold —
+ * checkpoint tests need payload that survives compression. */
 static int
-cmd_fill (const char *path, int n, int do_kill)
+insert_rows (sqlite3 *db, int n, int random_payload)
 {
-	sqlite3 *db = open_inner (path);
 	sqlite3_stmt *ins;
 	char *err = NULL;
 	int i;
 
-	if (!db)
-		return 2;
 	sqlite3_exec (db, "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, v TEXT)",
 	              NULL, NULL, NULL);
 	sqlite3_exec (db, "BEGIN", NULL, NULL, NULL);
@@ -48,8 +51,16 @@ cmd_fill (const char *path, int n, int do_kill)
 	for (i = 0; i < n; i++)
 	{
 		char buf[128];
-		snprintf (buf, sizeof (buf),
-		          "row %d: the quick brown fox jumps over the lazy dog", i);
+		if (random_payload)
+		{
+			int j;
+			for (j = 0; j < (int) sizeof (buf) - 1; j++)
+				buf[j] = (char) (33 + (rand () % 94));
+			buf[sizeof (buf) - 1] = '\0';
+		}
+		else
+			snprintf (buf, sizeof (buf),
+			          "row %d: the quick brown fox jumps over the lazy dog", i);
 		sqlite3_reset (ins);
 		sqlite3_bind_text (ins, 1, buf, -1, SQLITE_TRANSIENT);
 		if (sqlite3_step (ins) != SQLITE_DONE)
@@ -64,6 +75,18 @@ cmd_fill (const char *path, int n, int do_kill)
 		fprintf (stderr, "commit failed: %s\n", err ? err : "?");
 		return 2;
 	}
+	return 0;
+}
+
+static int
+cmd_fill (const char *path, int n, int do_kill)
+{
+	sqlite3 *db = open_inner (path);
+
+	if (!db)
+		return 2;
+	if (insert_rows (db, n, 0) != 0)
+		return 2;
 	if (do_kill)
 	{
 		printf ("committed %d rows, dying without close\n", n);
@@ -71,6 +94,47 @@ cmd_fill (const char *path, int n, int do_kill)
 		_exit (9);	/* simulate process kill: no close, no meta persist */
 	}
 	printf ("committed %d rows, clean close\n", n);
+	sqlite3_close (db);
+	zstd_vfs_shutdown ();
+	return 0;
+}
+
+/* Sizes of the OUTER file pair, observed mid-session (before the clean
+ * close that would checkpoint and delete the -wal). */
+static void
+print_outer_sizes (const char *path, const char *label)
+{
+	GStatBuf st;
+	char *wal = g_strdup_printf ("%s-wal", path);
+	long long main_sz = (g_stat (path, &st) == 0) ? (long long) st.st_size : -1;
+	long long wal_sz = (g_stat (wal, &st) == 0) ? (long long) st.st_size : -1;
+
+	printf ("%s: main=%lld wal=%lld\n", label, main_sz, wal_sz);
+	fflush (stdout);
+	g_free (wal);
+}
+
+/* Cross the WAL auto-checkpoint threshold inside ONE process and report
+ * the outer file sizes after each commit.  A clean close hides checkpoint
+ * failures (close absorbs and deletes the -wal), so the suite must assert
+ * on these mid-session numbers: after the big commit the auto-checkpoint
+ * must have backfilled the main file, and after the follow-up commit the
+ * restart checkpoint must have truncated the -wal back down. */
+static int
+cmd_bigfill (const char *path, int n)
+{
+	sqlite3 *db = open_inner (path);
+
+	if (!db)
+		return 2;
+	srand (12345);	/* deterministic incompressible payload */
+	if (insert_rows (db, n, 1) != 0)
+		return 2;
+	print_outer_sizes (path, "after-big");
+	if (insert_rows (db, 10, 1) != 0)
+		return 2;
+	print_outer_sizes (path, "after-small");
+	printf ("committed %d rows, clean close\n", n + 10);
 	sqlite3_close (db);
 	zstd_vfs_shutdown ();
 	return 0;
@@ -192,7 +256,9 @@ main (int argc, char **argv)
 		return cmd_hold (argv[1], atoi (argv[3]));
 	if (argc >= 4 && strcmp (argv[2], "backup") == 0)
 		return cmd_backup (argv[1], argv[3]);
-	fprintf (stderr, "usage: %s <db> fill N | kill N | check | geom | hold SECONDS | backup DEST\n",
+	if (argc >= 4 && strcmp (argv[2], "bigfill") == 0)
+		return cmd_bigfill (argv[1], atoi (argv[3]));
+	fprintf (stderr, "usage: %s <db> fill N | kill N | check | geom | hold SECONDS | backup DEST | bigfill N\n",
 	         argv[0]);
 	return 3;
 }

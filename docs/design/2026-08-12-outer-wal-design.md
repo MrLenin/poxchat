@@ -146,6 +146,40 @@ does its first-open probe. WAL made the sidecar a standing, near-permanent
 fixture instead of a fleeting one, turning a theoretical race into a
 guaranteed collision on every open.
 
+### 1c. Outer read statements must not linger in ROW state (found in the field)
+
+First live session after the flip: the outer `-wal` grew monotonically
+(≈10 MB in two hours), the main file's mtime stayed frozen at open time, and
+the WAL header's checkpoint counter stayed 0 — auto-checkpoint was firing at
+every commit past the 1000-page threshold and backfilling **zero** frames,
+silently, every time.
+
+Cause: `zvfs_read` used reset-*before*-use on its persistent `stmt_read`,
+leaving the statement in `SQLITE_ROW` state after every page read. A stepped
+but unreset SELECT keeps an implicit read transaction open on the outer
+connection, and SQLite (which happily COMMITs write transactions while a
+read cursor is open) caps every passive checkpoint at that cursor's pinned
+snapshot. In steady state the outer connection *always* had a page read in
+flight, so the pin never lifted. Under DELETE journaling this same
+statement lifecycle was completely harmless — no WAL, nothing to checkpoint
+— which is why it survived unnoticed since the VFS was written.
+
+Fix: `zvfs_read` resets `stmt_read` immediately after copying the page data
+out (the column blob pointer dies at reset, so ordering matters). The write
+statements were never implicated — `SQLITE_DONE` completes a statement and
+releases its transaction. Companion: `journal_size_limit=4194304` on the
+outer connection, so a burst-inflated WAL (chathistory backfill) is
+truncated back to 4 MB by the next restart checkpoint instead of pinning
+its high-water mark for the rest of the session (SQLite never shrinks a WAL
+on its own — it only rewinds and overwrites).
+
+Regression guard: the suite's `bigfill` leg crosses the auto-checkpoint
+threshold with incompressible payload inside one process — compressible
+payload never crosses it through the zstd layer — and asserts mid-session,
+before the clean close whose absorb-and-delete would mask both failures,
+that (a) the main file grew (backfill happened) and (b) the follow-up
+commit truncated the `-wal` (size limit applied).
+
 ### 2. Durability semantics (deliberate change, strictly no worse)
 
 | Failure | DELETE + NORMAL (today) | WAL + NORMAL (proposed) |

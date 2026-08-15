@@ -159,5 +159,33 @@ Write-Host 'PASS: busy-check'
 $hold.WaitForExit()
 if (-not $ExpectKillFail) { Step 'check-after-hold' @('check') 0 }
 
+# 4. WAL checkpoint lifecycle inside one session.  A clean close absorbs the
+#    -wal and hides checkpoint failures, so this must assert mid-session:
+#    (a) after a commit that crosses the auto-checkpoint threshold, the
+#        backfill must have grown the main file (a pinned read snapshot --
+#        e.g. an unreset outer read statement -- caps backfill at zero and
+#        the WAL then grows for the whole session);
+#    (b) after the next small commit, the restart checkpoint must have
+#        truncated the -wal back down (journal_size_limit), so a burst's
+#        high-water mark doesn't persist.
+if (-not $ExpectKillFail) {
+  $bigOut = & $exe $db bigfill 80000
+  $bigOut | Write-Host
+  if ($LASTEXITCODE -ne 0) { throw "FAIL bigfill: exit $LASTEXITCODE, expected 0" }
+  $big = $bigOut | Out-String
+  if (-not ($big -match 'after-big: main=(\d+) wal=(\d+)')) { throw 'FAIL bigfill: no after-big stats' }
+  $mainBig = [int64]$Matches[1]; $walBig = [int64]$Matches[2]
+  if (-not ($big -match 'after-small: main=(\d+) wal=(\d+)')) { throw 'FAIL bigfill: no after-small stats' }
+  $walSmall = [int64]$Matches[2]
+  if ($mainBig -lt 2MB) {
+    throw "FAIL bigfill-checkpoint: main=$mainBig after a threshold-crossing commit -- auto-checkpoint backfilled nothing (pinned reader?)"
+  }
+  if ($walSmall -gt 5MB) {
+    throw "FAIL bigfill-truncate: wal=$walSmall (was $walBig) after the follow-up commit -- journal_size_limit not truncating the burst high-water mark"
+  }
+  Write-Host "PASS: bigfill-checkpoint (main=$mainBig, wal $walBig -> $walSmall)"
+  Step 'check-after-bigfill' @('check') 0
+}
+
 Remove-Item "$db*" -ErrorAction SilentlyContinue
 Write-Host 'ALL PASS'

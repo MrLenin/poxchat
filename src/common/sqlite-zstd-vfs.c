@@ -136,6 +136,12 @@ outer_db_init (zstd_vfs_file *f, const char *path, int flags)
 		}
 	}
 	sqlite3_exec (f->outer_db, "PRAGMA synchronous=NORMAL;", NULL, NULL, NULL);
+	/* A write burst (e.g. chathistory backfill) balloons the -wal to its
+	 * high-water mark, and SQLite never shrinks the file on its own — after
+	 * a checkpoint it merely rewinds and overwrites in place.  With a size
+	 * limit, the restart checkpoint truncates the file back down, so one
+	 * burst doesn't pin megabytes on disk for the rest of the session. */
+	sqlite3_exec (f->outer_db, "PRAGMA journal_size_limit=4194304;", NULL, NULL, NULL);
 
 	/* Create schema */
 	rc = sqlite3_exec (f->outer_db,
@@ -662,6 +668,7 @@ zvfs_read (sqlite3_file *file, void *buf, int iAmt, sqlite3_int64 iOfst)
 		int data_len = sqlite3_column_bytes (f->stmt_read, 0);
 		int is_compressed = sqlite3_column_int (f->stmt_read, 1);
 		int sub_page_offset = (int)(iOfst % f->page_size);
+		int ret = SQLITE_OK;
 
 		if (is_compressed == COMPRESS_RAW)
 		{
@@ -678,7 +685,7 @@ zvfs_read (sqlite3_file *file, void *buf, int iAmt, sqlite3_int64 iOfst)
 					memcpy (buf, (const char *)data + sub_page_offset, avail);
 				memset ((char *)buf + (avail > 0 ? avail : 0), 0,
 				        iAmt - (avail > 0 ? avail : 0));
-				return SQLITE_IOERR_SHORT_READ;
+				ret = SQLITE_IOERR_SHORT_READ;
 			}
 		}
 		else
@@ -687,29 +694,30 @@ zvfs_read (sqlite3_file *file, void *buf, int iAmt, sqlite3_int64 iOfst)
 			if (sub_page_offset == 0 && iAmt == f->page_size)
 			{
 				/* Common case: full page read */
-				rc = decompress_page (f, data, data_len, buf, iAmt,
-				                      is_compressed);
-				if (rc != SQLITE_OK)
-					return rc;
+				ret = decompress_page (f, data, data_len, buf, iAmt,
+				                       is_compressed);
 			}
 			else
 			{
 				/* Sub-page read of compressed data — decompress to temp */
 				void *tmp = g_malloc (f->page_size);
-				rc = decompress_page (f, data, data_len, tmp,
-				                      f->page_size, is_compressed);
-				if (rc != SQLITE_OK)
-				{
-					g_free (tmp);
-					return rc;
-				}
-				memcpy (buf, (char *)tmp + sub_page_offset, iAmt);
+				ret = decompress_page (f, data, data_len, tmp,
+				                       f->page_size, is_compressed);
+				if (ret == SQLITE_OK)
+					memcpy (buf, (char *)tmp + sub_page_offset, iAmt);
 				g_free (tmp);
 			}
 		}
-	}
 
-	return SQLITE_OK;
+		/* Reset NOW, not at the next call's reset-before-use: a stepped
+		 * SELECT left in ROW state keeps an implicit read transaction open
+		 * on the outer connection, and its pinned snapshot caps every WAL
+		 * auto-checkpoint at zero pages backfilled — the WAL then grows
+		 * unbounded for the whole session.  Must come after the copies
+		 * above: the column blob pointer dies at reset. */
+		sqlite3_reset (f->stmt_read);
+		return ret;
+	}
 }
 
 static int
