@@ -2755,8 +2755,10 @@ mg_scroll_to_top_cb (GtkXText *xtext, gpointer userdata)
 
 /* Callback for gap-fill proximity: request history for a recorded hole.
  * Resolves the buffer's own session — gap fill must work for whichever
- * buffer is scrolled, not just the current tab's. */
-static void
+ * buffer is scrolled, not just the current tab's.  Returns TRUE only
+ * when chathistory_request_gap_fill actually submitted a request, so
+ * the caller knows whether to show the gap as in_flight. */
+static gboolean
 mg_gap_fill_cb (GtkXText *xtext, gint64 gap_id, int approach_dir,
                 gpointer userdata)
 {
@@ -2765,17 +2767,17 @@ mg_gap_fill_cb (GtkXText *xtext, gint64 gap_id, int approach_dir,
 	(void) userdata;
 
 	if (!prefs.hex_irc_gapfill)
-		return;
+		return FALSE;
 
 	for (list = sess_list; list; list = list->next)
 	{
 		session *sess = list->data;
 		if (sess->res && (void *) sess->res->buffer == (void *) xtext->buffer)
 		{
-			chathistory_request_gap_fill (sess, gap_id, approach_dir);
-			return;
+			return chathistory_request_gap_fill (sess, gap_id, approach_dir);
 		}
 	}
+	return FALSE;
 }
 
 /* Clear react-with-text state */

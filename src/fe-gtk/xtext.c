@@ -1165,21 +1165,43 @@ gtk_xtext_scroll_top_timeout (gpointer data)
 	return G_SOURCE_REMOVE;
 }
 
-/* Debounce timeout callback for gap-fill proximity requests */
+/* Debounce timeout callback for gap-fill proximity requests.
+ * in_flight semantics: set here ONLY when the callback actually
+ * submitted a request (not a dup/suppressed/backed-off no-op), so the
+ * marker never shows "loading" for a gap nothing is happening to. */
 static gboolean
 gtk_xtext_gap_fill_timeout (gpointer data)
 {
 	GtkXText *xtext = GTK_XTEXT (data);
+	gint64 gap_id;
+	int dir;
+	gboolean submitted;
 
 	xtext->gap_fill_debounce_tag = 0;
 
 	/* Re-validate: buffer switches and completed fills invalidate the
 	 * pending gap. */
-	if (xtext->gap_fill_cb && xtext->buffer &&
-	    xtext_find_gap_info (xtext->buffer, xtext->gap_fill_pending_id))
-		xtext->gap_fill_cb (xtext, xtext->gap_fill_pending_id,
-		                    xtext->gap_fill_pending_dir,
-		                    xtext->gap_fill_userdata);
+	if (!xtext->gap_fill_cb || !xtext->buffer ||
+	    !xtext_find_gap_info (xtext->buffer, xtext->gap_fill_pending_id))
+		return G_SOURCE_REMOVE;
+
+	gap_id = xtext->gap_fill_pending_id;
+	dir = xtext->gap_fill_pending_dir;
+
+	submitted = xtext->gap_fill_cb (xtext, gap_id, dir, xtext->gap_fill_userdata);
+
+	if (submitted)
+	{
+		/* Fresh lookup by gap_id rather than reusing any pointer from
+		 * before the callback — the cache may have been rebuilt
+		 * underneath us while the callback ran. */
+		xtext_gap_info *gi = xtext->buffer ?
+			xtext_find_gap_info (xtext->buffer, gap_id) : NULL;
+		if (gi)
+			gi->in_flight = 1;
+		gtk_widget_queue_draw (GTK_WIDGET (xtext));
+	}
+
 	return G_SOURCE_REMOVE;
 }
 
@@ -1526,7 +1548,9 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 						xtext->gap_fill_pending_dir = dir;
 						xtext->gap_fill_debounce_tag = g_timeout_add (500,
 							gtk_xtext_gap_fill_timeout, xtext);
-						gi->in_flight = 1;	/* display only */
+						/* in_flight is set by gtk_xtext_gap_fill_timeout,
+						 * only once the callback actually submits a
+						 * request — not here at debounce-arm time. */
 						break;
 					}
 				}
@@ -7429,14 +7453,30 @@ gtk_xtext_refresh_gap_cache (xtext_buffer *buf)
 /* Public sweep: reload the gap cache and reconcile marker entries against
  * it — drop markers whose record is gone or dead, insert markers newly
  * straddled by materialized entries.  Called after set_virtual's initial
- * load and by fe_gap_updated whenever the ledger changes underneath an
- * open buffer (record shrunk, closed, or dead-marked). */
+ * load (answered_gap_id = 0) and by fe_gap_updated whenever the ledger
+ * changes underneath an open buffer (record shrunk, closed, or
+ * dead-marked; answered_gap_id = the gap whose batch just completed).
+ *
+ * gtk_xtext_refresh_gap_cache preserves in_flight for every row that
+ * was in_flight before the rebuild (fill-progress state the ledger
+ * itself doesn't record), so a completed request's gap would otherwise
+ * stay marked in_flight forever.  answered_gap_id is the one entry
+ * that preservation must NOT carry forward — its request has been
+ * answered (success, empty, or FAIL), so clear it explicitly once the
+ * cache is rebuilt. */
 void
-gtk_xtext_refresh_gap_markers (xtext_buffer *buf)
+gtk_xtext_refresh_gap_markers (xtext_buffer *buf, gint64 answered_gap_id)
 {
 	textentry *ent, *next;
 
 	gtk_xtext_refresh_gap_cache (buf);
+
+	if (answered_gap_id > 0)
+	{
+		xtext_gap_info *gi = xtext_find_gap_info (buf, answered_gap_id);
+		if (gi)
+			gi->in_flight = 0;
+	}
 
 	/* Drop markers whose record is gone or dead */
 	for (ent = buf->text_first; ent; ent = next)
@@ -11422,7 +11462,7 @@ gtk_xtext_set_scroll_to_top_callback (GtkXText *xtext,
 
 void
 gtk_xtext_set_gap_fill_callback (GtkXText *xtext,
-                                 void (*callback) (GtkXText *, gint64, int, gpointer),
+                                 gboolean (*callback) (GtkXText *, gint64, int, gpointer),
                                  gpointer userdata)
 {
 	xtext->gap_fill_cb = callback;
@@ -11930,7 +11970,7 @@ gtk_xtext_buffer_set_virtual (xtext_buffer *buf, void *db, const char *channel,
 	/* Seed the gap cache and insert any markers straddled by the entries
 	 * just materialized above. */
 	gtk_xtext_refresh_gap_cache (buf);
-	gtk_xtext_refresh_gap_markers (buf);
+	gtk_xtext_refresh_gap_markers (buf, 0);
 
 	/* Compute initial line estimates so the scrollbar reflects total history.
 	 * Block the value-changed handler during calc_lines_virtual to prevent

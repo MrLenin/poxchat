@@ -2739,7 +2739,10 @@ fe_set_batch_mode (session *sess, gboolean on)
 void
 fe_gap_updated (session *sess, gint64 gap_id)
 {
-	(void) gap_id;	/* full refresh is cheap; per-gap delta not worth it */
+	/* gap_id is the gap whose request just got answered — passed through
+	 * so the cache refresh can clear its in_flight flag (it would
+	 * otherwise be preserved forever by the refresh's in-flight
+	 * carry-over, which is meant for gaps still awaiting an answer). */
 	if (sess && sess->res && sess->res->buffer)
-		gtk_xtext_refresh_gap_markers ((xtext_buffer *) sess->res->buffer);
+		gtk_xtext_refresh_gap_markers ((xtext_buffer *) sess->res->buffer, gap_id);
 }

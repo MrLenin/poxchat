@@ -161,8 +161,10 @@ void chathistory_request_between (session *sess, const char *start_ref,
  * @param gap_id Ledger row id (from scrollback_gap) identifying the hole
  * @param approach_dir -1 if the gap is above the viewport (scrolling up),
  *                     +1 if below
+ * @return TRUE if a request was actually submitted (not dropped as a
+ *         duplicate, suppressed, backed off, or blocked by catch-up)
  */
-void chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir);
+gboolean chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir);
 
 /**
  * Request list of active conversations.

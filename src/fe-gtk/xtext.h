@@ -455,12 +455,15 @@ struct _GtkXText
 	void (*scroll_to_top_cb) (GtkXText *xtext, gpointer userdata);
 	gpointer scroll_to_top_userdata;
 
-	/* Gap-fill (recorded history holes) support */
+	/* Gap-fill (recorded history holes) support.  gap_fill_cb returns
+	 * TRUE only when it actually submitted a request (not a dup, not
+	 * suppressed, not backed off) — that's when the pending gap's
+	 * marker should show in_flight. */
 	guint gap_fill_debounce_tag;
 	gint64 gap_fill_pending_id;
 	int gap_fill_pending_dir;
-	void (*gap_fill_cb) (GtkXText *xtext, gint64 gap_id, int approach_dir,
-	                     gpointer userdata);
+	gboolean (*gap_fill_cb) (GtkXText *xtext, gint64 gap_id, int approach_dir,
+	                         gpointer userdata);
 	gpointer gap_fill_userdata;
 
 	/* Bottom status strip (generalized from typing indicator) */
@@ -514,7 +517,7 @@ int gtk_xtext_moveto_marker_pos (GtkXText *xtext);
 void gtk_xtext_scroll_to_entry (xtext_buffer *buf, textentry *target);
 void gtk_xtext_calc_lines (xtext_buffer *buf);
 void gtk_xtext_recalc_day_boundaries (xtext_buffer *buf);
-void gtk_xtext_refresh_gap_markers (xtext_buffer *buf);
+void gtk_xtext_refresh_gap_markers (xtext_buffer *buf, gint64 answered_gap_id);
 void gtk_xtext_set_marker_from_timestamp (xtext_buffer *buf, time_t timestamp);
 void gtk_xtext_check_marker_visibility(GtkXText *xtext);
 void gtk_xtext_set_marker_last (session *sess);
@@ -537,7 +540,7 @@ void gtk_xtext_set_wordwrap (GtkXText *xtext, gboolean word_wrap);
 void gtk_xtext_set_scroll_to_top_callback (GtkXText *xtext, void (*callback) (GtkXText *, gpointer), gpointer userdata);
 void gtk_xtext_reset_scroll_top_backoff (GtkXText *xtext);
 void gtk_xtext_set_gap_fill_callback (GtkXText *xtext,
-	void (*callback) (GtkXText *, gint64, int, gpointer), gpointer userdata);
+	gboolean (*callback) (GtkXText *, gint64, int, gpointer), gpointer userdata);
 void gtk_xtext_set_reply_button_callback (GtkXText *xtext, void (*callback) (GtkXText *, const char *, const char *, gpointer), gpointer userdata);
 void gtk_xtext_set_react_text_button_callback (GtkXText *xtext, void (*callback) (GtkXText *, const char *, const char *, gpointer), gpointer userdata);
 void gtk_xtext_set_react_emoji_button_callback (GtkXText *xtext, void (*callback) (GtkXText *, const char *, const char *, gpointer), gpointer userdata);
