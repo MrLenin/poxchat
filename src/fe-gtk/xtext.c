@@ -184,11 +184,16 @@ static GtkWidgetClass *parent_class = NULL;
 #define TEXTENTRY_FLAG_SEPARATE_STR  0x01
 #define TEXTENTRY_FLAG_DAY_SEP       0x02  /* entry IS a day-separator row */
 #define TEXTENTRY_FLAG_EPHEMERAL     0x04  /* no DB row; pinned during eviction */
+#define TEXTENTRY_FLAG_GAP_MARKER    0x08  /* entry IS a gap-marker row (recorded history hole) */
 
 /* Day separators are first-class synthetic entries: zero text, stamped
  * at local midnight of their day, ephemeral (no DB row).  See
  * gtk_xtext_maybe_insert_day_sep. */
 #define XTEXT_ENT_IS_DAY_SEP(ent) (((ent)->flags & TEXTENTRY_FLAG_DAY_SEP) != 0)
+#define XTEXT_ENT_IS_GAP_MARKER(ent) (((ent)->flags & TEXTENTRY_FLAG_GAP_MARKER) != 0)
+/* Synthetic chrome rows (day separators, gap markers): excluded from
+ * selection/save/foreach, dropped at window edges, never content. */
+#define XTEXT_ENT_IS_CHROME(ent) (XTEXT_ENT_IS_DAY_SEP (ent) || XTEXT_ENT_IS_GAP_MARKER (ent))
 
 typedef struct xtext_redaction_info {
 	char *original_content;		/* preserved text for audit/reveal */
@@ -245,6 +250,7 @@ struct textentry
 	char *msgid;		/* Server-assigned message ID (may be NULL) */
 	guint64 entry_id;	/* Local unique ID (always set, monotonic) */
 	guint64 group_id;	/* Multiline group: entries with same non-zero group_id are one message */
+	gint64 gap_id;		/* gap-marker rows: ledger row id (0 otherwise) */
 
 	/* Phase 4: redaction accountability (lazy-allocated, NULL for most entries) */
 	struct xtext_redaction_info *redaction;
@@ -318,6 +324,17 @@ entry_stamp_cmp (void *a, void *b)
 	textentry *eb = (textentry *)b;
 	if (ea->stamp < eb->stamp) return -1;
 	if (ea->stamp > eb->stamp) return 1;
+	/* Stamp tie: synthetic chrome (day separator, gap marker) sorts
+	 * before real content — the separator introduces the span the
+	 * equal-stamped real entry belongs to.  This is the shared
+	 * tie-break the day-sep midnight fix needs; the <= midnight
+	 * creation skip in maybe_insert_day_sep is unchanged for now. */
+	{
+		gboolean ca = XTEXT_ENT_IS_CHROME (ea);
+		gboolean cb = XTEXT_ENT_IS_CHROME (eb);
+		if (ca != cb)
+			return ca ? -1 : 1;
+	}
 	/* Same timestamp — use entry_id for stable ordering */
 	if (ea->entry_id < eb->entry_id) return -1;
 	if (ea->entry_id > eb->entry_id) return 1;
@@ -462,6 +479,13 @@ xtext_day_start (time_t t)
 static int gtk_xtext_maybe_insert_day_sep (xtext_buffer *buf, textentry *ent);
 static int gtk_xtext_drop_edge_day_sep (xtext_buffer *buf, gboolean at_head);
 static int gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent);
+
+/* Gap markers (CONTROLLER RULING R1: forward-declared so call sites can
+ * precede definitions, matching the day-sep statics above). */
+static xtext_gap_info *xtext_find_gap_info (xtext_buffer *buf, gint64 gap_id);
+static void gtk_xtext_refresh_gap_cache (xtext_buffer *buf);
+static int gtk_xtext_maybe_insert_gap_marker (xtext_buffer *buf, textentry *ent);
+static void gtk_xtext_render_gap_marker (GtkXText *xtext, textentry *ent, int line, int win_width);
 
 /* GTK4 event controller callbacks - forward declarations */
 static void gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
@@ -3618,8 +3642,9 @@ gtk_xtext_get_click_zone (GtkXText *xtext, int y, textentry **ent_out)
 	if (!ent)
 		return XTEXT_ZONE_TEXT;
 
-	/* Day separators own their entire (single) row. */
-	if (XTEXT_ENT_IS_DAY_SEP (ent))
+	/* Chrome rows (day separators, gap markers) own their entire
+	 * (single) row. */
+	if (XTEXT_ENT_IS_CHROME (ent))
 		return XTEXT_ZONE_DAY_SEP;
 
 	/* Subline layout for a rendered entry, in order:
@@ -4519,8 +4544,8 @@ gtk_xtext_selection_get_text (GtkXText *xtext, int *len_ret)
 	ent = gtk_xtext_find_by_id (buf, buf->last_ent_start_id);
 	while (ent)
 	{
-		/* Day separators are synthetic chrome — never copy them */
-		if (ent->mark_start != -1 && !XTEXT_ENT_IS_DAY_SEP (ent))
+		/* Chrome rows (day separators, gap markers) are synthetic — never copy them */
+		if (ent->mark_start != -1 && !XTEXT_ENT_IS_CHROME (ent))
 		{
 			/* include timestamp? */
 			if (ent->mark_start == 0 && xtext->mark_stamp)
@@ -4549,7 +4574,7 @@ gtk_xtext_selection_get_text (GtkXText *xtext, int *len_ret)
 	ent = gtk_xtext_find_by_id (buf, buf->last_ent_start_id);
 	while (ent)
 	{
-		if (ent->mark_start != -1 && !XTEXT_ENT_IS_DAY_SEP (ent))
+		if (ent->mark_start != -1 && !XTEXT_ENT_IS_CHROME (ent))
 		{
 			if (!first)
 			{
@@ -6237,6 +6262,88 @@ gtk_xtext_render_day_separator (GtkXText *xtext, textentry *ent, int line, int w
 	pango_layout_set_attributes (xtext->layout, NULL);
 }
 
+static void
+xtext_format_gap_span (char *out, size_t out_len, gint64 span_secs)
+{
+	if (span_secs >= 2 * 86400)
+		g_snprintf (out, out_len, _("%d days"), (int)(span_secs / 86400));
+	else if (span_secs >= 2 * 3600)
+		g_snprintf (out, out_len, _("%d hours"), (int)(span_secs / 3600));
+	else
+		g_snprintf (out, out_len, _("%d min"), (int)(span_secs / 60));
+}
+
+/* render a gap-marker line: ──── ~3 hours missing — scroll to load ──── */
+
+static void
+gtk_xtext_render_gap_marker (GtkXText *xtext, textentry *ent, int line, int win_width)
+{
+	int y = (xtext->fontsize * line) + xtext->font->ascent - xtext->pixel_offset;
+	int mid_y = y - xtext->font->ascent + xtext->fontsize / 2;
+	xtext_gap_info *gi = xtext_find_gap_info (xtext->buffer, ent->gap_id);
+	char span_buf[64], label[160];
+	PangoRectangle logical;
+	int text_w, text_x, pad;
+	GdkRGBA color;
+	double line_alpha, text_alpha;
+
+	if (!gi)
+	{
+		/* Record vanished; sweep will remove this marker — draw bg only */
+		xtext_draw_bg (xtext, 0, y - xtext->font->ascent, win_width + MARGIN,
+		               xtext->fontsize);
+		return;
+	}
+	xtext_format_gap_span (span_buf, sizeof (span_buf), gi->end_ts - gi->start_ts);
+	if (gi->in_flight)
+		g_snprintf (label, sizeof (label), _("loading missed messages…"));
+	else if (gi->state == SCROLLBACK_GAP_CANDIDATE)
+		g_snprintf (label, sizeof (label), _("possible gap (~%s quiet)"), span_buf);
+	else
+		g_snprintf (label, sizeof (label), _("~%s missing — scroll to load"), span_buf);
+
+	/* Candidates (heuristic guesses, not witnessed by flanking real rows
+	 * on both sides) render subdued relative to confirmed holes. */
+	line_alpha = (gi->state == SCROLLBACK_GAP_CANDIDATE) ? 0.10 : 0.15;
+	text_alpha = (gi->state == SCROLLBACK_GAP_CANDIDATE) ? 0.35 : 0.5;
+
+	/* Clear background */
+	xtext_draw_bg (xtext, 0, y - xtext->font->ascent, win_width + MARGIN, xtext->fontsize);
+
+	/* Measure text */
+	pango_layout_set_text (xtext->layout, label, -1);
+	pango_layout_set_attributes (xtext->layout, NULL);
+	pango_layout_get_pixel_extents (xtext->layout, NULL, &logical);
+	text_w = logical.width;
+	pad = 12;
+	text_x = (win_width - text_w) / 2;
+
+	/* Draw horizontal lines */
+	color = xtext->palette[XTEXT_FG];
+	color.alpha = line_alpha;
+	gdk_cairo_set_source_rgba (xtext->cr, &color);
+
+	cairo_set_line_width (xtext->cr, 1.0);
+	cairo_move_to (xtext->cr, MARGIN + 8, mid_y + 0.5);
+	cairo_line_to (xtext->cr, text_x - pad, mid_y + 0.5);
+	cairo_stroke (xtext->cr);
+
+	cairo_move_to (xtext->cr, text_x + text_w + pad, mid_y + 0.5);
+	cairo_line_to (xtext->cr, win_width - 8, mid_y + 0.5);
+	cairo_stroke (xtext->cr);
+
+	/* Draw centered label text */
+	color = xtext->palette[XTEXT_FG];
+	color.alpha = text_alpha;
+	gdk_cairo_set_source_rgba (xtext->cr, &color);
+	{
+		PangoLayoutLine *pl = pango_layout_get_lines_readonly (xtext->layout)->data;
+		xtext_draw_layout_line (xtext, text_x, y, pl);
+	}
+
+	pango_layout_set_attributes (xtext->layout, NULL);
+}
+
 /* Render the collapse/expand indicator line for collapsible multiline entries */
 static void
 gtk_xtext_render_collapse_indicator (GtkXText *xtext, textentry *ent,
@@ -6305,6 +6412,12 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 	if (XTEXT_ENT_IS_DAY_SEP (ent))
 	{
 		gtk_xtext_render_day_separator (xtext, ent, line, win_width);
+		return 1;
+	}
+
+	if (XTEXT_ENT_IS_GAP_MARKER (ent))
+	{
+		gtk_xtext_render_gap_marker (xtext, ent, line, win_width);
 		return 1;
 	}
 
@@ -6928,8 +7041,8 @@ gtk_xtext_save (GtkXText * xtext, int fh)
 	ent = xtext->buffer->text_first;
 	while (ent)
 	{
-		/* Day separators are synthetic chrome — don't write them out */
-		if (XTEXT_ENT_IS_DAY_SEP (ent))
+		/* Chrome rows (day separators, gap markers) are synthetic — don't write them out */
+		if (XTEXT_ENT_IS_CHROME (ent))
 		{
 			ent = ent->next;
 			continue;
@@ -7162,6 +7275,95 @@ gtk_xtext_recalc_day_boundaries (xtext_buffer *buf)
 	gtk_xtext_calc_lines (buf);
 }
 
+static xtext_gap_info *
+xtext_find_gap_info (xtext_buffer *buf, gint64 gap_id)
+{
+	GList *l;
+	for (l = buf->gap_cache; l; l = l->next)
+		if (((xtext_gap_info *) l->data)->gap_id == gap_id)
+			return l->data;
+	return NULL;
+}
+
+/* Reload the gap cache from the ledger.  Dead gaps are excluded — they
+ * have no marker and no fill; the ledger remembers them so the server
+ * is never re-asked. */
+static void
+gtk_xtext_refresh_gap_cache (xtext_buffer *buf)
+{
+	GList *rows, *l;
+
+	g_list_free_full (buf->gap_cache, g_free);
+	buf->gap_cache = NULL;
+	buf->gap_cache_dirty = FALSE;
+
+	if (!HAS_VIRT_DB (buf) || !buf->virt_channel)
+		return;
+
+	rows = scrollback_gap_list (buf->virt_db, buf->virt_channel);
+	for (l = rows; l; l = l->next)
+	{
+		scrollback_gap *g = l->data;
+		xtext_gap_info *gi;
+		if (g->state == SCROLLBACK_GAP_DEAD)
+			continue;
+		gi = g_new0 (xtext_gap_info, 1);
+		gi->gap_id = g->id;
+		gi->start_ts = g->start_ts;
+		gi->end_ts = g->end_ts;
+		gi->state = g->state;
+		gi->ordinal = scrollback_gap_ordinal (buf->virt_db, buf->virt_channel,
+		                                      g->end_ts);
+		buf->gap_cache = g_list_append (buf->gap_cache, gi);
+	}
+	scrollback_gap_list_free (rows);
+}
+
+/* Public sweep: reload the gap cache and reconcile marker entries against
+ * it — drop markers whose record is gone or dead, insert markers newly
+ * straddled by materialized entries.  Called after set_virtual's initial
+ * load and by fe_gap_updated whenever the ledger changes underneath an
+ * open buffer (record shrunk, closed, or dead-marked). */
+void
+gtk_xtext_refresh_gap_markers (xtext_buffer *buf)
+{
+	textentry *ent, *next;
+
+	gtk_xtext_refresh_gap_cache (buf);
+
+	/* Drop markers whose record is gone or dead */
+	for (ent = buf->text_first; ent; ent = next)
+	{
+		next = ent->next;
+		if (!XTEXT_ENT_IS_GAP_MARKER (ent))
+			continue;
+		if (!xtext_find_gap_info (buf, ent->gap_id))
+		{
+			if (ent->prev)
+				ent->prev->next = ent->next;
+			else
+				buf->text_first = ent->next;
+			if (ent->next)
+				ent->next->prev = ent->prev;
+			else
+				buf->text_last = ent->prev;
+			gtk_xtext_kill_ent (buf, ent);
+		}
+	}
+
+	/* Insert markers newly straddled by materialized entries */
+	for (ent = buf->text_first; ent; ent = next)
+	{
+		next = ent->next;
+		if (!XTEXT_ENT_IS_CHROME (ent))
+			gtk_xtext_maybe_insert_gap_marker (buf, ent);
+	}
+
+	gtk_xtext_calc_lines (buf);
+	if (buf->xtext && buf->xtext->buffer == buf)
+		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
+}
+
 /* Calculate number of actual lines (with wraps), to set adj->lower. *
  * This should only be called when the window resizes.               */
 
@@ -7265,8 +7467,13 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
 	 * rejecting duplicates while insert functions no longer increment. */
 	if (HAS_VIRT_DB (buf) && buf->virt_channel)
 	{
+		int db_total_prev = buf->total_entries;
 		int db_total = scrollback_count (buf->virt_db, buf->virt_channel);
 		buf->total_entries = db_total;
+
+		/* Ordinals shift whenever DB content changes underneath us. */
+		if (buf->total_entries != db_total_prev || buf->gap_cache_dirty)
+			gtk_xtext_refresh_gap_cache (buf);
 
 		/* Same trust model for mat_first_index: the ±1 incremental
 		 * maintenance drifts when chathistory splices rows into the
@@ -8687,19 +8894,20 @@ gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
 	return visible;
 }
 
-/* If the head (or tail) of the list is a day separator, unlink and free
- * it, returning its display-line count for the caller's accounting
- * (0 when the edge is not a separator).  A separator at either edge is
- * always stale chrome: at the head its predecessor is gone and the
- * window edge never shows a day header; at the tail its day has no
- * content below it. */
+/* If the head (or tail) of the list is chrome (day separator or gap
+ * marker), unlink and free it, returning its display-line count for the
+ * caller's accounting (0 when the edge is not chrome).  Chrome at either
+ * edge is always stale: at the head its predecessor is gone and the
+ * window edge never shows a day header or a marker for a hole that no
+ * longer borders materialized content; at the tail its day (or hole) has
+ * no content below it. */
 static int
 gtk_xtext_drop_edge_day_sep (xtext_buffer *buf, gboolean at_head)
 {
 	textentry *ent = at_head ? buf->text_first : buf->text_last;
 	int lines;
 
-	if (!ent || !XTEXT_ENT_IS_DAY_SEP (ent))
+	if (!ent || !XTEXT_ENT_IS_CHROME (ent))
 		return 0;
 
 	lines = ENT_DISPLAY_LINES (ent);
@@ -9761,6 +9969,7 @@ gtk_xtext_init_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 		ent->has_db_row = has_db_row ? 1 : 0;
 	}
 	ent->group_id = buf->current_group_id;
+	ent->gap_id = 0;
 	g_hash_table_insert (buf->entries_by_id, GSIZE_TO_POINTER (ent->entry_id), ent);
 
 	/* Entry modification support */
@@ -9889,18 +10098,23 @@ gtk_xtext_link_entry (xtext_buffer *buf, textentry *ent, xtext_link_position pos
 	if (buf->entry_tree)
 		add234 (buf->entry_tree, ent);
 
-	/* Day separators are first-class entries.  After linking a real
-	 * entry, ensure a separator exists on either side of it where it now
-	 * borders a different local day: the prev side covers appends and
-	 * ordinary inserts, the next side covers prepends and the join point
-	 * when older history materializes above the current head.  Both
-	 * sides fold into the returned line count so callers that shift the
+	/* Day separators and gap markers are first-class chrome entries.
+	 * After linking a real entry, ensure a separator/marker exists on
+	 * either side of it where it now borders a different local day or
+	 * a recorded hole: the prev side covers appends and ordinary
+	 * inserts, the next side covers prepends and the join point when
+	 * older history materializes above the current head.  Both sides
+	 * fold into the returned line count so callers that shift the
 	 * scroll value by "lines added" stay accurate. */
-	if (!XTEXT_ENT_IS_DAY_SEP (ent))
+	if (!XTEXT_ENT_IS_CHROME (ent))
 	{
 		new_lines += gtk_xtext_maybe_insert_day_sep (buf, ent);
-		if (ent->next && !XTEXT_ENT_IS_DAY_SEP (ent->next))
+		new_lines += gtk_xtext_maybe_insert_gap_marker (buf, ent);
+		if (ent->next && !XTEXT_ENT_IS_CHROME (ent->next))
+		{
 			new_lines += gtk_xtext_maybe_insert_day_sep (buf, ent->next);
+			new_lines += gtk_xtext_maybe_insert_gap_marker (buf, ent->next);
+		}
 	}
 
 	return new_lines;
@@ -9915,9 +10129,10 @@ gtk_xtext_link_entry (xtext_buffer *buf, textentry *ent, xtext_link_position pos
  * between the last entry of the previous day and every entry of its own
  * day — chathistory backfill on either side lands on the correct side
  * of it with no flag migration.  An entry stamped exactly at midnight
- * would tie with the separator's stamp and win the id tiebreak (DB
- * rowids < LOCAL_ENTRY_ID_BASE), putting the separator on the wrong
- * side; creation is skipped for that one-second window (cosmetic). */
+ * would tie with the separator's stamp; chrome now sorts first on
+ * stamp ties (entry_stamp_cmp), so in principle the separator would
+ * land correctly even then — creation is still skipped for that
+ * one-second window regardless (cosmetic, unchanged for now). */
 static int
 gtk_xtext_maybe_insert_day_sep (xtext_buffer *buf, textentry *ent)
 {
@@ -9958,6 +10173,61 @@ gtk_xtext_maybe_insert_day_sep (xtext_buffer *buf, textentry *ent)
 	sep->prev = ent->prev;
 	sep->next = ent;
 	return gtk_xtext_link_entry (buf, sep, LINK_BEFORE);
+}
+
+/* Insert a gap-marker entry before `ent` when a recorded (live) hole
+ * falls between `ent` and its nearest real predecessor.  Same contract
+ * as gtk_xtext_maybe_insert_day_sep: returns display lines added. */
+static int
+gtk_xtext_maybe_insert_gap_marker (xtext_buffer *buf, textentry *ent)
+{
+	GList *l;
+	textentry *sep, *real_prev;
+
+	if (!HAS_VIRT_DB (buf) || !buf->gap_cache)
+		return 0;
+	if (XTEXT_ENT_IS_CHROME (ent) || !ent->prev || ent->stamp <= 0)
+		return 0;
+
+	/* Walk back over chrome (a day separator can sit inside the hole's
+	 * span); an existing marker at this boundary means we're done. */
+	real_prev = ent->prev;
+	while (real_prev && XTEXT_ENT_IS_CHROME (real_prev))
+	{
+		if (XTEXT_ENT_IS_GAP_MARKER (real_prev))
+			return 0;
+		real_prev = real_prev->prev;
+	}
+	if (!real_prev || real_prev->stamp <= 0)
+		return 0;
+
+	for (l = buf->gap_cache; l; l = l->next)
+	{
+		xtext_gap_info *gi = l->data;
+		if (real_prev->stamp <= gi->start_ts && ent->stamp >= gi->end_ts)
+		{
+			sep = g_malloc0 (1 + sizeof (textentry));
+			sep->str = (unsigned char *) sep + sizeof (textentry);
+			sep->str_len = 0;
+			sep->left_len = -1;
+			sep->indent = MARGIN;
+
+			gtk_xtext_init_entry (buf, sep, (time_t) gi->end_ts);
+			sep->flags |= TEXTENTRY_FLAG_GAP_MARKER;
+			sep->gap_id = gi->gap_id;
+			sep->group_id = 0;
+			if (!(sep->flags & TEXTENTRY_FLAG_EPHEMERAL))
+			{
+				sep->flags |= TEXTENTRY_FLAG_EPHEMERAL;
+				buf->ephemeral_count++;
+			}
+
+			sep->prev = ent->prev;
+			sep->next = ent;
+			return gtk_xtext_link_entry (buf, sep, LINK_BEFORE);
+		}
+	}
+	return 0;
 }
 
 /* append a textentry to our linked list */
@@ -10162,10 +10432,11 @@ gtk_xtext_insert_sorted_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
 
 	/* Find insertion point — walk forward to the first entry that sorts
 	 * after ent under the same (stamp, id) comparator the B-tree uses.
-	 * A plain stamp comparison diverges from the tree on ties: day
-	 * separators carry local ids >= LOCAL_ENTRY_ID_BASE, so an entry
-	 * stamped exactly at a separator's midnight must land BEFORE the
-	 * separator in both structures, not after it in just one.
+	 * A plain stamp comparison diverges from the tree on ties: chrome
+	 * (day separators, gap markers) sorts before real content at equal
+	 * stamps (entry_stamp_cmp), so an entry stamped exactly at a
+	 * separator's midnight lands AFTER it in both structures, not
+	 * before it in just one.
 	 * When insert_hint is set (sorted batch), start from the hint to
 	 * avoid O(N²). */
 	if (buf->insert_hint && entry_stamp_cmp (buf->insert_hint, ent) < 0)
@@ -10834,7 +11105,7 @@ gtk_xtext_foreach (xtext_buffer *buf, GtkXTextForeach func, void *data)
 
 		while (ent)
 		{
-			if (!XTEXT_ENT_IS_DAY_SEP (ent))
+			if (!XTEXT_ENT_IS_CHROME (ent))
 				(*func) (buf->xtext, ent->str, data);
 			ent = ent->next;
 		}
@@ -11482,6 +11753,9 @@ gtk_xtext_buffer_free (xtext_buffer *buf)
 	buf->virt_channel = NULL;
 	buf->virt_db = NULL;	/* borrowed pointer, don't free */
 
+	g_list_free_full (buf->gap_cache, g_free);
+	buf->gap_cache = NULL;
+
 	g_free (buf);
 }
 
@@ -11520,6 +11794,11 @@ gtk_xtext_buffer_set_virtual (xtext_buffer *buf, void *db, const char *channel,
 	/* Set initial lines_before_mat from the formula — the only place this
 	 * is computed from the formula.  After this, it's absorptive. */
 	buf->lines_before_mat = (int)(buf->mat_first_index * buf->avg_lines_per_entry);
+
+	/* Seed the gap cache and insert any markers straddled by the entries
+	 * just materialized above. */
+	gtk_xtext_refresh_gap_cache (buf);
+	gtk_xtext_refresh_gap_markers (buf);
 
 	/* Compute initial line estimates so the scrollbar reflects total history.
 	 * Block the value-changed handler during calc_lines_virtual to prevent
@@ -11918,7 +12197,10 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 	{
 		next = e->next;
 		if (!XTEXT_ENT_IS_DAY_SEP (e))
+		{
 			gtk_xtext_maybe_insert_day_sep (buf, e);
+			gtk_xtext_maybe_insert_gap_marker (buf, e);
+		}
 	}
 
 	buf->mat_first_index = want_start;
@@ -12061,6 +12343,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 				if (!XTEXT_ENT_IS_DAY_SEP (e))
 				{
 					gtk_xtext_maybe_insert_day_sep (buf, e);
+					gtk_xtext_maybe_insert_gap_marker (buf, e);
 					checked++;
 				}
 				e = nxt;
@@ -12112,6 +12395,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			buf->text_last = ent;
 
 			gtk_xtext_maybe_insert_day_sep (buf, ent);
+			gtk_xtext_maybe_insert_gap_marker (buf, ent);
 			loaded++;
 		}
 
@@ -12143,6 +12427,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			buf->text_last = ent;
 
 			gtk_xtext_maybe_insert_day_sep (buf, ent);
+			gtk_xtext_maybe_insert_gap_marker (buf, ent);
 		}
 
 		scrollback_msg_list_free (msgs);

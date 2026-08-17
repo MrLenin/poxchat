@@ -2735,3 +2735,11 @@ fe_set_batch_mode (session *sess, gboolean on)
 		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
 	}
 }
+
+void
+fe_gap_updated (session *sess, gint64 gap_id)
+{
+	(void) gap_id;	/* full refresh is cheap; per-gap delta not worth it */
+	if (sess && sess->res && sess->res->buffer)
+		gtk_xtext_refresh_gap_markers ((xtext_buffer *) sess->res->buffer);
+}

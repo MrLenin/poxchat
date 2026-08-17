@@ -977,5 +977,6 @@ void fe_scrollback_set_virtual (struct session *sess, void *db, const char *chan
 void fe_set_pending_db_rowid (struct session *sess, gint64 rowid) {}
 void fe_resolve_pending_dup (struct session *sess, gint64 old_rowid, gint64 new_rowid) {}
 void fe_set_batch_mode (struct session *sess, gboolean on) {}
+void fe_gap_updated (struct session *sess, gint64 gap_id) {}
 void fe_begin_multiline_group (struct session *sess) {}
 void fe_end_multiline_group (struct session *sess) {}

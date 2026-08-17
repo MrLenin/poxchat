@@ -165,6 +165,20 @@ typedef struct {
 
 #define DISPLAY_CACHE_SIZE 200	/* ~4x typical viewport */
 
+/* Cached view of a scrollback_gap row, refreshed from the ledger whenever
+ * DB content changes (see gtk_xtext_refresh_gap_cache).  ordinal is the
+ * gap's end bound expressed in the same position space gtk_xtext_nth
+ * uses, for the proximity trigger (Task 7); in_flight marks a fill
+ * request in progress so the marker can say so. */
+typedef struct {
+	gint64 gap_id;
+	gint64 start_ts;
+	gint64 end_ts;
+	int state;
+	int ordinal;
+	unsigned int in_flight:1;
+} xtext_gap_info;
+
 typedef struct {
 	GtkXText *xtext;					/* attached to this widget */
 
@@ -224,6 +238,11 @@ typedef struct {
 									   survives evict/rematerialize (session-lifetime) */
 	guint64 next_entry_id;			/* monotonic counter for generating entry IDs */
 	guint64 current_group_id;		/* non-zero during multiline output; entries inherit this */
+
+	/* Gap markers: cache of the gap ledger, refreshed on DB-content change
+	 * (see gtk_xtext_refresh_gap_cache) or on demand via gap_cache_dirty. */
+	GList *gap_cache;				/* xtext_gap_info*, one per live (non-dead) ledger row */
+	unsigned int gap_cache_dirty:1;	/* force a refresh on next resync (e.g. fe_gap_updated) */
 
 	/* DB-backed scrollback */
 	unsigned int batch_mode:1;	/* TRUE during bulk insert — suppress per-entry renders */
@@ -487,6 +506,7 @@ int gtk_xtext_moveto_marker_pos (GtkXText *xtext);
 void gtk_xtext_scroll_to_entry (xtext_buffer *buf, textentry *target);
 void gtk_xtext_calc_lines (xtext_buffer *buf);
 void gtk_xtext_recalc_day_boundaries (xtext_buffer *buf);
+void gtk_xtext_refresh_gap_markers (xtext_buffer *buf);
 void gtk_xtext_set_marker_from_timestamp (xtext_buffer *buf, time_t timestamp);
 void gtk_xtext_check_marker_visibility(GtkXText *xtext);
 void gtk_xtext_set_marker_last (session *sess);
