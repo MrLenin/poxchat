@@ -535,6 +535,8 @@ const struct prefs vars[] =
 	{"irc_chathistory_background", P_OFFINT (hex_irc_chathistory_background), TYPE_BOOL},
 	{"irc_chathistory_background_delay", P_OFFINT (hex_irc_chathistory_background_delay), TYPE_INT},
 	{"irc_chathistory_background_max_age", P_OFFINT (hex_irc_chathistory_background_max_age), TYPE_INT},
+	{"irc_gapfill", P_OFFINT (hex_irc_gapfill), TYPE_BOOL},
+	{"irc_gapfill_catchup_budget", P_OFFINT (hex_irc_gapfill_catchup_budget), TYPE_INT},
 	{"irc_conf_mode", P_OFFINT (hex_irc_conf_mode), TYPE_BOOL},
 	{"irc_extra_hilight", P_OFFSET (hex_irc_extra_hilight), TYPE_STR},
 	{"irc_hide_nickchange", P_OFFINT (hex_irc_hide_nickchange), TYPE_BOOL},
@@ -838,6 +840,8 @@ load_default_config(void)
 	prefs.hex_irc_chathistory_background = 1; /* background fetch older history (default: enabled) */
 	prefs.hex_irc_chathistory_background_delay = 10; /* seconds between background fetches */
 	prefs.hex_irc_chathistory_background_max_age = 24; /* max hours to fetch in background (0 = unlimited) */
+	prefs.hex_irc_gapfill = 1;  /* gap ledger + fill (default: enabled) */
+	prefs.hex_irc_gapfill_catchup_budget = 500; /* eager-close budget per channel */
 	prefs.hex_irc_logging = 1;
 	prefs.hex_irc_react_show = 1;
 	prefs.hex_irc_reply_show = 1;

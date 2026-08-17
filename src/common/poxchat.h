@@ -210,6 +210,7 @@ struct poxchatprefs
 	unsigned int hex_irc_chathistory_background; /* background fetch older history */
 	unsigned int hex_irc_chathistory_background_delay; /* seconds between background fetches */
 	unsigned int hex_irc_chathistory_background_max_age; /* max hours to fetch in background (0 = unlimited) */
+	unsigned int hex_irc_gapfill;  /* gap ledger: markers + scroll fill + eager close */
 	unsigned int hex_net_auto_reconnect;
 	unsigned int hex_net_auto_reconnectonfail;
 	unsigned int hex_net_proxy_auth;
@@ -296,6 +297,7 @@ struct poxchatprefs
 	int hex_identd_port;
 	int hex_irc_ban_type;
 	int hex_irc_chathistory_lines;  /* lines to fetch per request */
+	int hex_irc_gapfill_catchup_budget;  /* eager-close messages per channel per reconnect */
 	int hex_irc_join_delay;
 	int hex_irc_notice_pos;
 	int hex_net_ping_timeout;
@@ -471,6 +473,9 @@ typedef struct session
 	int background_history_active:1; /* background history fetch enabled for this session */
 	guint background_history_timer;	/* timer for next background history fetch */
 	time_t catchup_lower_bound;		/* timestamp stop condition for BEFORE pagination */
+	gint64 catchup_gap_id;			/* open witnessed-gap ledger row this catchup is closing (0 = none) */
+	time_t catchup_prev_newest_time;	/* newest stored row when this catchup started */
+	char *catchup_prev_newest_msgid;	/* its msgid (owned; may be NULL) */
 	int history_catchup_stale_count;	/* consecutive all-dupe BEFORE responses */
 	int history_catchup_retrieved;	/* total messages retrieved in BEFORE catch-up */
 	void *chunk_state;				/* chathistory_chunk_state* during async batch processing */

@@ -505,6 +505,7 @@ finish_catchup (session *sess)
 	sess->catchup_is_before = FALSE;
 	sess->history_catchup_stale_count = 0;
 	sess->history_catchup_retrieved = 0;
+	sess->catchup_gap_id = 0;
 
 	/* Catch-up sets oldest_msgid to its oldest batch message, which may be
 	 * newer than the DB's oldest.  Reset to the DB's oldest so that
@@ -1253,9 +1254,29 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 			/* --- BEFORE pagination phase --- */
 			sess->history_catchup_retrieved += chunk->msg_count;
 
+			/* Each BEFORE batch narrows the witnessed gap from its end side */
+			if (sess->catchup_gap_id > 0 && chunk->raw_count > 0 &&
+			    chunk->oldest_timestamp > 0)
+			{
+				const char *network = server_get_network (serv, FALSE);
+				scrollback_db *gdb = network ? scrollback_open (network) : NULL;
+				if (gdb)
+					scrollback_gap_shrink (gdb, sess->catchup_gap_id,
+						0, NULL,
+						chunk->oldest_timestamp, chunk->batch_oldest_msgid);
+			}
+
 			/* No more history (empty batch or chathistory-end tag) */
 			if (chunk->raw_count == 0 || sess->history_exhausted)
 			{
+				if (sess->catchup_gap_id > 0)
+				{
+					const char *network = server_get_network (serv, FALSE);
+					scrollback_db *gdb = network ? scrollback_open (network) : NULL;
+					if (gdb)
+						scrollback_gap_set_state (gdb, sess->catchup_gap_id,
+						                          SCROLLBACK_GAP_DEAD);
+				}
 				finish_catchup (sess);
 				chathistory_check_before_catchup (serv);
 				return;
@@ -1265,6 +1286,13 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 			if (sess->catchup_lower_bound > 0 && chunk->oldest_timestamp > 0 &&
 			    chunk->oldest_timestamp < sess->catchup_lower_bound)
 			{
+				if (sess->catchup_gap_id > 0)
+				{
+					const char *network = server_get_network (serv, FALSE);
+					scrollback_db *gdb = network ? scrollback_open (network) : NULL;
+					if (gdb)
+						scrollback_gap_delete (gdb, sess->catchup_gap_id);
+				}
 				finish_catchup (sess);
 				chathistory_check_before_catchup (serv);
 				return;
@@ -1277,6 +1305,14 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 				if (sess->history_catchup_stale_count >= 3)
 				{
 					sess->history_exhausted = TRUE;
+					if (sess->catchup_gap_id > 0)
+					{
+						const char *network = server_get_network (serv, FALSE);
+						scrollback_db *gdb = network ? scrollback_open (network) : NULL;
+						if (gdb)
+							scrollback_gap_set_state (gdb, sess->catchup_gap_id,
+							                          SCROLLBACK_GAP_DEAD);
+					}
 					finish_catchup (sess);
 					chathistory_check_before_catchup (serv);
 					return;
@@ -1319,6 +1355,29 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 		}
 
 		/* --- Initial LATEST phase --- */
+
+		/* Gap-ledger witness: the LATEST batch landed but did not reach
+		 * back to our newest stored row — the span between them is a
+		 * real hole.  Record it before the BEFORE loop starts shrinking
+		 * it, so an interrupted catchup leaves the truth in the ledger. */
+		if (prefs.hex_irc_gapfill && chunk->raw_count > 0 &&
+		    sess->catchup_prev_newest_time > 0 &&
+		    chunk->oldest_timestamp > 0 &&
+		    sess->catchup_lower_bound > 0 &&
+		    chunk->oldest_timestamp > sess->catchup_lower_bound)
+		{
+			const char *network = server_get_network (serv, FALSE);
+			scrollback_db *gdb = network ? scrollback_open (network) : NULL;
+			if (gdb)
+				sess->catchup_gap_id = scrollback_gap_record (gdb,
+					sess->channel,
+					sess->catchup_prev_newest_time,
+					sess->catchup_prev_newest_msgid,
+					chunk->oldest_timestamp,
+					chunk->batch_oldest_msgid,
+					SCROLLBACK_GAP_WITNESSED);
+		}
+
 		if (serv->chathistory_latest_pending > 0)
 			serv->chathistory_latest_pending--;
 
@@ -1846,6 +1905,28 @@ send_deferred_latest (session *sess)
 		return;
 	if (sess->type != SESS_CHANNEL || !sess->channel[0])
 		return;
+
+	/* Refresh the newest-stored snapshot from the DB.  The session's
+	 * scrollback_newest_* fields are loaded once at scrollback-load time
+	 * and go stale as soon as catchup or live traffic writes newer rows —
+	 * a reconnect without an app restart would otherwise anchor LATEST
+	 * and the gap ledger on app-start-era values. */
+	{
+		const char *network = server_get_network (sess->server, FALSE);
+		scrollback_db *db = network ? scrollback_open (network) : NULL;
+		if (db)
+		{
+			g_free (sess->scrollback_newest_msgid);
+			sess->scrollback_newest_msgid =
+				scrollback_get_newest_msgid (db, sess->channel);
+			sess->scrollback_newest_time =
+				scrollback_get_newest_time (db, sess->channel);
+		}
+	}
+	sess->catchup_prev_newest_time = sess->scrollback_newest_time;
+	g_free (sess->catchup_prev_newest_msgid);
+	sess->catchup_prev_newest_msgid = g_strdup (sess->scrollback_newest_msgid);
+	sess->catchup_gap_id = 0;
 
 	sess->catchup_in_progress = TRUE;
 	sess->catchup_is_before = FALSE;

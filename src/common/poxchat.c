@@ -695,6 +695,7 @@ session_free (session *killsess)
 	g_free (killsess->markread_timestamp);
 	g_free (killsess->scrollback_oldest_msgid);
 	g_free (killsess->scrollback_newest_msgid);
+	g_free (killsess->catchup_prev_newest_msgid);
 	if (killsess->known_msgids)
 		g_hash_table_destroy (killsess->known_msgids);
 	g_free (killsess->reply_msgid);
