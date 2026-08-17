@@ -744,7 +744,9 @@ git add src/common/poxchat.h src/common/poxchat.c src/common/cfgfiles.c src/comm
 git commit -m "chathistory: record reconnect gaps in the ledger; shrink via BEFORE pagination"
 ```
 
----### Task 4: Eager bounded close for background channels (spec §4 eager)
+---
+
+### Task 4: Eager bounded close for background channels (spec §4 eager)
 
 Today the BEFORE catch-up loop runs only on the active tab (`chathistory_check_before_catchup` bails when `current_sess` doesn't need it), and a hop pauses whenever the user switches tabs. Rework the scheduler: every continuation hops through `schedule_before_catchup` → `check_before_catchup`, which re-picks the target each time (active tab first, then any session on the server), and a per-channel budget bounds each session's spend.
 
