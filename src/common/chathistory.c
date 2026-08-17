@@ -191,34 +191,34 @@ chathistory_dispatch_now (session *sess, chreq *req)
 	}
 }
 
-void
+gboolean
 chathistory_submit (session *sess, chreq *req)
 {
 	if (!sess || !req)
 	{
 		chreq_free (req);
-		return;
+		return FALSE;
 	}
 
 	/* Dedup against active request */
 	if (chreq_is_dup (sess->ch_active, req))
 	{
 		chreq_free (req);
-		return;
+		return FALSE;
 	}
 
 	/* Dedup against pending request */
 	if (chreq_is_dup (sess->ch_pending, req))
 	{
 		chreq_free (req);
-		return;
+		return FALSE;
 	}
 
 	/* No active request → dispatch immediately */
 	if (!sess->ch_active)
 	{
 		chathistory_dispatch_now (sess, req);
-		return;
+		return TRUE;
 	}
 
 	/* Active request exists → queue as pending */
@@ -227,11 +227,13 @@ chathistory_submit (session *sess, chreq *req)
 		/* Replace lower-priority pending with this request */
 		chreq_free (sess->ch_pending);
 		sess->ch_pending = req;
+		return TRUE;
 	}
 	else
 	{
 		/* Equal or lower priority — drop */
 		chreq_free (req);
+		return FALSE;
 	}
 }
 
@@ -468,8 +470,9 @@ chathistory_request_older (session *sess)
  * approach_dir: -1 = gap is above the viewport (user scrolling up),
  * +1 = below.  Rate limiting lives in the ledger (attempts/last_attempt,
  * reset by any batch that shrinks the gap).
- * Returns TRUE only when a request was actually submitted (reached
- * chathistory_submit past the dedup pre-check) — callers use this to
+ * Returns TRUE only when chathistory_submit() reports the request was
+ * actually dispatched or queued as pending (not dropped as a duplicate
+ * or by losing the pending-slot priority contest) — callers use this to
  * decide whether the gap is genuinely in flight. */
 gboolean
 chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
@@ -554,14 +557,21 @@ chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
 	req->gap_id = gap_id;
 	req->gap_dir = approach_dir;
 
-	/* Pre-check duplicates ourselves: chathistory_submit silently drops
-	 * and frees an exact-duplicate request, and a dropped request must
-	 * not count as an attempt (ledger touch) or be reported as
-	 * submitted — both would desync in_flight and the attempts/backoff
-	 * counter from what actually went out on the wire. */
-	if (chreq_is_dup (sess->ch_active, req) || chreq_is_dup (sess->ch_pending, req))
+	/* Submit first and only touch the ledger if chathistory_submit
+	 * reports the request actually went out (dispatched now or queued
+	 * as pending).  An exact-duplicate pre-check here isn't enough:
+	 * chathistory_submit can also silently drop and free req by losing
+	 * the pending-slot priority contest (an active request plus an
+	 * equal-or-higher-priority ch_pending already queued) even when req
+	 * isn't a duplicate of either.  A dropped request must not count as
+	 * an attempt (ledger touch) or be reported as submitted — both would
+	 * desync in_flight and the attempts/backoff counter from what
+	 * actually went out on the wire.  Touching after submit is fine
+	 * either way: it's bookkeeping, not a precondition, and nothing can
+	 * re-enter between the two calls in this single-threaded GLib main
+	 * loop. */
+	if (!chathistory_submit (sess, req))
 	{
-		chreq_free (req);
 		g_free (near_ref);
 		g_free (far_ref);
 		scrollback_gap_clear (&gap);
@@ -569,7 +579,6 @@ chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
 	}
 
 	scrollback_gap_touch (db, gap_id);
-	chathistory_submit (sess, req);
 
 	g_free (near_ref);
 	g_free (far_ref);
@@ -1445,9 +1454,12 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 				const char *network = server_get_network (serv, FALSE);
 				scrollback_db *gdb = network ? scrollback_open (network) : NULL;
 				if (gdb)
+				{
 					scrollback_gap_shrink (gdb, sess->catchup_gap_id,
 						0, NULL,
 						chunk->oldest_timestamp, chunk->batch_oldest_msgid);
+					fe_gap_updated (sess, sess->catchup_gap_id);
+				}
 			}
 
 			/* No more history (empty batch or chathistory-end tag) */
@@ -1458,8 +1470,11 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 					const char *network = server_get_network (serv, FALSE);
 					scrollback_db *gdb = network ? scrollback_open (network) : NULL;
 					if (gdb)
+					{
 						scrollback_gap_set_state (gdb, sess->catchup_gap_id,
 						                          SCROLLBACK_GAP_DEAD);
+						fe_gap_updated (sess, sess->catchup_gap_id);
+					}
 				}
 				finish_catchup (sess);
 				chathistory_check_before_catchup (serv);
@@ -1475,7 +1490,10 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 					const char *network = server_get_network (serv, FALSE);
 					scrollback_db *gdb = network ? scrollback_open (network) : NULL;
 					if (gdb)
+					{
 						scrollback_gap_delete (gdb, sess->catchup_gap_id);
+						fe_gap_updated (sess, sess->catchup_gap_id);
+					}
 				}
 				finish_catchup (sess);
 				chathistory_check_before_catchup (serv);
@@ -1494,8 +1512,11 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 						const char *network = server_get_network (serv, FALSE);
 						scrollback_db *gdb = network ? scrollback_open (network) : NULL;
 						if (gdb)
+						{
 							scrollback_gap_set_state (gdb, sess->catchup_gap_id,
 							                          SCROLLBACK_GAP_DEAD);
+							fe_gap_updated (sess, sess->catchup_gap_id);
+						}
 					}
 					finish_catchup (sess);
 					chathistory_check_before_catchup (serv);
@@ -1561,6 +1582,7 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 			const char *network = server_get_network (serv, FALSE);
 			scrollback_db *gdb = network ? scrollback_open (network) : NULL;
 			if (gdb)
+			{
 				sess->catchup_gap_id = scrollback_gap_record (gdb,
 					sess->channel,
 					sess->catchup_prev_newest_time,
@@ -1568,6 +1590,9 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 					chunk->oldest_timestamp,
 					chunk->batch_oldest_msgid,
 					SCROLLBACK_GAP_WITNESSED);
+				if (sess->catchup_gap_id > 0)
+					fe_gap_updated (sess, sess->catchup_gap_id);
+			}
 		}
 
 		if (serv->chathistory_latest_pending > 0)
@@ -1625,23 +1650,57 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 		{
 			gboolean bridged = FALSE;
 
-			if (chunk->oldest_timestamp > 0 &&
-			    chunk->oldest_timestamp <= g.start_ts)
-				bridged = TRUE;	/* batch overlaps the start bound: covered */
-			else if (chunk->raw_count <
-			         get_effective_limit (serv, prefs.hex_irc_chathistory_lines))
-				bridged = TRUE;	/* server returned everything in range */
-			else if (chunk->gap_dir < 0)
-				/* End-side fill: end bound moves down to the batch's
-				 * oldest edge. */
-				scrollback_gap_shrink (gdb, chunk->gap_id, 0, NULL,
-					chunk->oldest_timestamp, chunk->batch_oldest_msgid);
+			/* The bridge test must be keyed on the request's own
+			 * approach direction, not tested against a fixed bound
+			 * regardless of direction.  For an end-side fill (gap_dir <
+			 * 0), the batch's oldest edge is the one closing on the
+			 * gap, so test it against the start bound.  For a
+			 * start-side fill (gap_dir >= 0, including the AFTER
+			 * fallback), the batch's newest edge is the one closing on
+			 * the gap, so test it against the end bound instead.
+			 * Testing the wrong edge is wrong in both directions: a
+			 * start-side batch's oldest edge sits adjacent to the start
+			 * bound *by construction*, so testing it there would
+			 * prematurely bridge (delete) the record on a same-second
+			 * tie after a single batch even though the far (end) side
+			 * is still open; and on the AFTER fallback a batch that
+			 * overshoots the gap's end would never satisfy an
+			 * oldest<=start test, so it would always fall through to
+			 * shrink and could write start_ts past end_ts -- an
+			 * inverted record whose attempts keep resetting, causing
+			 * request churn.  (scrollback_gap_shrink also guards against
+			 * an inverted result outright, as defense in depth.) */
+			if (chunk->gap_dir < 0)
+			{
+				if (chunk->oldest_timestamp > 0 &&
+				    chunk->oldest_timestamp <= g.start_ts)
+					bridged = TRUE;	/* batch overlaps the start bound: covered */
+			}
 			else
-				/* Start-side fill: start bound moves up to the batch's
-				 * newest edge. */
-				scrollback_gap_shrink (gdb, chunk->gap_id,
-					chunk->newest_timestamp, chunk->batch_newest_msgid,
-					0, NULL);
+			{
+				if (chunk->newest_timestamp > 0 &&
+				    chunk->newest_timestamp >= g.end_ts)
+					bridged = TRUE;	/* batch overlaps the end bound: covered */
+			}
+
+			if (!bridged && chunk->raw_count <
+			    get_effective_limit (serv, prefs.hex_irc_chathistory_lines))
+				bridged = TRUE;	/* server returned everything in range */
+
+			if (!bridged)
+			{
+				if (chunk->gap_dir < 0)
+					/* End-side fill: end bound moves down to the batch's
+					 * oldest edge. */
+					scrollback_gap_shrink (gdb, chunk->gap_id, 0, NULL,
+						chunk->oldest_timestamp, chunk->batch_oldest_msgid);
+				else
+					/* Start-side fill: start bound moves up to the batch's
+					 * newest edge. */
+					scrollback_gap_shrink (gdb, chunk->gap_id,
+						chunk->newest_timestamp, chunk->batch_newest_msgid,
+						0, NULL);
+			}
 
 			if (bridged)
 				scrollback_gap_delete (gdb, chunk->gap_id);

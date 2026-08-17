@@ -92,6 +92,34 @@ main (int argc, char **argv)
 		scrollback_gap_delete (db, id3);
 	}
 
+	/* direction-agnostic shrink guard: a one-sided shrink still works
+	 * normally in either direction, but a shrink that would invert the
+	 * bounds (new start_ts >= existing end_ts) must delete the row
+	 * instead of leaving a nonsensical record behind. */
+	{
+		gint64 id4 = scrollback_gap_record (db, "#invert", 1000, "s1", 2000, "e1",
+		                                    SCROLLBACK_GAP_WITNESSED);
+		CHECK ("invert setup", id4 > 0);
+
+		/* normal one-sided shrink: start moves up, end untouched */
+		scrollback_gap_shrink (db, id4, 1500, "s2", 0, NULL);
+		{
+			scrollback_gap g;
+			CHECK ("normal start-side shrink", scrollback_gap_get (db, id4, &g) &&
+				g.start_ts == 1500 && g.end_ts == 2000 &&
+				g_strcmp0 (g.start_msgid, "s2") == 0);
+			scrollback_gap_clear (&g);
+		}
+
+		/* inverting shrink: new start moves past the existing end -> the
+		 * row is deleted rather than left inverted */
+		scrollback_gap_shrink (db, id4, 2500, "s3", 0, NULL);
+		{
+			scrollback_gap g;
+			CHECK ("inverting shrink deletes row", !scrollback_gap_get (db, id4, &g));
+		}
+	}
+
 	/* ordinal: 11 rows sort before ts 90000 */
 	CHECK ("ordinal", scrollback_gap_ordinal (db, "#t", 90000) == 11);
 

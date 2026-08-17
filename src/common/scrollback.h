@@ -398,6 +398,11 @@ void scrollback_gap_clear (scrollback_gap *gap);
  * Narrow a gap's bounds after a partial fill.  A new_start_ts/new_end_ts
  * of 0 (with the paired msgid NULL) means "keep this side unchanged".
  * Resets attempts and last_attempt to 0 -- progress re-earns a fast retry.
+ *
+ * Defense in depth: if the narrowing would invert the record
+ * (start_ts >= end_ts), the row is deleted instead of left inverted --
+ * an inverted gap isn't a real hole, and would otherwise re-request
+ * forever since every shrink resets attempts/last_attempt.
  */
 void scrollback_gap_shrink (scrollback_db *db, gint64 gap_id,
                             gint64 new_start_ts, const char *new_start_msgid,

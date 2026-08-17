@@ -329,9 +329,17 @@ void chathistory_notify_tab_switch (session *new_sess);
  * Submit a chathistory request to the per-session queue.
  * Handles deduplication and priority. If no request is in-flight,
  * dispatches immediately. Otherwise queues as pending.
- * Takes ownership of req (caller must not free).
+ * Takes ownership of req in all cases (caller must not free) --
+ * on a dedup/priority drop, req is freed here rather than handed back.
+ *
+ * @return TRUE if the request was dispatched immediately or queued as
+ *         pending; FALSE if it was dropped (freed) as a duplicate or by
+ *         losing the pending-slot priority contest.  Callers that need
+ *         to know whether a request is genuinely in flight (e.g. before
+ *         touching bookkeeping tied to it) must check this return value
+ *         rather than assuming submission always succeeds.
  */
-void chathistory_submit (session *sess, chreq *req);
+gboolean chathistory_submit (session *sess, chreq *req);
 
 /**
  * Mark the active request as complete and dispatch any pending request.

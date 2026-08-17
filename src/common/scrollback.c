@@ -2096,6 +2096,23 @@ scrollback_gap_shrink (scrollback_db *db, gint64 gap_id,
 		sqlite3_bind_null (stmt, 5);
 	sqlite3_step (stmt);
 	sqlite3_finalize (stmt);
+
+	/* Defense in depth: callers key the direction of a shrink off the
+	 * gap-fill request's own approach direction (see chathistory.c's
+	 * finish_batch_processing), so a mismatch there -- or any other
+	 * caller narrowing the wrong side -- could otherwise leave
+	 * start_ts >= end_ts behind: an inverted record that is not a real
+	 * gap, and whose attempts/last_attempt reset on every shrink means
+	 * it would keep re-requesting forever without ever being
+	 * satisfiable.  Treat an inverted result as closed and delete it. */
+	if (sqlite3_prepare_v2 (db->db,
+		"DELETE FROM gaps WHERE id = ?1 AND start_ts >= end_ts",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, gap_id);
+		sqlite3_step (stmt);
+		sqlite3_finalize (stmt);
+	}
 }
 
 /* Set a gap's state (SCROLLBACK_GAP_*). */
