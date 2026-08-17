@@ -2813,7 +2813,15 @@ inbound_toggle_caps (server *serv, const char *extensions_str, gboolean enable)
 		else if (!strcmp (extension, "labeled-response"))
 			serv->have_labeled_response = enable;
 		else if (!strcmp (extension, "draft/chathistory"))
+		{
 			serv->have_chathistory = enable;
+			if (enable)
+			{
+				serv->chathistory_between_unsupported = FALSE;
+				serv->chathistory_suppressed = FALSE;
+				serv->chathistory_fail_streak = 0;
+			}
+		}
 		else if (!strcmp (extension, "draft/multiline"))
 			serv->have_multiline = enable;
 		else if (!strcmp (extension, "draft/event-playback"))

@@ -175,9 +175,10 @@ void chathistory_process_batch (server *serv, batch_info *batch);
  * Clears loading state and attempts fallback (msgid → timestamp → LATEST).
  *
  * @param serv Server the FAIL came from
+ * @param code FAIL code (e.g. "INVALID_PARAMS")
  * @param context Optional context from FAIL message (may be target channel)
  */
-void chathistory_handle_fail (server *serv, const char *context);
+void chathistory_handle_fail (server *serv, const char *code, const char *context);
 
 /**
  * Parse CHATHISTORY ISUPPORT token.

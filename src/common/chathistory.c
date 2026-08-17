@@ -135,7 +135,7 @@ chathistory_dispatch_now (session *sess, chreq *req)
 		return;
 	}
 
-	if (!serv->have_chathistory || !serv->connected)
+	if (!serv->have_chathistory || !serv->connected || serv->chathistory_suppressed)
 	{
 		chreq_free (req);
 		return;
@@ -1140,7 +1140,7 @@ find_session_with_pending_history (server *serv)
 }
 
 void
-chathistory_handle_fail (server *serv, const char *context)
+chathistory_handle_fail (server *serv, const char *code, const char *context)
 {
 	session *sess = NULL;
 
@@ -1156,26 +1156,53 @@ chathistory_handle_fail (server *serv, const char *context)
 		return;
 
 	{
-		/* Save flags from active request before completing it */
 		gboolean used_msgid = sess->history_request_used_msgid;
+		gboolean was_catchup_latest = sess->catchup_in_progress &&
+			!sess->catchup_is_before;
+		chreq_type failed_type = sess->ch_active ? sess->ch_active->type
+		                                         : CHREQ_LATEST;
+
+		/* Repeated-FAIL brake: an auth-walled or broken server would
+		 * otherwise get re-asked on every join and every scroll. */
+		serv->chathistory_fail_streak++;
+		if (serv->chathistory_fail_streak >= 4)
+			serv->chathistory_suppressed = TRUE;
+
+		/* BETWEEN not understood → remember; the gap-fill layer falls
+		 * back to BEFORE/AFTER pagination on its next trigger. */
+		if (failed_type == CHREQ_BETWEEN && code && code[0] &&
+		    (g_ascii_strcasecmp (code, "UNKNOWN_COMMAND") == 0 ||
+		     g_ascii_strcasecmp (code, "NEED_MORE_PARAMS") == 0 ||
+		     g_ascii_strcasecmp (code, "INVALID_PARAMS") == 0 ||
+		     g_ascii_strcasecmp (code, "INVALID_MSGREFTYPES") == 0))
+			serv->chathistory_between_unsupported = TRUE;
 
 		/* Clear active request and advance queue */
 		chathistory_request_complete (sess);
 
 		if (sess->catchup_in_progress)
 		{
-			/* Catch-up: server rejected our reference.  If we used a msgid the
-			 * server doesn't recognise (e.g. after restart), retry with timestamp. */
-			if (used_msgid && sess->scrollback_newest_time > 0)
+			/* A failed catchup LATEST previously left latest_pending
+			 * stranded, which blocked the BEFORE phase forever. */
+			if (was_catchup_latest && serv->chathistory_latest_pending > 0)
+				serv->chathistory_latest_pending--;
+
+			/* Catch-up: server rejected our reference.  If we used a
+			 * msgid the server doesn't recognise, retry with timestamp. */
+			if (!serv->chathistory_suppressed &&
+			    used_msgid && sess->scrollback_newest_time > 0)
 			{
 				char ref[64];
 				g_snprintf (ref, sizeof (ref), "timestamp=%" G_GINT64_FORMAT,
 				            (gint64) sess->scrollback_newest_time);
-				chathistory_request_latest (sess, ref, prefs.hex_irc_chathistory_lines);
+				chathistory_request_latest (sess, ref,
+				                            prefs.hex_irc_chathistory_lines);
 				return;
 			}
 			/* All fallbacks exhausted — finish with whatever we have */
 			finish_catchup (sess);
+			if (serv->chathistory_latest_pending == 0)
+				chathistory_check_before_catchup (serv);
 		}
 	}
 }
@@ -1222,6 +1249,8 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 {
 	session *sess = chunk->sess;
 	server *serv = chunk->serv;
+
+	serv->chathistory_fail_streak = 0;
 
 	/* Clear processing mode flags and advance the request queue.
 	 * chathistory_request_complete dispatches any pending request. */

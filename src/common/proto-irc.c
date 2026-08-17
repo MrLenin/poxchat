@@ -1361,7 +1361,8 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 			 * word[3] = subcommand, word[4] = code, word[5] = context or description */
 			if (g_ascii_strcasecmp (word[3], "CHATHISTORY") == 0)
 			{
-				chathistory_handle_fail (serv, word[5]);
+				/* word[4] = FAIL code, word[5] = context (target) */
+				chathistory_handle_fail (serv, word[4], word[5]);
 			}
 			else if (g_ascii_strcasecmp (word[3], "REDACT") == 0)
 			{

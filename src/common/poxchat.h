@@ -659,6 +659,9 @@ typedef struct server
 	guint chathistory_before_timer;	/* delay between BEFORE catch-up requests */
 	int chathistory_latest_pending;	/* count of sessions awaiting LATEST response */
 	struct session *chathistory_before_sess;	/* session doing active BEFORE catch-up (NULL = none) */
+	unsigned int chathistory_between_unsupported:1;	/* server FAILed BETWEEN; use BEFORE/AFTER fallback */
+	unsigned int chathistory_suppressed:1;	/* repeated FAILs — stop asking until reconnect */
+	int chathistory_fail_streak;			/* consecutive CHATHISTORY FAILs */
 	int multiline_max_bytes;		/* max bytes in multiline batch (from ISUPPORT) */
 	int multiline_max_lines;		/* max lines in multiline batch (from ISUPPORT) */
 	int sts_upgrade_port;			/* STS TLS port to upgrade to (0 = no upgrade needed) */
