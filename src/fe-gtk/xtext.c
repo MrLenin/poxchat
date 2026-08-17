@@ -6296,7 +6296,7 @@ gtk_xtext_render_gap_marker (GtkXText *xtext, textentry *ent, int line, int win_
 	}
 	xtext_format_gap_span (span_buf, sizeof (span_buf), gi->end_ts - gi->start_ts);
 	if (gi->in_flight)
-		g_snprintf (label, sizeof (label), _("loading missed messages…"));
+		g_strlcpy (label, _("loading missed messages…"), sizeof (label));
 	else if (gi->state == SCROLLBACK_GAP_CANDIDATE)
 		g_snprintf (label, sizeof (label), _("possible gap (~%s quiet)"), span_buf);
 	else
@@ -7292,13 +7292,32 @@ static void
 gtk_xtext_refresh_gap_cache (xtext_buffer *buf)
 {
 	GList *rows, *l;
+	GArray *in_flight_ids;
+	guint i;
+
+	/* in_flight is fill-progress state the ledger doesn't record (the
+	 * gaps table has no such column), so a straight rebuild would
+	 * silently drop it — and this refresh runs whenever total_entries
+	 * changes, which is exactly what a fill in progress does.  Remember
+	 * which gap_ids were in_flight before the rebuild and re-set it on
+	 * whichever survive (small lists — a linear scan per row is fine). */
+	in_flight_ids = g_array_new (FALSE, FALSE, sizeof (gint64));
+	for (l = buf->gap_cache; l; l = l->next)
+	{
+		xtext_gap_info *gi = l->data;
+		if (gi->in_flight)
+			g_array_append_val (in_flight_ids, gi->gap_id);
+	}
 
 	g_list_free_full (buf->gap_cache, g_free);
 	buf->gap_cache = NULL;
 	buf->gap_cache_dirty = FALSE;
 
 	if (!HAS_VIRT_DB (buf) || !buf->virt_channel)
+	{
+		g_array_free (in_flight_ids, TRUE);
 		return;
+	}
 
 	rows = scrollback_gap_list (buf->virt_db, buf->virt_channel);
 	for (l = rows; l; l = l->next)
@@ -7314,9 +7333,18 @@ gtk_xtext_refresh_gap_cache (xtext_buffer *buf)
 		gi->state = g->state;
 		gi->ordinal = scrollback_gap_ordinal (buf->virt_db, buf->virt_channel,
 		                                      g->end_ts);
+		for (i = 0; i < in_flight_ids->len; i++)
+		{
+			if (g_array_index (in_flight_ids, gint64, i) == gi->gap_id)
+			{
+				gi->in_flight = 1;
+				break;
+			}
+		}
 		buf->gap_cache = g_list_append (buf->gap_cache, gi);
 	}
 	scrollback_gap_list_free (rows);
+	g_array_free (in_flight_ids, TRUE);
 }
 
 /* Public sweep: reload the gap cache and reconcile marker entries against
@@ -10222,8 +10250,24 @@ gtk_xtext_maybe_insert_gap_marker (xtext_buffer *buf, textentry *ent)
 				buf->ephemeral_count++;
 			}
 
-			sep->prev = ent->prev;
-			sep->next = ent;
+			/* Comparator-verified insertion point.  sep's stamp is
+			 * gi->end_ts, not ent->stamp, so intervening chrome between
+			 * real_prev and ent (e.g. a today-midnight day separator
+			 * ahead of a months-old gap) can sort AFTER sep even though
+			 * it sits before `ent` in the list — inserting blindly at
+			 * ent->prev would then diverge from tree order (which uses
+			 * entry_stamp_cmp directly) and drop a chrome row from the
+			 * render walk.  Real content never sorts wrong here
+			 * (real_prev/ent bracket the gap by construction above);
+			 * only intervening chrome needs this walk, so it's short. */
+			{
+				textentry *before = ent->prev;
+				while (before && before != real_prev &&
+				       entry_stamp_cmp (before, sep) > 0)
+					before = before->prev;
+				sep->prev = before;
+				sep->next = before ? before->next : buf->text_first;
+			}
 			return gtk_xtext_link_entry (buf, sep, LINK_BEFORE);
 		}
 	}
