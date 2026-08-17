@@ -455,6 +455,14 @@ struct _GtkXText
 	void (*scroll_to_top_cb) (GtkXText *xtext, gpointer userdata);
 	gpointer scroll_to_top_userdata;
 
+	/* Gap-fill (recorded history holes) support */
+	guint gap_fill_debounce_tag;
+	gint64 gap_fill_pending_id;
+	int gap_fill_pending_dir;
+	void (*gap_fill_cb) (GtkXText *xtext, gint64 gap_id, int approach_dir,
+	                     gpointer userdata);
+	gpointer gap_fill_userdata;
+
 	/* Bottom status strip (generalized from typing indicator) */
 	xtext_status_item status_items[XTEXT_STATUS_MAX_ITEMS];
 	int status_item_count;
@@ -528,6 +536,8 @@ void gtk_xtext_set_urlcheck_function (GtkXText *xtext, int (*urlcheck_function) 
 void gtk_xtext_set_wordwrap (GtkXText *xtext, gboolean word_wrap);
 void gtk_xtext_set_scroll_to_top_callback (GtkXText *xtext, void (*callback) (GtkXText *, gpointer), gpointer userdata);
 void gtk_xtext_reset_scroll_top_backoff (GtkXText *xtext);
+void gtk_xtext_set_gap_fill_callback (GtkXText *xtext,
+	void (*callback) (GtkXText *, gint64, int, gpointer), gpointer userdata);
 void gtk_xtext_set_reply_button_callback (GtkXText *xtext, void (*callback) (GtkXText *, const char *, const char *, gpointer), gpointer userdata);
 void gtk_xtext_set_react_text_button_callback (GtkXText *xtext, void (*callback) (GtkXText *, const char *, const char *, gpointer), gpointer userdata);
 void gtk_xtext_set_react_emoji_button_callback (GtkXText *xtext, void (*callback) (GtkXText *, const char *, const char *, gpointer), gpointer userdata);

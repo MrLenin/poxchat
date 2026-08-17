@@ -48,6 +48,8 @@ typedef struct chreq_tag {
 	chreq_priority priority;
 	unsigned int is_catchup:1;	/* part of automatic catch-up */
 	unsigned int used_msgid:1;	/* used msgid reference (for FAIL fallback) */
+	gint64 gap_id;				/* gap-fill: ledger row this request serves (0 = none) */
+	int gap_dir;				/* gap-fill: approach direction (-1 above, +1 below) */
 } chreq;
 
 /* Default number of messages to request if not specified */
@@ -148,6 +150,19 @@ void chathistory_request_around (session *sess, const char *reference, int limit
  */
 void chathistory_request_between (session *sess, const char *start_ref,
                                   const char *end_ref, int limit);
+
+/**
+ * Request history for a recorded gap-ledger hole, anchored at the edge
+ * the user approached from so adjacent content arrives first.
+ * Uses CHATHISTORY BETWEEN (or BEFORE/AFTER when the server lacks
+ * BETWEEN support), rate-limited by the ledger's attempts/last_attempt.
+ *
+ * @param sess Session/channel to request history for
+ * @param gap_id Ledger row id (from scrollback_gap) identifying the hole
+ * @param approach_dir -1 if the gap is above the viewport (scrolling up),
+ *                     +1 if below
+ */
+void chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir);
 
 /**
  * Request list of active conversations.

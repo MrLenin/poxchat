@@ -486,6 +486,9 @@ static xtext_gap_info *xtext_find_gap_info (xtext_buffer *buf, gint64 gap_id);
 static void gtk_xtext_refresh_gap_cache (xtext_buffer *buf);
 static int gtk_xtext_maybe_insert_gap_marker (xtext_buffer *buf, textentry *ent);
 static void gtk_xtext_render_gap_marker (GtkXText *xtext, textentry *ent, int line, int win_width);
+/* Gap-fill (Task 7): forward-declared per CONTROLLER RULING R1 so the
+ * proximity check in gtk_xtext_adjustment_changed can call it. */
+static gboolean gtk_xtext_gap_fill_timeout (gpointer data);
 
 /* GTK4 event controller callbacks - forward declarations */
 static void gtk_xtext_button_press (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
@@ -989,6 +992,11 @@ gtk_xtext_init (GtkXText * xtext)
 	xtext->scroll_top_backoff_ms = 500; /* Initial debounce: 500ms */
 	xtext->scroll_to_top_cb = NULL;
 	xtext->scroll_to_top_userdata = NULL;
+	xtext->gap_fill_debounce_tag = 0;
+	xtext->gap_fill_pending_id = 0;
+	xtext->gap_fill_pending_dir = 0;
+	xtext->gap_fill_cb = NULL;
+	xtext->gap_fill_userdata = NULL;
 	xtext->skip_stamp = FALSE;
 	xtext->render_hilights_only = FALSE;
 	xtext->un_hilight = FALSE;
@@ -1154,6 +1162,24 @@ gtk_xtext_scroll_top_timeout (gpointer data)
 		xtext->scroll_top_backoff_ms = MIN (xtext->scroll_top_backoff_ms + 250, 2000);
 	}
 
+	return G_SOURCE_REMOVE;
+}
+
+/* Debounce timeout callback for gap-fill proximity requests */
+static gboolean
+gtk_xtext_gap_fill_timeout (gpointer data)
+{
+	GtkXText *xtext = GTK_XTEXT (data);
+
+	xtext->gap_fill_debounce_tag = 0;
+
+	/* Re-validate: buffer switches and completed fills invalidate the
+	 * pending gap. */
+	if (xtext->gap_fill_cb && xtext->buffer &&
+	    xtext_find_gap_info (xtext->buffer, xtext->gap_fill_pending_id))
+		xtext->gap_fill_cb (xtext, xtext->gap_fill_pending_id,
+		                    xtext->gap_fill_pending_dir,
+		                    xtext->gap_fill_userdata);
 	return G_SOURCE_REMOVE;
 }
 
@@ -1458,6 +1484,53 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 				xtext->scroll_top_backoff_ms = MIN (xtext->scroll_top_backoff_ms + 250, 2000);
 			}
 			}
+
+			/* Gap-fill proximity: a recorded hole within ~two pages of
+			 * the viewport gets a server fill request.  Wider margin
+			 * than ensure_range's one page — the network is slower than
+			 * SQLite.  Line-space estimate mirrors the num_lines
+			 * composition (estimate above/below, exact inside). */
+			if (xtext->gap_fill_cb && xtext->buffer->gap_cache &&
+			    xtext->buffer->avg_lines_per_entry > 0)
+			{
+				GList *gl;
+				double avg = xtext->buffer->avg_lines_per_entry;
+				double gmat_top = LINES_BEFORE_MAT (xtext->buffer);
+				double gmat_bot = gmat_top + BUF_LINES_MAT (xtext->buffer);
+				int gmat_end_idx = xtext->buffer->mat_first_index +
+					(BUF_MAT_COUNT (xtext->buffer) -
+					 xtext->buffer->ephemeral_count);
+
+				for (gl = xtext->buffer->gap_cache; gl; gl = gl->next)
+				{
+					xtext_gap_info *gi = gl->data;
+					double gap_line;
+
+					if (gi->ordinal <= xtext->buffer->mat_first_index)
+						gap_line = gi->ordinal * avg;
+					else if (gi->ordinal >= gmat_end_idx)
+						gap_line = gmat_bot +
+							(gi->ordinal - gmat_end_idx) * avg;
+					else
+						gap_line = gmat_top +
+							(gi->ordinal - xtext->buffer->mat_first_index) * avg;
+
+					if (gap_line >= value - 2.0 * page_size &&
+					    gap_line <= value + 3.0 * page_size)
+					{
+						int dir = (gap_line < value + page_size / 2) ? -1 : 1;
+
+						if (xtext->gap_fill_debounce_tag)
+							g_source_remove (xtext->gap_fill_debounce_tag);
+						xtext->gap_fill_pending_id = gi->gap_id;
+						xtext->gap_fill_pending_dir = dir;
+						xtext->gap_fill_debounce_tag = g_timeout_add (500,
+							gtk_xtext_gap_fill_timeout, xtext);
+						gi->in_flight = 1;	/* display only */
+						break;
+					}
+				}
+			}
 		}
 
 		/* Queue a redraw.  The old code distinguished arrow clicks (±1 line,
@@ -1520,6 +1593,12 @@ gtk_xtext_dispose (GObject * object)
 	{
 		g_source_remove (xtext->scroll_top_debounce_tag);
 		xtext->scroll_top_debounce_tag = 0;
+	}
+
+	if (xtext->gap_fill_debounce_tag)
+	{
+		g_source_remove (xtext->gap_fill_debounce_tag);
+		xtext->gap_fill_debounce_tag = 0;
 	}
 
 	if (xtext->flash_tag)
@@ -11339,6 +11418,15 @@ gtk_xtext_set_scroll_to_top_callback (GtkXText *xtext,
 {
 	xtext->scroll_to_top_cb = callback;
 	xtext->scroll_to_top_userdata = userdata;
+}
+
+void
+gtk_xtext_set_gap_fill_callback (GtkXText *xtext,
+                                 void (*callback) (GtkXText *, gint64, int, gpointer),
+                                 gpointer userdata)
+{
+	xtext->gap_fill_cb = callback;
+	xtext->gap_fill_userdata = userdata;
 }
 
 void

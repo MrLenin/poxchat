@@ -109,7 +109,7 @@ chreq_free (chreq *req)
 	g_free (req);
 }
 
-/* Check if two requests are duplicates (same type + same reference) */
+/* Check if two requests are duplicates (same type + same reference[s]) */
 static gboolean
 chreq_is_dup (const chreq *a, const chreq *b)
 {
@@ -117,7 +117,9 @@ chreq_is_dup (const chreq *a, const chreq *b)
 		return FALSE;
 	if (a->type != b->type)
 		return FALSE;
-	return g_strcmp0 (a->reference, b->reference) == 0;
+	if (g_strcmp0 (a->reference, b->reference) != 0)
+		return FALSE;
+	return g_strcmp0 (a->end_ref, b->end_ref) == 0;
 }
 
 /* Dispatch a request onto the wire immediately. Sets session flags. */
@@ -459,6 +461,96 @@ chathistory_request_older (session *sess)
 	                  CHREQ_PRI_USER, FALSE, TRUE);
 	chathistory_submit (sess, req);
 	g_free (ref);
+}
+
+/* Gap fill: request history for a recorded hole, anchored at the edge
+ * the user approached from so adjacent content arrives first.
+ * approach_dir: -1 = gap is above the viewport (user scrolling up),
+ * +1 = below.  Rate limiting lives in the ledger (attempts/last_attempt,
+ * reset by any batch that shrinks the gap). */
+void
+chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
+{
+	const char *network;
+	scrollback_db *db;
+	scrollback_gap gap;
+	char *near_ref, *far_ref;
+	gboolean near_is_msgid;
+	chreq *req;
+	gint64 wait;
+
+	if (!sess || !sess->server || !sess->server->have_chathistory ||
+	    sess->server->chathistory_suppressed)
+		return;
+	if (!prefs.hex_irc_gapfill || gap_id <= 0)
+		return;
+
+	network = server_get_network (sess->server, FALSE);
+	db = network ? scrollback_open (network) : NULL;
+	if (!db || !scrollback_gap_get (db, gap_id, &gap))
+		return;
+
+	if (gap.state == SCROLLBACK_GAP_DEAD)
+	{
+		scrollback_gap_clear (&gap);
+		return;
+	}
+
+	/* Ledger backoff: 5s per prior attempt, capped at 60s */
+	wait = 5 * gap.attempts;
+	if (wait > 60)
+		wait = 60;
+	if (gap.last_attempt > 0 && time (NULL) - gap.last_attempt < wait)
+	{
+		scrollback_gap_clear (&gap);
+		return;
+	}
+
+	if (approach_dir < 0)
+	{
+		/* Gap above viewport: fill newest-first from its end bound */
+		near_is_msgid = (gap.end_msgid && gap.end_msgid[0]);
+		near_ref = near_is_msgid
+			? g_strdup_printf ("msgid=%s", gap.end_msgid)
+			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.end_ts);
+		far_ref = (gap.start_msgid && gap.start_msgid[0])
+			? g_strdup_printf ("msgid=%s", gap.start_msgid)
+			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.start_ts);
+	}
+	else
+	{
+		near_is_msgid = (gap.start_msgid && gap.start_msgid[0]);
+		near_ref = near_is_msgid
+			? g_strdup_printf ("msgid=%s", gap.start_msgid)
+			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.start_ts);
+		far_ref = (gap.end_msgid && gap.end_msgid[0])
+			? g_strdup_printf ("msgid=%s", gap.end_msgid)
+			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.end_ts);
+	}
+
+	if (sess->server->chathistory_between_unsupported)
+	{
+		/* Fallback pagination anchored at the near edge; termination is
+		 * the ledger shrink logic (bounds clamp per batch). */
+		req = chreq_new (approach_dir < 0 ? CHREQ_BEFORE : CHREQ_AFTER,
+		                 near_ref, NULL, prefs.hex_irc_chathistory_lines,
+		                 CHREQ_PRI_USER, FALSE, near_is_msgid);
+	}
+	else
+	{
+		req = chreq_new (CHREQ_BETWEEN, near_ref, far_ref,
+		                 prefs.hex_irc_chathistory_lines,
+		                 CHREQ_PRI_USER, FALSE, near_is_msgid);
+	}
+	req->gap_id = gap_id;
+	req->gap_dir = approach_dir;
+
+	scrollback_gap_touch (db, gap_id);
+	chathistory_submit (sess, req);
+
+	g_free (near_ref);
+	g_free (far_ref);
+	scrollback_gap_clear (&gap);
 }
 
 /* Compare batch messages by timestamp for sorting (ascending order) */
@@ -1161,6 +1253,7 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 			!sess->catchup_is_before;
 		chreq_type failed_type = sess->ch_active ? sess->ch_active->type
 		                                         : CHREQ_LATEST;
+		gint64 failed_gap_id = sess->ch_active ? sess->ch_active->gap_id : 0;
 
 		/* Repeated-FAIL brake: an auth-walled or broken server would
 		 * otherwise get re-asked on every join and every scroll. */
@@ -1179,6 +1272,24 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 
 		/* Clear active request and advance queue */
 		chathistory_request_complete (sess);
+
+		/* Gap-fill FAIL: back off via the ledger; three strikes → dead.
+		 * A BETWEEN FAIL that just latched chathistory_between_unsupported
+		 * above retries naturally: the next proximity trigger takes the
+		 * BEFORE/AFTER fallback after the ledger's attempt backoff. */
+		if (failed_gap_id > 0)
+		{
+			const char *gnet = server_get_network (serv, FALSE);
+			scrollback_db *gdb = gnet ? scrollback_open (gnet) : NULL;
+			if (gdb)
+			{
+				if (scrollback_gap_touch (gdb, failed_gap_id) >= 3)
+					scrollback_gap_set_state (gdb, failed_gap_id,
+					                          SCROLLBACK_GAP_DEAD);
+				fe_gap_updated (sess, failed_gap_id);
+			}
+			return;	/* not a catchup request; nothing further */
+		}
 
 		if (sess->catchup_in_progress)
 		{
@@ -1228,6 +1339,8 @@ typedef struct {
 	gboolean chathistory_end;	/* server signalled no more history (draft/chathistory-end) */
 	guint idle_tag;
 	scrollback_db *db;			/* for transaction begin/commit between chunks */
+	gint64 gap_id;				/* gap-fill request this batch answers (0 = none) */
+	char *batch_newest_msgid;	/* owned copy (chunked) / borrowed (sync) */
 } chathistory_chunk_state;
 
 static void
@@ -1244,6 +1357,7 @@ chunk_state_free (chathistory_chunk_state *chunk)
 		chunk->sess->chunk_state = NULL;
 	g_slist_free_full (chunk->all_messages, (GDestroyNotify) batch_message_free);
 	g_free (chunk->batch_oldest_msgid);
+	g_free (chunk->batch_newest_msgid);
 	g_free (chunk);
 }
 
@@ -1276,8 +1390,10 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 		sess->oldest_msgid = g_strdup (chunk->batch_oldest_msgid);
 	}
 
-	/* Server explicitly signalled end of history via draft/chathistory-end tag */
-	if (chunk->chathistory_end)
+	/* Server explicitly signalled end of history via draft/chathistory-end tag.
+	 * A gap-fill batch's chathistory-end refers only to the requested range,
+	 * not to the session's full history — don't poison history_exhausted. */
+	if (chunk->chathistory_end && chunk->gap_id == 0)
 		sess->history_exhausted = TRUE;
 
 	/* Catch-up loop */
@@ -1454,6 +1570,46 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 		sess->background_history_active = FALSE;
 	}
 
+	/* Gap fill: clamp the ledger record to the edge this batch attached
+	 * to, using the batch's actual returned bounds (robust against
+	 * server direction quirks).  All-duplicate batches still shrink —
+	 * the span content was already stored locally. */
+	if (chunk->gap_id > 0 && chunk->raw_count > 0)
+	{
+		const char *gnet = server_get_network (serv, FALSE);
+		scrollback_db *gdb = gnet ? scrollback_open (gnet) : NULL;
+		scrollback_gap g;
+
+		if (gdb && scrollback_gap_get (gdb, chunk->gap_id, &g))
+		{
+			gboolean bridged = FALSE;
+
+			if (chunk->oldest_timestamp > 0 &&
+			    chunk->oldest_timestamp <= g.start_ts)
+				bridged = TRUE;	/* batch overlaps the start bound: covered */
+			else if (chunk->raw_count <
+			         get_effective_limit (serv, prefs.hex_irc_chathistory_lines))
+				bridged = TRUE;	/* server returned everything in range */
+			else if (chunk->newest_timestamp >= g.end_ts &&
+			         chunk->oldest_timestamp > g.start_ts)
+				/* attached at the end side: end bound moves down */
+				scrollback_gap_shrink (gdb, chunk->gap_id, 0, NULL,
+					chunk->oldest_timestamp, chunk->batch_oldest_msgid);
+			else if (chunk->newest_timestamp > 0 &&
+			         chunk->newest_timestamp < g.end_ts)
+				/* attached at the start side: start bound moves up */
+				scrollback_gap_shrink (gdb, chunk->gap_id,
+					chunk->newest_timestamp, chunk->batch_newest_msgid,
+					0, NULL);
+
+			if (bridged)
+				scrollback_gap_delete (gdb, chunk->gap_id);
+
+			fe_gap_updated (sess, chunk->gap_id);
+			scrollback_gap_clear (&g);
+		}
+	}
+
 	fe_reset_scroll_top_backoff (sess);
 
 	/* Schedule next background fetch if active */
@@ -1553,7 +1709,9 @@ chathistory_process_batch (server *serv, batch_info *batch)
 {
 	session *sess = NULL;
 	gboolean is_catchup;
+	gint64 active_gap_id;
 	char *batch_oldest_msgid = NULL;
+	const char *batch_newest_msgid = NULL;
 	int raw_count;
 	const char *network;
 	scrollback_db *db;
@@ -1571,6 +1729,7 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		return;
 
 	is_catchup = sess->catchup_in_progress;
+	active_gap_id = sess->ch_active ? sess->ch_active->gap_id : 0;
 
 	/* Empty batch handling */
 	if (!batch->messages)
@@ -1579,6 +1738,23 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		if (batch->chathistory_end)
 			sess->history_exhausted = TRUE;
 		chathistory_request_complete (sess);
+
+		/* Gap-fill probe that returned empty: the span is genuinely
+		 * empty (or beyond retention).  Dead-mark and stop — don't
+		 * fall through to the catchup/exhausted paths below, which
+		 * don't apply to a gap-fill request. */
+		if (active_gap_id > 0)
+		{
+			const char *gnet = server_get_network (serv, FALSE);
+			scrollback_db *gdb = gnet ? scrollback_open (gnet) : NULL;
+			if (gdb)
+			{
+				scrollback_gap_set_state (gdb, active_gap_id, SCROLLBACK_GAP_DEAD);
+				fe_gap_updated (sess, active_gap_id);
+			}
+			return;
+		}
+
 		if (is_catchup)
 		{
 			/* Server may not recognize our msgid (e.g., server restart).
@@ -1620,6 +1796,12 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		if (first_msg && first_msg->msgid)
 			batch_oldest_msgid = first_msg->msgid;
 	}
+	{
+		GSList *last = g_slist_last (batch->messages);
+		batch_message *last_msg = last ? last->data : NULL;
+		if (last_msg && last_msg->msgid)
+			batch_newest_msgid = last_msg->msgid;
+	}
 
 	raw_count = g_slist_length (batch->messages);
 
@@ -1642,6 +1824,8 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		sync_state.is_catchup = is_catchup;
 		sync_state.chathistory_end = batch->chathistory_end;
 		sync_state.batch_oldest_msgid = (char *)batch_oldest_msgid; /* borrowed, not freed */
+		sync_state.gap_id = active_gap_id;
+		sync_state.batch_newest_msgid = (char *) batch_newest_msgid; /* borrowed, not freed */
 
 		if (db)
 			scrollback_begin_transaction (db);
@@ -1669,6 +1853,8 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		chunk->chathistory_end = batch->chathistory_end;
 		chunk->db = db;
 		chunk->batch_oldest_msgid = g_strdup (batch_oldest_msgid);
+		chunk->gap_id = active_gap_id;
+		chunk->batch_newest_msgid = g_strdup (batch_newest_msgid);
 		batch->messages = NULL;  /* prevent batch_info_free from freeing */
 
 		sess->chunk_state = chunk;

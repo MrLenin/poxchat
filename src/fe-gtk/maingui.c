@@ -2753,6 +2753,31 @@ mg_scroll_to_top_cb (GtkXText *xtext, gpointer userdata)
 	}
 }
 
+/* Callback for gap-fill proximity: request history for a recorded hole.
+ * Resolves the buffer's own session — gap fill must work for whichever
+ * buffer is scrolled, not just the current tab's. */
+static void
+mg_gap_fill_cb (GtkXText *xtext, gint64 gap_id, int approach_dir,
+                gpointer userdata)
+{
+	GSList *list;
+
+	(void) userdata;
+
+	if (!prefs.hex_irc_gapfill)
+		return;
+
+	for (list = sess_list; list; list = list->next)
+	{
+		session *sess = list->data;
+		if (sess->res && (void *) sess->res->buffer == (void *) xtext->buffer)
+		{
+			chathistory_request_gap_fill (sess, gap_id, approach_dir);
+			return;
+		}
+	}
+}
+
 /* Clear react-with-text state */
 static void
 mg_clear_react_state (session *sess)
@@ -3113,6 +3138,7 @@ mg_create_textarea (session *sess, GtkWidget *box)
 	gtk_xtext_set_urlcheck_function (xtext, mg_word_check);
 	gtk_xtext_set_max_lines (xtext, prefs.hex_text_max_lines);
 	gtk_xtext_set_scroll_to_top_callback (xtext, mg_scroll_to_top_cb, NULL);
+	gtk_xtext_set_gap_fill_callback (xtext, mg_gap_fill_cb, NULL);
 	gtk_xtext_set_reply_button_callback (xtext, mg_reply_button_cb, NULL);
 	gtk_xtext_set_react_text_button_callback (xtext, mg_react_text_button_cb, NULL);
 	gtk_xtext_set_react_emoji_button_callback (xtext, mg_react_emoji_button_cb, NULL);
