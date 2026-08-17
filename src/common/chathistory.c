@@ -1323,6 +1323,19 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 				sess->history_catchup_stale_count = 0;
 			}
 
+			/* Per-channel eager-close budget: beyond this, the remainder
+			 * stays recorded in the gap ledger for lazy scroll-fill.
+			 * CHATHISTORY_SANITY_LIMIT below stays as the outer backstop. */
+			if (prefs.hex_irc_gapfill &&
+			    prefs.hex_irc_gapfill_catchup_budget > 0 &&
+			    sess->history_catchup_retrieved >=
+			    prefs.hex_irc_gapfill_catchup_budget)
+			{
+				finish_catchup (sess);
+				chathistory_check_before_catchup (serv);
+				return;
+			}
+
 			/* Sanity limit — only for automatic post-connect catch-up.
 			 * Scroll-to-top and gap-fill are user-driven and uncapped. */
 			if (sess->history_catchup_retrieved >= CHATHISTORY_SANITY_LIMIT)
@@ -1332,18 +1345,13 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 				return;
 			}
 
-			/* Tab switched away — pause this session, check new active */
-			if (serv->chathistory_before_sess != sess ||
-			    sess != current_sess)
-			{
-				serv->chathistory_before_sess = NULL;
-				chathistory_check_before_catchup (serv);
-				return;
-			}
-
-			/* Continue BEFORE pagination after a delay */
+			/* Continue after a delay — every hop goes through the
+			 * scheduler, which re-picks the target (active tab first,
+			 * then background sessions).  That re-pick is what the
+			 * explicit tab-switch pause used to accomplish. */
 			if (chunk->batch_oldest_msgid)
 			{
+				serv->chathistory_before_sess = NULL;
 				schedule_before_catchup (serv);
 			}
 			else
@@ -2061,10 +2069,25 @@ chathistory_check_before_catchup (server *serv)
 		target = current_sess;
 	}
 
+	/* Background channels: their residual gap used to be silently
+	 * abandoned here (active-tab-only).  With the gap ledger they are
+	 * closed eagerly too, one session at a time, budget-bounded. */
+	if (!target && prefs.hex_irc_gapfill)
+	{
+		for (list = sess_list; list; list = list->next)
+		{
+			session *s = list->data;
+			if (s->server == serv && s->catchup_in_progress &&
+			    !s->history_exhausted && !s->history_loading)
+			{
+				target = s;
+				break;
+			}
+		}
+	}
+
 	if (!target)
 	{
-		/* No active tab needs catch-up — don't start on inactive tabs.
-		 * BEFORE catch-up only runs on the active tab. */
 		serv->chathistory_before_sess = NULL;
 		return;
 	}
@@ -2099,9 +2122,11 @@ chathistory_notify_tab_switch (session *new_sess)
 	if (!serv->have_chathistory)
 		return;
 
-	/* If the BEFORE target changed, the current BEFORE batch will detect
-	 * the mismatch in finish_batch_processing and call check_before_catchup.
-	 * But if there's no in-flight request, start immediately. */
+	/* Every BEFORE hop re-picks its target via check_before_catchup
+	 * (see finish_batch_processing), so a tab switch is picked up on
+	 * the next scheduled hop regardless.  This just nudges it to
+	 * happen immediately instead of waiting out the delay — but only
+	 * when there's no in-flight request to interrupt. */
 	if (serv->chathistory_before_sess != new_sess &&
 	    serv->chathistory_latest_pending == 0)
 	{
