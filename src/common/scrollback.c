@@ -2202,6 +2202,80 @@ scrollback_gap_ordinal (scrollback_db *db, const char *channel, gint64 end_ts)
 	return count;
 }
 
+/* One-shot per-channel bootstrap scan: walks stored messages in order and
+ * records a candidate gap for every adjacent pair whose timestamps are
+ * >= threshold_secs apart.  Latches via channels.gap_bootstrap_done so a
+ * channel is never rescanned, even when it found nothing.  Returns
+ * candidates recorded, or -1 if already done / bad args / error. */
+int
+scrollback_gap_bootstrap (scrollback_db *db, const char *channel,
+                          gint64 threshold_secs)
+{
+	gint64 channel_id;
+	sqlite3_stmt *stmt = NULL;
+	gint64 prev_ts = 0;
+	char *prev_msgid = NULL;
+	int recorded = 0;
+	int done = 0;
+
+	if (!db || !channel || threshold_secs <= 0)
+		return -1;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return -1;
+
+	/* One-shot latch */
+	if (sqlite3_prepare_v2 (db->db,
+		"SELECT gap_bootstrap_done FROM channels WHERE id = ?1",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return -1;
+	sqlite3_bind_int64 (stmt, 1, channel_id);
+	if (sqlite3_step (stmt) == SQLITE_ROW)
+		done = sqlite3_column_int (stmt, 0);
+	sqlite3_finalize (stmt);
+	stmt = NULL;
+	if (done)
+		return -1;
+
+	scrollback_begin_transaction (db);
+
+	if (sqlite3_prepare_v2 (db->db,
+		"SELECT timestamp, msgid FROM messages WHERE channel_id = ?1 "
+		"ORDER BY timestamp ASC, id ASC",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, channel_id);
+		while (sqlite3_step (stmt) == SQLITE_ROW)
+		{
+			gint64 ts = sqlite3_column_int64 (stmt, 0);
+			const char *msgid = (const char *) sqlite3_column_text (stmt, 1);
+			if (prev_ts > 0 && ts - prev_ts >= threshold_secs)
+			{
+				if (scrollback_gap_record (db, channel, prev_ts, prev_msgid,
+				                           ts, msgid,
+				                           SCROLLBACK_GAP_CANDIDATE) > 0)
+					recorded++;
+			}
+			prev_ts = ts;
+			g_free (prev_msgid);
+			prev_msgid = g_strdup (msgid);
+		}
+		sqlite3_finalize (stmt);
+	}
+	g_free (prev_msgid);
+
+	{
+		char *upd = sqlite3_mprintf (
+			"UPDATE channels SET gap_bootstrap_done = 1 WHERE id = %lld",
+			(long long) channel_id);
+		sqlite3_exec (db->db, upd, NULL, NULL, NULL);
+		sqlite3_free (upd);
+	}
+
+	scrollback_commit_transaction (db);
+	return recorded;
+}
+
 GSList *
 scrollback_search_text (scrollback_db *db, const char *channel, const char *pattern)
 {

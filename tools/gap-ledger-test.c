@@ -95,6 +95,29 @@ main (int argc, char **argv)
 	/* ordinal: 11 rows sort before ts 90000 */
 	CHECK ("ordinal", scrollback_gap_ordinal (db, "#t", 90000) == 11);
 
+	/* bootstrap: candidate over a >12h silence in a fresh channel.
+	 * NOTE: do not call bootstrap before seeding — the first call sets
+	 * the one-shot latch regardless of row count. */
+	{
+		scrollback_begin_transaction (db);
+		scrollback_db_save (db, "#boot", 1000, "b1", "a", TRUE);
+		scrollback_db_save (db, "#boot", 2000, "b2", "b", TRUE);
+		scrollback_db_save (db, "#boot", 200000, "b3", "c", TRUE);
+		scrollback_commit_transaction (db);
+		CHECK ("bootstrap finds hole", scrollback_gap_bootstrap (db, "#boot", 12 * 3600) == 1);
+		{
+			GList *l = scrollback_gap_list (db, "#boot");
+			CHECK ("bootstrap candidate", g_list_length (l) == 1 &&
+				nth_gap (l, 0)->state == SCROLLBACK_GAP_CANDIDATE &&
+				nth_gap (l, 0)->start_ts == 2000 &&
+				nth_gap (l, 0)->end_ts == 200000 &&
+				g_strcmp0 (nth_gap (l, 0)->start_msgid, "b2") == 0 &&
+				g_strcmp0 (nth_gap (l, 0)->end_msgid, "b3") == 0);
+			scrollback_gap_list_free (l);
+		}
+		CHECK ("bootstrap latched", scrollback_gap_bootstrap (db, "#boot", 12 * 3600) == -1);
+	}
+
 	printf (failures ? "RESULT: %d FAILURES\n" : "RESULT: ALL PASS\n", failures);
 	return failures ? 1 : 0;
 }

@@ -307,6 +307,31 @@ poxchat_timing_log (const char *fmt, ...)
 	fclose (f);
 }
 
+/* Gap-ledger bootstrap: one-shot candidate scan per channel, deferred to
+ * a low-priority idle so the 187k-row walk stays off the replay path. */
+typedef struct {
+	session *sess;		/* validate with is_session() before use */
+	char *network;
+	char *channel;
+} gap_bootstrap_req;
+
+static gboolean
+gap_bootstrap_idle_cb (gpointer data)
+{
+	gap_bootstrap_req *req = data;
+	scrollback_db *db = scrollback_open (req->network);
+
+	if (db && scrollback_gap_bootstrap (db, req->channel,
+		(gint64) prefs.hex_irc_gapfill_bootstrap_hours * 3600) > 0 &&
+	    is_session (req->sess))
+		fe_gap_updated (req->sess, 0);
+
+	g_free (req->network);
+	g_free (req->channel);
+	g_free (req);
+	return G_SOURCE_REMOVE;
+}
+
 void
 scrollback_load (session *sess)
 {
@@ -439,6 +464,15 @@ scrollback_load (session *sess)
 	sess->scrollback_newest_time = scrollback_get_newest_time (db, sess->channel);
 	poxchat_timing_log ("scrollback_load %s: msgid queries %.1f ms", sess->channel,
 	                    (g_get_monotonic_time () - t_step) / 1000.0);
+
+	if (prefs.hex_irc_gapfill && prefs.hex_irc_gapfill_bootstrap_hours > 0)
+	{
+		gap_bootstrap_req *breq = g_new0 (gap_bootstrap_req, 1);
+		breq->sess = sess;
+		breq->network = g_strdup (network);
+		breq->channel = g_strdup (sess->channel);
+		g_idle_add_full (G_PRIORITY_LOW, gap_bootstrap_idle_cb, breq, NULL);
+	}
 
 	/* Initialize oldest_msgid from scrollback for scroll-to-load support.
 	 * This allows CHATHISTORY BEFORE requests when user scrolls to top. */

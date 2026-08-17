@@ -431,6 +431,19 @@ void scrollback_gap_delete (scrollback_db *db, gint64 gap_id);
 int scrollback_gap_ordinal (scrollback_db *db, const char *channel, gint64 end_ts);
 
 /**
+ * One-shot per-channel bootstrap scan: walks stored messages in order and
+ * records a SCROLLBACK_GAP_CANDIDATE for every adjacent pair whose
+ * timestamps are >= threshold_secs apart.  Latches via
+ * channels.gap_bootstrap_done so it never rescans a channel, even if it
+ * found nothing the first time.
+ *
+ * @return Candidates recorded (>= 0), or -1 if already done, or on
+ *         bad args / error.
+ */
+int scrollback_gap_bootstrap (scrollback_db *db, const char *channel,
+                              gint64 threshold_secs);
+
+/**
  * Begin a ref-counted transaction.  Multiple begin calls nest;
  * the actual SQL BEGIN only fires on the first.
  */

@@ -297,6 +297,7 @@ struct poxchatprefs
 	int hex_identd_port;
 	int hex_irc_ban_type;
 	int hex_irc_chathistory_lines;  /* lines to fetch per request */
+	int hex_irc_gapfill_bootstrap_hours;  /* candidate threshold; 0 disables bootstrap */
 	int hex_irc_gapfill_catchup_budget;  /* eager-close messages per channel per reconnect */
 	int hex_irc_join_delay;
 	int hex_irc_notice_pos;
