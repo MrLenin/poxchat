@@ -244,6 +244,21 @@ def migrate_image(image_path):
             db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_msgid "
                        "ON messages(channel_id, msgid) "
                        "WHERE msgid IS NOT NULL")
+            # Gap ledger (chathistory gap fill)
+            db.execute("""CREATE TABLE IF NOT EXISTS gaps (
+                id INTEGER PRIMARY KEY,
+                channel_id INTEGER NOT NULL REFERENCES channels(id),
+                start_ts INTEGER NOT NULL,
+                start_msgid TEXT,
+                end_ts INTEGER NOT NULL,
+                end_msgid TEXT,
+                state INTEGER NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_attempt INTEGER NOT NULL DEFAULT 0
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_gaps_channel ON gaps(channel_id, start_ts)")
+            if "gap_bootstrap_done" not in table_cols(db, "channels"):
+                db.execute("ALTER TABLE channels ADD COLUMN gap_bootstrap_done INTEGER NOT NULL DEFAULT 0")
     finally:
         db.close()
 

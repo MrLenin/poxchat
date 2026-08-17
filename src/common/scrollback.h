@@ -329,6 +329,107 @@ gint64 scrollback_get_rowid_by_msgid (scrollback_db *db, const char *channel,
 GSList *scrollback_search_text (scrollback_db *db, const char *channel,
                                 const char *pattern);
 
+/* --- Gap ledger (chathistory gap fill) --- */
+
+#define SCROLLBACK_GAP_WITNESSED 0	/* both flanking rows are real stored messages */
+#define SCROLLBACK_GAP_CANDIDATE 1	/* heuristic guess (e.g. timestamp jump) */
+#define SCROLLBACK_GAP_DEAD      2	/* fill attempts exhausted or proven not a hole */
+
+/* A recorded hole in stored history.  Bounds are anchored to real stored
+ * rows and are exclusive on both ends: start_ts/start_msgid identify the
+ * newest stored message BEFORE the hole, end_ts/end_msgid the oldest
+ * stored message AFTER it.  Either msgid may be NULL when its flanking
+ * row has none. */
+typedef struct {
+	gint64 id;
+	gint64 start_ts;      /* newest stored msg BEFORE the hole (exclusive bound) */
+	char *start_msgid;    /* NULL when the flanking row has no msgid */
+	gint64 end_ts;        /* oldest stored msg AFTER the hole (exclusive bound) */
+	char *end_msgid;
+	int state;            /* SCROLLBACK_GAP_* */
+	int attempts;
+	gint64 last_attempt;  /* unix time of last fill attempt (0 = never) */
+} scrollback_gap;
+
+/**
+ * Record a hole in stored history.  Merges with any overlapping-or-touching
+ * non-dead gap of the same channel: bounds become the union, each bound's
+ * msgid is taken from whichever row contributes it, and the resulting
+ * state is the MIN of the merged states (witnessed absorbs candidate).
+ * Runs inside scrollback_begin_transaction/commit (ref-counted, nests
+ * safely with an outer transaction).
+ *
+ * @return The surviving row id, or -1 on failure (bad args, or
+ *         end_ts <= start_ts).
+ */
+gint64 scrollback_gap_record (scrollback_db *db, const char *channel,
+                              gint64 start_ts, const char *start_msgid,
+                              gint64 end_ts, const char *end_msgid, int state);
+
+/**
+ * List all gaps for a channel, including dead ones (consumers filter),
+ * ordered by start_ts ascending.
+ *
+ * @return GList of scrollback_gap* (caller frees with scrollback_gap_list_free)
+ */
+GList *scrollback_gap_list (scrollback_db *db, const char *channel);
+
+/**
+ * Free a list returned by scrollback_gap_list.
+ */
+void scrollback_gap_list_free (GList *gaps);
+
+/**
+ * Fill *out with the gap identified by gap_id (msgids are strdup'd).
+ * Caller frees with scrollback_gap_clear, which frees only the msgids,
+ * not the struct itself.
+ *
+ * @return TRUE if the gap was found.
+ */
+gboolean scrollback_gap_get (scrollback_db *db, gint64 gap_id, scrollback_gap *out);
+
+/**
+ * Free the msgids owned by a scrollback_gap filled by scrollback_gap_get.
+ * Does not free the struct itself.
+ */
+void scrollback_gap_clear (scrollback_gap *gap);
+
+/**
+ * Narrow a gap's bounds after a partial fill.  A new_start_ts/new_end_ts
+ * of 0 (with the paired msgid NULL) means "keep this side unchanged".
+ * Resets attempts and last_attempt to 0 -- progress re-earns a fast retry.
+ */
+void scrollback_gap_shrink (scrollback_db *db, gint64 gap_id,
+                            gint64 new_start_ts, const char *new_start_msgid,
+                            gint64 new_end_ts, const char *new_end_msgid);
+
+/**
+ * Set a gap's state (SCROLLBACK_GAP_*).
+ */
+void scrollback_gap_set_state (scrollback_db *db, gint64 gap_id, int state);
+
+/**
+ * Record a fill attempt against a gap: increments attempts and sets
+ * last_attempt to now.
+ *
+ * @return The new attempts value.
+ */
+int scrollback_gap_touch (scrollback_db *db, gint64 gap_id);
+
+/**
+ * Delete a gap row outright (e.g. a candidate proven not to be a real
+ * hole).
+ */
+void scrollback_gap_delete (scrollback_db *db, gint64 gap_id);
+
+/**
+ * Position of a gap's end bound in the same (timestamp, id) ordinal
+ * space scrollback_load_range uses: the count of messages strictly
+ * before end_ts.  Used as a proximity margin, so the tie-at-end_ts
+ * off-by-one (the end-flanking row itself) doesn't matter.
+ */
+int scrollback_gap_ordinal (scrollback_db *db, const char *channel, gint64 end_ts);
+
 /**
  * Begin a ref-counted transaction.  Multiple begin calls nest;
  * the actual SQL BEGIN only fires on the first.

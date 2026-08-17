@@ -71,6 +71,10 @@ struct scrollback_db {
 	sqlite3_stmt *stmt_channel_insert;
 	sqlite3_stmt *stmt_channel_lookup;
 	GHashTable *channel_id_cache;    /* channel name -> GINT_TO_POINTER(channel_id) */
+
+	/* Gap ledger */
+	sqlite3_stmt *stmt_gap_list;
+	sqlite3_stmt *stmt_gap_ordinal;
 };
 
 /* Hash table of open databases: network -> scrollback_db */
@@ -228,6 +232,29 @@ init_database (scrollback_db *sdb)
 		"    id INTEGER PRIMARY KEY,"
 		"    name TEXT NOT NULL UNIQUE"
 		");",
+		NULL, NULL, NULL);
+
+	/* Gap ledger: recorded holes in stored history (chathistory gap fill).
+	 * Bounds are anchored to real stored rows, exclusive on both ends. */
+	sqlite3_exec (sdb->db,
+		"CREATE TABLE IF NOT EXISTS gaps ("
+		"    id INTEGER PRIMARY KEY,"
+		"    channel_id INTEGER NOT NULL REFERENCES channels(id),"
+		"    start_ts INTEGER NOT NULL,"
+		"    start_msgid TEXT,"
+		"    end_ts INTEGER NOT NULL,"
+		"    end_msgid TEXT,"
+		"    state INTEGER NOT NULL DEFAULT 0,"
+		"    attempts INTEGER NOT NULL DEFAULT 0,"
+		"    last_attempt INTEGER NOT NULL DEFAULT 0"
+		");",
+		NULL, NULL, NULL);
+	sqlite3_exec (sdb->db,
+		"CREATE INDEX IF NOT EXISTS idx_gaps_channel ON gaps(channel_id, start_ts);",
+		NULL, NULL, NULL);
+	/* One-shot bootstrap latch per channel (heuristic candidate scan) */
+	sqlite3_exec (sdb->db,
+		"ALTER TABLE channels ADD COLUMN gap_bootstrap_done INTEGER NOT NULL DEFAULT 0;",
 		NULL, NULL, NULL);
 
 	/* Add channel_id column to messages (NULL = legacy, use channel TEXT) */
@@ -581,6 +608,20 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_search_text, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
+	/* Gap ledger: all gaps for a channel, chronological */
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT id, start_ts, start_msgid, end_ts, end_msgid, state, "
+		"attempts, last_attempt FROM gaps WHERE channel_id = ? "
+		"ORDER BY start_ts ASC",
+		-1, &sdb->stmt_gap_list, NULL);
+	if (rc != SQLITE_OK) goto fail;
+
+	/* Gap ledger: ordinal of a gap's end bound in load_range order */
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT COUNT(*) FROM messages WHERE channel_id = ?1 AND timestamp < ?2",
+		-1, &sdb->stmt_gap_ordinal, NULL);
+	if (rc != SQLITE_OK) goto fail;
+
 	return TRUE;
 
 fail:
@@ -614,6 +655,8 @@ finalize_statements (scrollback_db *sdb)
 	if (sdb->stmt_max_rowid) sqlite3_finalize (sdb->stmt_max_rowid);
 	if (sdb->stmt_index_of_rowid) sqlite3_finalize (sdb->stmt_index_of_rowid);
 	if (sdb->stmt_search_text) sqlite3_finalize (sdb->stmt_search_text);
+	if (sdb->stmt_gap_list) sqlite3_finalize (sdb->stmt_gap_list);
+	if (sdb->stmt_gap_ordinal) sqlite3_finalize (sdb->stmt_gap_ordinal);
 	if (sdb->channel_id_cache) g_hash_table_destroy (sdb->channel_id_cache);
 }
 
@@ -1815,6 +1858,348 @@ scrollback_get_rowid_by_msgid (scrollback_db *db, const char *channel, const cha
 	}
 
 	return rowid;
+}
+
+/* --- Gap ledger (chathistory gap fill) --- */
+
+/* Record a hole in stored history.  Merges with any overlapping-or-touching
+ * non-dead gap of the same channel (union of bounds; msgids taken from
+ * whichever row contributes each bound; resulting state = MIN of merged
+ * states so witnessed absorbs candidate).  Returns the surviving row id,
+ * or -1 on failure.  Runs inside a ref-counted transaction. */
+gint64
+scrollback_gap_record (scrollback_db *db, const char *channel,
+                       gint64 start_ts, const char *start_msgid,
+                       gint64 end_ts, const char *end_msgid, int state)
+{
+	gint64 channel_id, result = -1;
+	gint64 u_start = start_ts, u_end = end_ts;
+	char *u_start_msgid = g_strdup (start_msgid);
+	char *u_end_msgid = g_strdup (end_msgid);
+	int u_state = state;
+	sqlite3_stmt *stmt = NULL;
+
+	if (!db || !channel || start_ts <= 0 || end_ts <= start_ts)
+		goto out;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		goto out;
+
+	scrollback_begin_transaction (db);
+
+	/* Fold every overlapping-or-touching live gap into the union */
+	if (sqlite3_prepare_v2 (db->db,
+		"SELECT id, start_ts, start_msgid, end_ts, end_msgid, state FROM gaps "
+		"WHERE channel_id = ?1 AND state != 2 AND start_ts <= ?2 AND end_ts >= ?3",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, channel_id);
+		sqlite3_bind_int64 (stmt, 2, end_ts);
+		sqlite3_bind_int64 (stmt, 3, start_ts);
+		while (sqlite3_step (stmt) == SQLITE_ROW)
+		{
+			gint64 o_start = sqlite3_column_int64 (stmt, 1);
+			gint64 o_end = sqlite3_column_int64 (stmt, 3);
+			int o_state = sqlite3_column_int (stmt, 5);
+			if (o_start < u_start)
+			{
+				u_start = o_start;
+				g_free (u_start_msgid);
+				u_start_msgid = g_strdup ((const char *) sqlite3_column_text (stmt, 2));
+			}
+			if (o_end > u_end)
+			{
+				u_end = o_end;
+				g_free (u_end_msgid);
+				u_end_msgid = g_strdup ((const char *) sqlite3_column_text (stmt, 4));
+			}
+			if (o_state < u_state)
+				u_state = o_state;	/* witnessed (0) absorbs candidate (1) */
+			{
+				char *del = sqlite3_mprintf (
+					"DELETE FROM gaps WHERE id = %lld",
+					(long long) sqlite3_column_int64 (stmt, 0));
+				sqlite3_exec (db->db, del, NULL, NULL, NULL);
+				sqlite3_free (del);
+			}
+		}
+		sqlite3_finalize (stmt);
+		stmt = NULL;
+	}
+
+	if (sqlite3_prepare_v2 (db->db,
+		"INSERT INTO gaps (channel_id, start_ts, start_msgid, end_ts, end_msgid, state) "
+		"VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, channel_id);
+		sqlite3_bind_int64 (stmt, 2, u_start);
+		if (u_start_msgid)
+			sqlite3_bind_text (stmt, 3, u_start_msgid, -1, SQLITE_TRANSIENT);
+		else
+			sqlite3_bind_null (stmt, 3);
+		sqlite3_bind_int64 (stmt, 4, u_end);
+		if (u_end_msgid)
+			sqlite3_bind_text (stmt, 5, u_end_msgid, -1, SQLITE_TRANSIENT);
+		else
+			sqlite3_bind_null (stmt, 5);
+		sqlite3_bind_int (stmt, 6, u_state);
+		if (sqlite3_step (stmt) == SQLITE_DONE)
+			result = sqlite3_last_insert_rowid (db->db);
+		sqlite3_finalize (stmt);
+		stmt = NULL;
+	}
+
+	scrollback_commit_transaction (db);
+out:
+	if (stmt)
+		sqlite3_finalize (stmt);
+	g_free (u_start_msgid);
+	g_free (u_end_msgid);
+	return result;
+}
+
+/* Return all gaps for a channel (all states, including dead — consumers
+ * filter), ordered by start_ts.  Free with scrollback_gap_list_free. */
+GList *
+scrollback_gap_list (scrollback_db *db, const char *channel)
+{
+	GList *list = NULL;
+	gint64 channel_id;
+	int rc;
+
+	if (!db || !db->stmt_gap_list || !channel)
+		return NULL;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return NULL;
+
+	sqlite3_reset (db->stmt_gap_list);
+	sqlite3_bind_int64 (db->stmt_gap_list, 1, channel_id);
+
+	while ((rc = sqlite3_step (db->stmt_gap_list)) == SQLITE_ROW)
+	{
+		scrollback_gap *gap = g_new0 (scrollback_gap, 1);
+		gap->id = sqlite3_column_int64 (db->stmt_gap_list, 0);
+		gap->start_ts = sqlite3_column_int64 (db->stmt_gap_list, 1);
+		gap->start_msgid = g_strdup ((const char *) sqlite3_column_text (db->stmt_gap_list, 2));
+		gap->end_ts = sqlite3_column_int64 (db->stmt_gap_list, 3);
+		gap->end_msgid = g_strdup ((const char *) sqlite3_column_text (db->stmt_gap_list, 4));
+		gap->state = sqlite3_column_int (db->stmt_gap_list, 5);
+		gap->attempts = sqlite3_column_int (db->stmt_gap_list, 6);
+		gap->last_attempt = sqlite3_column_int64 (db->stmt_gap_list, 7);
+		list = g_list_prepend (list, gap);
+	}
+	if (rc != SQLITE_DONE)
+		g_warning ("Error loading gap list: %s", sqlite3_errmsg (db->db));
+
+	return g_list_reverse (list);
+}
+
+static void
+gap_free_and_clear (gpointer data)
+{
+	scrollback_gap *gap = (scrollback_gap *) data;
+	scrollback_gap_clear (gap);
+	g_free (gap);
+}
+
+/* Free a list returned by scrollback_gap_list. */
+void
+scrollback_gap_list_free (GList *gaps)
+{
+	g_list_free_full (gaps, gap_free_and_clear);
+}
+
+/* Fill *out with the gap identified by gap_id (strdup'd msgids).
+ * Caller frees with scrollback_gap_clear (frees the msgids only, not
+ * the struct).  Returns FALSE if no such row exists. */
+gboolean
+scrollback_gap_get (scrollback_db *db, gint64 gap_id, scrollback_gap *out)
+{
+	sqlite3_stmt *stmt = NULL;
+	gboolean found = FALSE;
+
+	if (!db || gap_id <= 0 || !out)
+		return FALSE;
+
+	memset (out, 0, sizeof (*out));
+
+	if (sqlite3_prepare_v2 (db->db,
+		"SELECT id, start_ts, start_msgid, end_ts, end_msgid, state, "
+		"attempts, last_attempt FROM gaps WHERE id = ?",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return FALSE;
+
+	sqlite3_bind_int64 (stmt, 1, gap_id);
+	if (sqlite3_step (stmt) == SQLITE_ROW)
+	{
+		out->id = sqlite3_column_int64 (stmt, 0);
+		out->start_ts = sqlite3_column_int64 (stmt, 1);
+		out->start_msgid = g_strdup ((const char *) sqlite3_column_text (stmt, 2));
+		out->end_ts = sqlite3_column_int64 (stmt, 3);
+		out->end_msgid = g_strdup ((const char *) sqlite3_column_text (stmt, 4));
+		out->state = sqlite3_column_int (stmt, 5);
+		out->attempts = sqlite3_column_int (stmt, 6);
+		out->last_attempt = sqlite3_column_int64 (stmt, 7);
+		found = TRUE;
+	}
+	sqlite3_finalize (stmt);
+	return found;
+}
+
+/* Free the msgids owned by a scrollback_gap filled by scrollback_gap_get.
+ * Does not free the struct itself (stack-allocated by the caller). */
+void
+scrollback_gap_clear (scrollback_gap *gap)
+{
+	if (!gap)
+		return;
+	g_free (gap->start_msgid);
+	g_free (gap->end_msgid);
+	gap->start_msgid = NULL;
+	gap->end_msgid = NULL;
+}
+
+/* Narrow a gap's bounds after a partial fill.  0/NULL for a new_*
+ * parameter means "keep this side unchanged".  Resets attempts and
+ * last_attempt to 0 — progress re-earns a fast retry. */
+void
+scrollback_gap_shrink (scrollback_db *db, gint64 gap_id,
+                       gint64 new_start_ts, const char *new_start_msgid,
+                       gint64 new_end_ts, const char *new_end_msgid)
+{
+	sqlite3_stmt *stmt;
+	if (!db || gap_id <= 0)
+		return;
+	if (sqlite3_prepare_v2 (db->db,
+		"UPDATE gaps SET "
+		"start_ts = CASE WHEN ?2 > 0 THEN ?2 ELSE start_ts END, "
+		"start_msgid = CASE WHEN ?2 > 0 THEN ?3 ELSE start_msgid END, "
+		"end_ts = CASE WHEN ?4 > 0 THEN ?4 ELSE end_ts END, "
+		"end_msgid = CASE WHEN ?4 > 0 THEN ?5 ELSE end_msgid END, "
+		"attempts = 0, last_attempt = 0 "
+		"WHERE id = ?1",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return;
+	sqlite3_bind_int64 (stmt, 1, gap_id);
+	sqlite3_bind_int64 (stmt, 2, new_start_ts);
+	if (new_start_msgid)
+		sqlite3_bind_text (stmt, 3, new_start_msgid, -1, SQLITE_TRANSIENT);
+	else
+		sqlite3_bind_null (stmt, 3);
+	sqlite3_bind_int64 (stmt, 4, new_end_ts);
+	if (new_end_msgid)
+		sqlite3_bind_text (stmt, 5, new_end_msgid, -1, SQLITE_TRANSIENT);
+	else
+		sqlite3_bind_null (stmt, 5);
+	sqlite3_step (stmt);
+	sqlite3_finalize (stmt);
+}
+
+/* Set a gap's state (SCROLLBACK_GAP_*). */
+void
+scrollback_gap_set_state (scrollback_db *db, gint64 gap_id, int state)
+{
+	sqlite3_stmt *stmt;
+
+	if (!db || gap_id <= 0)
+		return;
+
+	if (sqlite3_prepare_v2 (db->db,
+		"UPDATE gaps SET state = ? WHERE id = ?",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return;
+
+	sqlite3_bind_int (stmt, 1, state);
+	sqlite3_bind_int64 (stmt, 2, gap_id);
+	sqlite3_step (stmt);
+	sqlite3_finalize (stmt);
+}
+
+/* Record a fill attempt: attempts+1, last_attempt = now.  Returns the
+ * new attempts value. */
+int
+scrollback_gap_touch (scrollback_db *db, gint64 gap_id)
+{
+	sqlite3_stmt *stmt = NULL;
+	int attempts = 0;
+	gint64 now = (gint64) time (NULL);
+
+	if (!db || gap_id <= 0)
+		return 0;
+
+	if (sqlite3_prepare_v2 (db->db,
+		"UPDATE gaps SET attempts = attempts + 1, last_attempt = ?2 WHERE id = ?1",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, gap_id);
+		sqlite3_bind_int64 (stmt, 2, now);
+		sqlite3_step (stmt);
+		sqlite3_finalize (stmt);
+		stmt = NULL;
+	}
+
+	if (sqlite3_prepare_v2 (db->db,
+		"SELECT attempts FROM gaps WHERE id = ?",
+		-1, &stmt, NULL) == SQLITE_OK)
+	{
+		sqlite3_bind_int64 (stmt, 1, gap_id);
+		if (sqlite3_step (stmt) == SQLITE_ROW)
+			attempts = sqlite3_column_int (stmt, 0);
+		sqlite3_finalize (stmt);
+	}
+
+	return attempts;
+}
+
+/* Delete a gap row outright (e.g. a candidate proven not to be a real
+ * hole). */
+void
+scrollback_gap_delete (scrollback_db *db, gint64 gap_id)
+{
+	sqlite3_stmt *stmt;
+
+	if (!db || gap_id <= 0)
+		return;
+
+	if (sqlite3_prepare_v2 (db->db,
+		"DELETE FROM gaps WHERE id = ?",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return;
+
+	sqlite3_bind_int64 (stmt, 1, gap_id);
+	sqlite3_step (stmt);
+	sqlite3_finalize (stmt);
+}
+
+/* Position of a gap's end bound in the same (timestamp, id) ordinal
+ * space scrollback_load_range uses: COUNT(*) of messages strictly
+ * before end_ts.  Ties at end_ts are the end-flanking row itself and
+ * belong after the gap — the off-by-tie is irrelevant for a proximity
+ * margin. */
+int
+scrollback_gap_ordinal (scrollback_db *db, const char *channel, gint64 end_ts)
+{
+	int count = 0;
+	gint64 channel_id;
+
+	if (!db || !db->stmt_gap_ordinal || !channel)
+		return 0;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return 0;
+
+	sqlite3_reset (db->stmt_gap_ordinal);
+	sqlite3_bind_int64 (db->stmt_gap_ordinal, 1, channel_id);
+	sqlite3_bind_int64 (db->stmt_gap_ordinal, 2, end_ts);
+
+	if (sqlite3_step (db->stmt_gap_ordinal) == SQLITE_ROW)
+		count = sqlite3_column_int (db->stmt_gap_ordinal, 0);
+
+	return count;
 }
 
 GSList *
