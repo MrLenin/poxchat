@@ -7267,6 +7267,26 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
 	{
 		int db_total = scrollback_count (buf->virt_db, buf->virt_channel);
 		buf->total_entries = db_total;
+
+		/* Same trust model for mat_first_index: the ±1 incremental
+		 * maintenance drifts when chathistory splices rows into the
+		 * middle of history (a back-dated insert shifts every later
+		 * ordinal).  entry_id == DB rowid for DB-backed entries, so an
+		 * exact re-derivation is one indexed COUNT. */
+		{
+			textentry *first_db = buf->text_first;
+			while (first_db && !first_db->has_db_row)
+				first_db = first_db->next;
+			if (first_db)
+			{
+				int derived = scrollback_get_index_of_rowid (buf->virt_db,
+					buf->virt_channel, (gint64) first_db->entry_id);
+				XT_PERF ("mat_first resync: incr=%d derived=%d%s",
+				         buf->mat_first_index, derived,
+				         buf->mat_first_index != derived ? " DRIFT" : "");
+				buf->mat_first_index = derived;
+			}
+		}
 	}
 
 	/* Clamp lines_before_mat */
