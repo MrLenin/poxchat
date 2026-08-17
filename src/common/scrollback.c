@@ -2239,8 +2239,18 @@ scrollback_gap_bootstrap (scrollback_db *db, const char *channel,
 
 	scrollback_begin_transaction (db);
 
+	/* pending:* msgids are client-local echo-message placeholders that
+	 * haven't been confirmed by the server yet (stale ones are purged
+	 * before this bootstrap idle is scheduled, but a message sent between
+	 * join and the idle firing can still be mid-flight).  The row's
+	 * timestamp is real activity and must still bound the gap -- excluding
+	 * the row would fabricate silence -- but the placeholder itself must
+	 * never be snapshotted as a gap boundary msgid, so it's nulled out
+	 * here; scrollback_gap_record's NULL handling and the ledger's
+	 * documented timestamp= fallback take it from there. */
 	if (sqlite3_prepare_v2 (db->db,
-		"SELECT timestamp, msgid FROM messages WHERE channel_id = ?1 "
+		"SELECT timestamp, CASE WHEN msgid LIKE 'pending:%' THEN NULL ELSE msgid END "
+		"FROM messages WHERE channel_id = ?1 "
 		"ORDER BY timestamp ASC, id ASC",
 		-1, &stmt, NULL) == SQLITE_OK)
 	{

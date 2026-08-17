@@ -118,6 +118,27 @@ main (int argc, char **argv)
 		CHECK ("bootstrap latched", scrollback_gap_bootstrap (db, "#boot", 12 * 3600) == -1);
 	}
 
+	/* bootstrap: a "pending:*" msgid is a client-local echo-message
+	 * placeholder the server has never heard of.  The row's timestamp is
+	 * real activity and must still bound the gap, but the placeholder
+	 * itself must not be snapshotted as the boundary msgid. */
+	{
+		scrollback_begin_transaction (db);
+		scrollback_db_save (db, "#bootpending", 1000, "p1", "a", TRUE);
+		scrollback_db_save (db, "#bootpending", 200000, "pending:zzz", "b", TRUE);
+		scrollback_commit_transaction (db);
+		CHECK ("bootstrap pending finds hole", scrollback_gap_bootstrap (db, "#bootpending", 12 * 3600) == 1);
+		{
+			GList *l = scrollback_gap_list (db, "#bootpending");
+			CHECK ("bootstrap suppresses pending placeholder", g_list_length (l) == 1 &&
+				nth_gap (l, 0)->start_ts == 1000 &&
+				nth_gap (l, 0)->end_ts == 200000 &&
+				g_strcmp0 (nth_gap (l, 0)->start_msgid, "p1") == 0 &&
+				nth_gap (l, 0)->end_msgid == NULL);
+			scrollback_gap_list_free (l);
+		}
+	}
+
 	printf (failures ? "RESULT: %d FAILURES\n" : "RESULT: ALL PASS\n", failures);
 	return failures ? 1 : 0;
 }
