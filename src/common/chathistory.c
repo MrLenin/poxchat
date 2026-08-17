@@ -1182,13 +1182,12 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 
 		if (sess->catchup_in_progress)
 		{
-			/* A failed catchup LATEST previously left latest_pending
-			 * stranded, which blocked the BEFORE phase forever. */
-			if (was_catchup_latest && serv->chathistory_latest_pending > 0)
-				serv->chathistory_latest_pending--;
-
 			/* Catch-up: server rejected our reference.  If we used a
-			 * msgid the server doesn't recognise, retry with timestamp. */
+			 * msgid the server doesn't recognise, retry with timestamp.
+			 * The retry is a continuation of the same LATEST-phase
+			 * generation for this session — don't touch latest_pending
+			 * here, or it gets decremented twice for one increment
+			 * (once now, once when the retry itself later completes). */
 			if (!serv->chathistory_suppressed &&
 			    used_msgid && sess->scrollback_newest_time > 0)
 			{
@@ -1199,6 +1198,12 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 				                            prefs.hex_irc_chathistory_lines);
 				return;
 			}
+			/* A failed catchup LATEST previously left latest_pending
+			 * stranded, which blocked the BEFORE phase forever.  Only
+			 * decrement here, in the no-retry branch, once this
+			 * session's LATEST-phase generation has actually ended. */
+			if (was_catchup_latest && serv->chathistory_latest_pending > 0)
+				serv->chathistory_latest_pending--;
 			/* All fallbacks exhausted — finish with whatever we have */
 			finish_catchup (sess);
 			if (serv->chathistory_latest_pending == 0)
