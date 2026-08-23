@@ -96,6 +96,18 @@ jobs:
           path: C:\gtk-build
           key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ github.run_id }}
 
+      # poxchat.props names the import libraries it wants in DepLibs, and
+      # gvsbuild does not always spell them the same way -- listing what is
+      # actually in the prefix turns a one-name-per-run guessing game into a
+      # single diff against that list.
+      - name: Inventory the dependency prefix
+        run: |
+          $prefix = 'C:\gtk-build\gtk\x64\release'
+          Write-Host '--- lib ---'
+          (Get-ChildItem "$prefix\lib\*.lib" | ForEach-Object Name) -join ' '
+          Write-Host '--- bin ---'
+          (Get-ChildItem "$prefix\bin\*.dll" | ForEach-Object Name) -join ' '
+
       - uses: microsoft/setup-msbuild@v2
 
       - name: Read version

@@ -174,6 +174,19 @@ for ($attempt = 1; $attempt -le $attempts; $attempt++) {
 	Start-Sleep -Seconds 30
 }
 
+# gvsbuild builds libcurl with CMake, which names the import library
+# libcurl_imp.lib -- gvsbuild patches libcurl.pc for exactly this reason.
+# DepLibs in poxchat.props asks for libcurl.lib, the name curl's own Windows
+# builds use, so give it that name; same fixup as websockets_static.lib below.
+$curlImp = Join-Path $prefix 'lib\libcurl_imp.lib'
+$curlLib = Join-Path $prefix 'lib\libcurl.lib'
+if (-not (Test-Path $curlLib)) {
+	if (-not (Test-Path $curlImp)) {
+		throw "neither libcurl.lib nor libcurl_imp.lib in $prefix\lib"
+	}
+	Copy-Item $curlImp $curlLib -Force
+}
+
 Write-Step 'jansson (static)'
 $janssonSrc = Get-SourceTree "https://github.com/akheron/jansson/archive/refs/tags/$JanssonTag.zip" "jansson-$JanssonTag"
 $janssonBuild = Join-Path $janssonSrc 'build-ci'
