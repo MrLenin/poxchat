@@ -7,7 +7,7 @@
 		<YourDepsPath>c:\gtk-build\gtk4</YourDepsPath>
 		<YourGendefPath>c:\gtk-build\gendef</YourGendefPath>
 		<YourPerlPath>C:\Strawberry\perl</YourPerlPath>
-		<YourPython3Path>C:\Python314\</YourPython3Path>
+		<YourPython3Path>C:\Python313\</YourPython3Path>
 		<YourWinSparklePath>c:\gtk-build\WinSparkle</YourWinSparklePath>
 		<!-- OpenSSL is not included in gvsbuild, install separately -->
 		<YourOpenSSLPath>C:\Program Files\OpenSSL</YourOpenSSLPath>

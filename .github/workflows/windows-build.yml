@@ -59,9 +59,18 @@ jobs:
         with:
           submodules: recursive
 
+      # 3.13 to match the rest of the python plugin's pins: Python3Lib
+      # (python313) in win32\poxchat.props, the embeddable runtime in
+      # build-deps.ps1, and the python313.* names in poxchat.iss.tt.  cffi is
+      # both a build dependency (generate_plugin.py renders python.c through
+      # it) and the source of the _cffi_backend.pyd that copy.vcxproj stages
+      # out of this interpreter's site-packages.
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
+
+      - name: Install cffi
+        run: python -m pip install --disable-pip-version-check cffi
 
       # The whole C:\gtk-build tree: install prefix, intermediates and source
       # archives.  The intermediates belong in here because gvsbuild's
@@ -107,19 +116,42 @@ jobs:
           if (-not $line) { throw 'no version in meson.build' }
           "version=$($line.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
 
-      # Split by target so a failure names the piece that broke.  perl, python3
-      # and htm (the C# theme manager) are left out until the rest is green:
-      # they need a matching Strawberry Perl / CPython / .NET on the runner.
-      # lua is out too, for want of a LuaJIT gvsbuild can build -- see
-      # build-deps.ps1.
+      # Split by target so a failure names the piece that broke.  perl is
+      # dropped deliberately, htm (the C# theme manager) needs a .NET toolchain
+      # nobody misses -- neither ships.  lua links the LuaJIT that
+      # build-deps.ps1 installs into the gvsbuild prefix; python3 links
+      # setup-python's import library and ships the embeddable runtime staged
+      # below.
       - name: Build core
         run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"poxchat\common;poxchat\fe-gtk;poxchat\fe-text"
 
       - name: Build plugins
-        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"plugins\checksum;plugins\exec;plugins\fishlim;plugins\sysinfo;plugins\winamp;plugins\upd;plugins\notifications-winrt;external\libenchant_win8"
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"plugins\checksum;plugins\exec;plugins\fishlim;plugins\sysinfo;plugins\winamp;plugins\upd;plugins\notifications-winrt;external\libenchant_win8;scripting\lua;scripting\python3"
 
       - name: Stage the distributable tree
         run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"release\nls;release\copy"
+
+      # The embeddable package from build-deps.ps1, minus its interpreter
+      # binaries (scripts run inside poxchat) and its signature catalog.
+      # Never overwrite: the tree already stages gvsbuild's sqlite3.dll, and
+      # python's _sqlite3.pyd is happy with any current sqlite beside it.
+      # Runs before the import check and smoke test so hcpython3.dll's
+      # python313.dll dependency is judged against the tree that ships.
+      - name: Stage the Python runtime
+        run: |
+          $rel = "${{ env.BUILD_DIR }}\x64\rel"
+          $skip = 'python.exe', 'pythonw.exe', 'python.cat'
+          Get-ChildItem C:\gtk-build\python-embed -File |
+            Where-Object { $skip -notcontains $_.Name } |
+            ForEach-Object {
+              $name = if ($_.Name -eq 'LICENSE.txt') { 'PYTHON-LICENSE.txt' } else { $_.Name }
+              $dest = Join-Path $rel $name
+              if (Test-Path $dest) {
+                Write-Host "keeping staged $name"
+              } else {
+                Copy-Item $_.FullName $dest
+              }
+            }
 
       # The smoke test below proves the tree runs, but STATUS_DLL_NOT_FOUND does
       # not say which DLL is missing, so name the whole set first -- same
