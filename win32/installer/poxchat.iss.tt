@@ -113,7 +113,6 @@ Source: "changelog.url"; DestDir: "{app}"; Flags: ignoreversion; Components: lib
 Source: "readme.url"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
 Source: "share\xml\*"; DestDir: "{app}\share\xml"; Flags: ignoreversion createallsubdirs recursesubdirs; Components: libs
 Source: "share\doc\*"; DestDir: "{app}\share\doc"; Flags: ignoreversion createallsubdirs recursesubdirs; Components: libs
-Source: "share\themes\MS-Windows\*"; DestDir: "{app}\share\themes\MS-Windows"; Flags: ignoreversion createallsubdirs recursesubdirs; Components: libs
 Source: "share\locale\*"; DestDir: "{app}\share\locale"; Flags: ignoreversion createallsubdirs recursesubdirs; Components: translations
 Source: "etc\fonts\*"; DestDir: "{app}\etc\fonts"; Flags: ignoreversion createallsubdirs recursesubdirs; Components: libs
 
@@ -161,6 +160,7 @@ Source: "plugins\hcnotifications-winrt.dll"; DestDir: "{app}\plugins"; Flags: ig
 
 ; Enchant spell checking (optional - may not be installed)
 Source: "libenchant-2.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
+Source: "libenchant.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
 Source: "lib\enchant-2\*"; DestDir: "{app}\lib\enchant-2"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
 
 ; GTK4 uses CSS theming only - no theme engine DLLs needed

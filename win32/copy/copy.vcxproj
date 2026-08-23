@@ -79,7 +79,6 @@
     <TrayIcons Include="..\..\data\icons\tray_*.ico" />
     <DepsRootDocs Include="$(DepsRoot)\share\doc\**\*" />
     <Locale Include="$(PoxChatBin)locale\**\*;$(DepsRoot)\share\locale\**\*" />
-    <MSWindowsTheme Include="$(DepsRoot)\share\themes\MS-Windows\**\*" />
     <!-- GSettings schemas (required for GTK color chooser, file chooser, etc.) -->
     <GSettingsSchemas Include="$(DepsRoot)\share\glib-2.0\schemas\gschemas.compiled" />
     <GSettingsSchemas Include="$(DepsRoot)\share\glib-2.0\schemas\org.gtk.gtk4.Settings.ColorChooser.gschema.xml" />
@@ -131,7 +130,6 @@
     <!-- Enchant hunspell provider (optional) -->
     <Copy SourceFiles="$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll" DestinationFolder="$(PoxChatRel)\lib\enchant-2" Condition="Exists('$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll')" />
     <Copy SourceFiles="@(Locale)" DestinationFiles="@(Locale->'$(PoxChatRel)\share\locale\%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Copy SourceFiles="@(MSWindowsTheme)" DestinationFiles="@(MSWindowsTheme->'$(PoxChatRel)\share\themes\MS-Windows\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="@(LuaShare)" DestinationFiles="@(LuaShare->'$(PoxChatRel)\share\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="@(LuaLib)" DestinationFiles="@(LuaLib->'$(PoxChatRel)\lib\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="@(Typelib)" DestinationFiles="@(Typelib->'$(PoxChatRel)\lib\girepository-1.0\%(Filename)%(Extension)')" />

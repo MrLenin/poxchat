@@ -183,15 +183,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
           "path=$out" >> $env:GITHUB_OUTPUT
 
-      - name: Build installer
-        if: inputs.installer
-        run: .\win32\ci\make-installer.ps1 -BuildDir "${{ env.BUILD_DIR }}" -Provision
-
       - name: Upload portable build
         uses: actions/upload-artifact@v4
         with:
           name: poxchat-x64-portable
           path: ${{ steps.portable.outputs.path }}
+
+      - name: Build installer
+        if: inputs.installer
+        run: .\win32\ci\make-installer.ps1 -BuildDir "${{ env.BUILD_DIR }}" -Provision
 
       - name: Upload installer
         if: inputs.installer
