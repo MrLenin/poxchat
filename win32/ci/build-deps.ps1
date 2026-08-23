@@ -8,12 +8,17 @@
 	solution's UserMacros point at:
 
 	  gtk\<plat>\release  gvsbuild prefix: GTK4, OpenSSL, libxml2, sqlite,
-	                      luajit, libcurl, enchant, and gettext (win32\nls
-	                      compiles the .po catalogues with its msgfmt.exe)
+	                      libcurl, enchant, and gettext (win32\nls compiles
+	                      the .po catalogues with its msgfmt.exe).  LuaJIT is
+	                      built below and installed into this prefix, which is
+	                      where poxchat.props looks for lua51.lib and
+	                      include\luajit-2.1
 	  jansson\            static jansson -- DepLibs wants jansson.lib and
 	                      copy.vcxproj ships no jansson dll
 	  libwebsockets\      static libwebsockets, same reasoning
 	  WinSparkle\<plat>\  prebuilt release, for the upd plugin
+	  python-embed\       CPython embeddable runtime, staged whole into the
+	                      tree so the python plugin needs no system Python
 	  cert\cacert.pem     CA bundle, shipped into the tree as cert.pem
 
 	Nothing outside -BuildRoot is written, so this is safe to run on a developer
@@ -33,6 +38,15 @@ param (
 	[string] $JanssonTag = 'v2.15.1',
 	[string] $LibWebSocketsTag = 'v4.5.8',
 	[string] $WinSparkleVersion = '0.9.4',
+	# LuaJIT's v2.1 branch is release-less by policy, so pin a commit rather
+	# than the floating v2.1.ROLLING tag.
+	[string] $LuaJITCommit = '1ee778a4e37122d8ca7d5733c590a47dafd6b15c',
+	# The runtime the python plugin ships.  Its minor version is load-bearing
+	# in three other places -- Python3Lib in win32\poxchat.props, setup-python
+	# in the workflow, and the python313.* names in poxchat.iss.tt -- so bump
+	# all four together, and the hash with the version.
+	[string] $PythonEmbedVersion = '3.13.9',
+	[string] $PythonEmbedSha256 = '91d828c2da3a029b41699e918674a0cb379c02cf20dab9c501306885f837402a',
 	[string] $CMakeGenerator = 'Visual Studio 17 2022'
 )
 
@@ -42,13 +56,12 @@ $ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest crawls with the pro
 # gvsbuild project names, not pkg-config names.  gettext is here for msgfmt.exe,
 # which win32\nls compiles the .po catalogues with.
 #
-# luajit is absent, and with it lgi (which depends on it) and --enable-gi (which
-# exists to produce lgi's typelibs).  gvsbuild builds luajit by running
-# '.\msvcbuild' through CreateProcess, which cannot launch a .bat file and finds
-# nothing without the extension -- it fails identically every time, so the lua
-# plugin is out of the first build.  Re-adding it means building LuaJIT here the
-# way jansson and libwebsockets are built below; the installer script also names
-# lua and lgi files unconditionally, so that has to be settled at the same time.
+# luajit is deliberately not asked of gvsbuild: it runs '.\msvcbuild' through
+# CreateProcess, which cannot launch a .bat file and finds nothing without the
+# extension -- it fails identically every time.  LuaJIT is built directly below
+# instead.  lgi and --enable-gi (which exists to produce lgi's typelibs) stay
+# out with it: the lua plugin itself needs neither, they were only ever for
+# GObject bindings inside Lua scripts.
 $GvsbuildProjects = @(
 	'gtk4',
 	'openssl',
@@ -230,6 +243,68 @@ if (Test-Path $lwsStatic) {
 	Copy-Item $lwsStatic (Join-Path $lwsPrefix 'lib\websockets.lib') -Force
 }
 
+Write-Step 'LuaJIT'
+# msvcbuild.bat wants cl on PATH and to be run from src\.  Doing the vcvars
+# call and the cd inside a generated .cmd sidesteps cmd /c's quote-stripping
+# rules, which would otherwise eat the spaces in the Visual Studio path.
+# msvcbuild.bat does not reliably set an exit code, so the proof of success is
+# the artifacts themselves, checked below.  Always a full rebuild, but that is
+# under a minute.
+$ljSrc = Get-SourceTree "https://github.com/LuaJIT/LuaJIT/archive/$LuaJITCommit.zip" "LuaJIT-$($LuaJITCommit.Substring(0, 12))"
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+$vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if (-not $vsRoot) {
+	throw 'vswhere found no Visual Studio with the C++ toolset'
+}
+$vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+$ljBuild = Join-Path $srcRoot 'build-luajit.cmd'
+@(
+	"call `"$vcvars`" || exit /b 1",
+	"cd /d `"$ljSrc\src`" || exit /b 1",
+	'call msvcbuild.bat'
+) | Set-Content -Path $ljBuild -Encoding ascii
+Invoke-Checked 'LuaJIT msvcbuild' { cmd /c $ljBuild }
+foreach ($artifact in 'lua51.dll', 'lua51.lib') {
+	if (-not (Test-Path (Join-Path $ljSrc "src\$artifact"))) {
+		throw "LuaJIT build produced no $artifact"
+	}
+}
+# Install into the gvsbuild prefix, in the layout poxchat.props expects:
+# LuaInclude points at include\luajit-2.1, lua.vcxproj links lua51.lib out of
+# the shared lib dir, and copy.vcxproj stages bin\lua51.dll when it exists.
+$ljInclude = Join-Path $prefix 'include\luajit-2.1'
+New-Item -ItemType Directory -Force -Path $ljInclude | Out-Null
+Copy-Item (Join-Path $ljSrc 'src\lua51.dll') (Join-Path $prefix 'bin') -Force
+Copy-Item (Join-Path $ljSrc 'src\lua51.lib') (Join-Path $prefix 'lib') -Force
+foreach ($header in 'lua.h', 'luaconf.h', 'lualib.h', 'lauxlib.h', 'lua.hpp', 'luajit.h') {
+	Copy-Item (Join-Path $ljSrc "src\$header") $ljInclude -Force
+}
+
+Write-Step "CPython $PythonEmbedVersion embeddable runtime"
+# The python plugin is a cffi embedding: hcpython3.dll links python313.dll and
+# needs a stdlib beside it at run time.  The embeddable package is CPython's
+# designed-for-this layout -- python313.dll, python313.zip, python313._pth
+# (whose '.' entry keeps the install dir on sys.path, where copy.vcxproj also
+# drops _cffi_backend*.pyd), and the stdlib's extension modules.  The workflow
+# stages this directory into the tree after the copy project runs.
+$pyDir = Join-Path $BuildRoot 'python-embed'
+$pyZip = Join-Path $srcRoot "python-$PythonEmbedVersion-embed-amd64.zip"
+New-Item -ItemType Directory -Force -Path $srcRoot | Out-Null
+if (-not (Test-Path $pyZip)) {
+	$pyUrl = "https://www.python.org/ftp/python/$PythonEmbedVersion/python-$PythonEmbedVersion-embed-amd64.zip"
+	Write-Host "downloading $pyUrl"
+	Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip -UseBasicParsing
+}
+$pyDigest = (Get-FileHash -Path $pyZip -Algorithm SHA256).Hash
+if ($pyDigest -ne $PythonEmbedSha256.ToUpper()) {
+	Remove-Item $pyZip -Force
+	throw "python embeddable zip hashed $pyDigest, expected $PythonEmbedSha256"
+}
+if (Test-Path $pyDir) {
+	Remove-Item $pyDir -Recurse -Force
+}
+Expand-Archive -Path $pyZip -DestinationPath $pyDir -Force
+
 Write-Step 'WinSparkle'
 $wsPrefix = Join-Path $BuildRoot "WinSparkle\$Platform"
 $wsSrc = Get-SourceTree "https://github.com/vslavik/winsparkle/releases/download/v$WinSparkleVersion/WinSparkle-$WinSparkleVersion.zip" "WinSparkle-$WinSparkleVersion"
@@ -268,7 +343,8 @@ New-Item -ItemType Directory -Force -Path $certDir | Out-Null
 Invoke-WebRequest -Uri 'https://curl.se/ca/cacert.pem' -OutFile (Join-Path $certDir 'cacert.pem') -UseBasicParsing
 
 Write-Step 'done'
-Write-Host "gvsbuild prefix:  $prefix"
+Write-Host "gvsbuild prefix:  $prefix (LuaJIT installed into it)"
 Write-Host "jansson:          $janssonPrefix"
 Write-Host "libwebsockets:    $lwsPrefix"
 Write-Host "WinSparkle:       $wsPrefix"
+Write-Host "python runtime:   $pyDir"
