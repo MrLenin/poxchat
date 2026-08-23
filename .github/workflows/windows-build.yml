@@ -1,0 +1,162 @@
+name: Windows Build
+
+on:
+  push:
+    # TEMPORARY: ci/** is here so this can be iterated on without merging to
+    # master first.  Drop it once the build is green.
+    branches: [master, 'ci/**']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      installer:
+        description: Also build the Inno Setup installer
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  # Bump to invalidate the dependency cache without editing build-deps.ps1 --
+  # e.g. when a new gvsbuild release should be picked up.
+  DEPS_CACHE_EPOCH: '1'
+  BUILD_DIR: ${{ github.workspace }}\poxchat-build
+
+  # poxchat.props keeps its UserMacros environment-specific on purpose, so CI
+  # overrides them from the command line rather than editing the file.
+  # PoxChatBuild moves the output tree inside the workspace; its default puts it
+  # a level above the checkout.
+  MSBUILD_PROPS: >-
+    /nologo /m /v:minimal
+    /p:Configuration=Release
+    /p:Platform=x64
+    /p:PoxChatBuild=${{ github.workspace }}\poxchat-build
+    /p:YourDepsPath=C:\gtk-build\gtk
+    /p:YourOpenSSLPath=C:\gtk-build\gtk\x64\release
+    /p:YourLibCurlPath=C:\gtk-build\gtk\x64\release
+    /p:YourJanssonPath=C:\gtk-build\jansson
+    /p:YourLibWebSocketsPath=C:\gtk-build\libwebsockets
+    /p:YourWinSparklePath=C:\gtk-build\WinSparkle
+    /p:YourCACertPath=C:\gtk-build\cert\cacert.pem
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # A cold build of the GTK stack takes 1-2 hours; a warm one restores in
+      # minutes.  Only the install prefixes are cached, not gvsbuild's sources
+      # and intermediates, which are far larger and of no use to us.
+      - name: Restore dependency stack
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\gtk-build\gtk\x64\release
+            C:\gtk-build\jansson
+            C:\gtk-build\libwebsockets
+            C:\gtk-build\WinSparkle
+            C:\gtk-build\cert
+          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ hashFiles('win32/ci/build-deps.ps1') }}
+
+      - name: Build dependency stack
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: .\win32\ci\build-deps.ps1
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Read version
+        id: version
+        run: |
+          $line = Select-String -Path meson.build -Pattern "^\s+version: '([^']+)'," | Select-Object -First 1
+          if (-not $line) { throw 'no version in meson.build' }
+          "version=$($line.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
+      # Split by target so a failure names the piece that broke.  perl, python3
+      # and htm (the C# theme manager) are left out until the rest is green:
+      # they need a matching Strawberry Perl / CPython / .NET on the runner.
+      - name: Build core
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /t:"poxchat\common;poxchat\fe-gtk;poxchat\fe-text"
+
+      - name: Build plugins
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /t:"plugins\checksum;plugins\exec;plugins\fishlim;plugins\sysinfo;plugins\winamp;plugins\upd;plugins\notifications-winrt;scripting\lua;external\libenchant_win8"
+
+      - name: Stage the distributable tree
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /t:"release\nls;release\copy"
+
+      # The staged tree is what ships, so run the binaries from it: a missing
+      # DLL kills the process immediately with STATUS_DLL_NOT_FOUND (0xC0000135)
+      # rather than showing up later as a user unzipping a broken build.
+      #
+      # poxchat-text.exe --version prints and exits.  poxchat.exe --version puts
+      # the string in a modal dialog on Windows, so surviving past gtk_init is
+      # the pass condition there, and we kill it afterwards.
+      - name: Smoke test the staged tree
+        run: |
+          $rel = "${{ env.BUILD_DIR }}\x64\rel"
+
+          $text = Join-Path $rel 'poxchat-text.exe'
+          if (-not (Test-Path $text)) { throw 'poxchat-text.exe missing from the staged tree' }
+          & $text --version
+          if ($LASTEXITCODE -ne 0) {
+            throw ("poxchat-text.exe --version exited with 0x{0:X8}" -f $LASTEXITCODE)
+          }
+
+          $gui = Join-Path $rel 'poxchat.exe'
+          if (-not (Test-Path $gui)) { throw 'poxchat.exe missing from the staged tree' }
+          $proc = Start-Process -FilePath $gui -ArgumentList '--version' -PassThru
+          if ($proc.WaitForExit(30000)) {
+            if ($proc.ExitCode -ne 0) {
+              throw ("poxchat.exe --version exited with 0x{0:X8}" -f $proc.ExitCode)
+            }
+          } else {
+            Write-Host 'poxchat.exe reached its version dialog; killing it'
+            $proc.Kill()
+          }
+
+      # copy.vcxproj already drops a portable-mode marker in the tree, which is
+      # what makes it keep its config beside the binary.
+      - name: Package portable zip
+        id: portable
+        run: |
+          $rel = "${{ env.BUILD_DIR }}\x64\rel"
+          $name = "PoxChat-${{ steps.version.outputs.version }}-x64-portable.zip"
+          $out = Join-Path "${{ github.workspace }}" $name
+          7z a -tzip -mx=7 "$out" "$rel\*" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+          "path=$out" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer
+        if: inputs.installer
+        run: .\win32\ci\make-installer.ps1 -BuildDir "${{ env.BUILD_DIR }}" -Provision
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: poxchat-x64-portable
+          path: ${{ steps.portable.outputs.path }}
+
+      - name: Upload installer
+        if: inputs.installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: poxchat-x64-installer
+          path: ${{ env.BUILD_DIR }}\x64\*.exe
