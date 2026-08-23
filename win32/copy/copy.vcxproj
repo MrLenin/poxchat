@@ -51,6 +51,9 @@
     <None Include="$(DepsRoot)\bin\pcre2-8-0.dll" />
     <None Include="$(DepsRoot)\bin\zlib1.dll" />
     <None Include="$(DepsRoot)\bin\epoxy-0.dll" />
+    <!-- sqlite3.lib in DepLibs is gvsbuild's import library, not a static
+         build, so the scrollback store needs the DLL beside the exe -->
+    <None Include="$(DepsRoot)\bin\sqlite3.dll" />
     <!-- OpenSSL from separate install -->
     <None Include="$(OpenSSLRoot)\bin\libcrypto-3-x64.dll" />
     <None Include="$(OpenSSLRoot)\bin\libssl-3-x64.dll" />
@@ -101,9 +104,12 @@
     <OptionalFiles Include="$(DepsRoot)\bin\soup-3.0-0.dll" Condition="Exists('$(DepsRoot)\bin\soup-3.0-0.dll')" />
     <!-- Enchant is optional - may be installed separately -->
     <OptionalFiles Include="$(DepsRoot)\bin\libenchant-2.dll" Condition="Exists('$(DepsRoot)\bin\libenchant-2.dll')" />
+    <OptionalFiles Include="$(DepsRoot)\bin\libenchant.dll" Condition="Exists('$(DepsRoot)\bin\libenchant.dll')" />
     <!-- libcurl for OAuth2 (optional - may be installed separately) -->
     <OptionalFiles Include="$(LibCurlRoot)\bin\libcurl.dll" Condition="Exists('$(LibCurlRoot)\bin\libcurl.dll')" />
     <OptionalFiles Include="$(LibCurlRoot)\bin\libcurl-x64.dll" Condition="Exists('$(LibCurlRoot)\bin\libcurl-x64.dll')" />
+    <!-- libcurl imports libpsl, so it travels with libcurl -->
+    <OptionalFiles Include="$(DepsRoot)\bin\psl-5.dll" Condition="Exists('$(DepsRoot)\bin\psl-5.dll')" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

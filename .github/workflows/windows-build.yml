@@ -106,7 +106,7 @@ jobs:
           Write-Host '--- lib ---'
           (Get-ChildItem "$prefix\lib\*.lib" | ForEach-Object Name) -join ' '
           Write-Host '--- bin ---'
-          (Get-ChildItem "$prefix\bin\*.dll" | ForEach-Object Name) -join ' '
+          (Get-ChildItem "$prefix\bin\*.dll", "$prefix\bin\*.exe" | ForEach-Object Name) -join ' '
 
       - uses: microsoft/setup-msbuild@v2
 
@@ -130,6 +130,16 @@ jobs:
 
       - name: Stage the distributable tree
         run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"release\nls;release\copy"
+
+      # The smoke test below proves the tree runs, but STATUS_DLL_NOT_FOUND does
+      # not say which DLL is missing, so name the whole set first -- same
+      # reasoning as the inventory step: one runner cycle per missing file is
+      # the slow way to find them.
+      - name: Check the staged tree's imports
+        run: >-
+          .\win32\ci\check-imports.ps1
+          -Root "${{ env.BUILD_DIR }}\x64\rel"
+          -Prefix C:\gtk-build\gtk\x64\release\bin,C:\gtk-build\WinSparkle\x64
 
       # The staged tree is what ships, so run the binaries from it: a missing
       # DLL kills the process immediately with STATUS_DLL_NOT_FOUND (0xC0000135)
