@@ -71,15 +71,15 @@ function Get-PeImports ([string] $Path)
 	# The section table follows the optional header and is what turns an RVA
 	# into a file offset.
 	$sections = @()
-	$s = $opt + $optSize
-	for ($i = 0; $i -lt $sectionCount; $i++, $s += 40) {
-		if ($s + 40 -gt $bytes.Length) { break }
-		$virtual = [BitConverter]::ToUInt32($bytes, $s + 8)
-		$raw = [BitConverter]::ToUInt32($bytes, $s + 16)
+	for ($i = 0; $i -lt $sectionCount; $i++) {
+		$at = $opt + $optSize + $i * 40
+		if ($at + 40 -gt $bytes.Length) { break }
+		$virtual = [BitConverter]::ToUInt32($bytes, $at + 8)
+		$raw = [BitConverter]::ToUInt32($bytes, $at + 16)
 		$sections += [pscustomobject]@{
-			Rva = [BitConverter]::ToUInt32($bytes, $s + 12)
+			Rva = [BitConverter]::ToUInt32($bytes, $at + 12)
 			Span = [Math]::Max($virtual, $raw)
-			File = [BitConverter]::ToUInt32($bytes, $s + 20)
+			File = [BitConverter]::ToUInt32($bytes, $at + 20)
 		}
 	}
 
