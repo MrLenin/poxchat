@@ -14,8 +14,14 @@ when re-enabling one of the targets it currently leaves out.
 | `win32/ci/make-installer.ps1` | Generates `poxchat.iss` from its template and runs Inno Setup 5 |
 
 A cold dependency stack is about three quarters of an hour; warm, a run is
-roughly 15 minutes. That ratio is why the cache key is deliberately per-run
-with a `restore-keys` prefix, so a failure part way through still resumes.
+roughly 15 minutes. That ratio is why `C:\gtk-build` is cached whole and keyed
+on `build-deps.ps1`'s hash, with a `restore-keys` prefix so that editing the
+script resumes from the previous stack instead of rebuilding it. Bump
+`DEPS_CACHE_EPOCH` when you want a deliberate clean slate.
+
+Cache scope is worth knowing: a pull request run can read caches from its base
+branch, not from the topic branch the work was done on, so the first PR run
+after a branch has been iterating in isolation pays for a cold stack.
 
 ## The rule that matters: never learn one fact per run
 

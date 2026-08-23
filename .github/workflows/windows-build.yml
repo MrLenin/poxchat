@@ -2,9 +2,7 @@ name: Windows Build
 
 on:
   push:
-    # TEMPORARY: ci/** is here so this can be iterated on without merging to
-    # master first.  Drop it once the build is green.
-    branches: [master, 'ci/**']
+    branches: [master]
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -65,36 +63,28 @@ jobs:
         with:
           python-version: '3.12'
 
-      # TEMPORARY, like the ci/** trigger: a rolling cache of the whole
-      # C:\gtk-build tree -- install prefix, intermediates and archives -- keyed
-      # per run and restored from the newest previous one.  A cold GTK stack is
-      # three quarters of an hour, and without this every failure part way
-      # through pays that again from scratch.  The intermediates are in here
-      # because gvsbuild's --fast-build decides what to skip by reading
-      # .wingtk-built markers out of the build tree, not the prefix.  The key
-      # deliberately omits the script hash, so editing build-deps.ps1 still
-      # resumes; bump DEPS_CACHE_EPOCH for a clean slate.  Once the build is
-      # green this becomes a plain actions/cache keyed on the script hash.
-      - name: Restore dependency stack
-        uses: actions/cache/restore@v4
+      # The whole C:\gtk-build tree: install prefix, intermediates and source
+      # archives.  The intermediates belong in here because gvsbuild's
+      # --fast-build decides what to skip by reading .wingtk-built markers out
+      # of the build tree, not out of the prefix.
+      #
+      # A cold stack is three quarters of an hour, so restore-keys lets an
+      # edited build-deps.ps1 resume from the previous one rather than pay that
+      # again; bump DEPS_CACHE_EPOCH for a deliberate clean slate.
+      - name: Dependency stack
+        uses: actions/cache@v4
         with:
           path: C:\gtk-build
-          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ github.run_id }}
+          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ hashFiles('win32/ci/build-deps.ps1') }}
           restore-keys: |
             win-deps-${{ env.DEPS_CACHE_EPOCH }}-
 
       # Always run, never skipped on a cache hit: with a complete stack restored
       # this is a quick no-op, and it is the only thing that can tell a complete
-      # stack from a half-built one.
+      # stack from a half-built one -- a partial hit through restore-keys is
+      # exactly that.
       - name: Build dependency stack
         run: .\win32\ci\build-deps.ps1
-
-      - name: Save dependency stack
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: C:\gtk-build
-          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ github.run_id }}
 
       # poxchat.props names the import libraries it wants in DepLibs, and
       # gvsbuild does not always spell them the same way -- listing what is
