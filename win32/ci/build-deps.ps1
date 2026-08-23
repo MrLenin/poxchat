@@ -247,13 +247,20 @@ foreach ($file in 'WinSparkle.dll', 'WinSparkle.lib') {
 	}
 	Copy-Item $found.FullName $wsPrefix -Force
 }
-foreach ($file in 'winsparkle.h', 'COPYING') {
-	$found = Get-ChildItem -Path $wsSrc -Recurse -Filter $file | Select-Object -First 1
-	if (-not $found) {
-		throw "no $file in the WinSparkle $WinSparkleVersion zip"
-	}
-	Copy-Item $found.FullName $wsPrefix -Force
+# winsparkle.h includes winsparkle-version.h, so take the whole include
+# directory rather than naming the headers -- upd.vcxproj compiles against
+# whatever this release ships, not a list written here.
+$header = Get-ChildItem -Path $wsSrc -Recurse -Filter 'winsparkle.h' | Select-Object -First 1
+if (-not $header) {
+	throw "no winsparkle.h in the WinSparkle $WinSparkleVersion zip"
 }
+Copy-Item (Join-Path $header.Directory.FullName '*.h') $wsPrefix -Force
+
+$copying = Get-ChildItem -Path $wsSrc -Recurse -Filter 'COPYING' | Select-Object -First 1
+if (-not $copying) {
+	throw "no COPYING in the WinSparkle $WinSparkleVersion zip"
+}
+Copy-Item $copying.FullName $wsPrefix -Force
 
 Write-Step 'CA bundle'
 $certDir = Join-Path $BuildRoot 'cert'
