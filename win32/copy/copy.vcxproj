@@ -51,6 +51,9 @@
     <None Include="$(DepsRoot)\bin\pcre2-8-0.dll" />
     <None Include="$(DepsRoot)\bin\zlib1.dll" />
     <None Include="$(DepsRoot)\bin\epoxy-0.dll" />
+    <!-- sqlite3.lib in DepLibs is gvsbuild's import library, not a static
+         build, so the scrollback store needs the DLL beside the exe -->
+    <None Include="$(DepsRoot)\bin\sqlite3.dll" />
     <!-- OpenSSL from separate install -->
     <None Include="$(OpenSSLRoot)\bin\libcrypto-3-x64.dll" />
     <None Include="$(OpenSSLRoot)\bin\libssl-3-x64.dll" />
@@ -76,7 +79,6 @@
     <TrayIcons Include="..\..\data\icons\tray_*.ico" />
     <DepsRootDocs Include="$(DepsRoot)\share\doc\**\*" />
     <Locale Include="$(PoxChatBin)locale\**\*;$(DepsRoot)\share\locale\**\*" />
-    <MSWindowsTheme Include="$(DepsRoot)\share\themes\MS-Windows\**\*" />
     <!-- GSettings schemas (required for GTK color chooser, file chooser, etc.) -->
     <GSettingsSchemas Include="$(DepsRoot)\share\glib-2.0\schemas\gschemas.compiled" />
     <GSettingsSchemas Include="$(DepsRoot)\share\glib-2.0\schemas\org.gtk.gtk4.Settings.ColorChooser.gschema.xml" />
@@ -101,9 +103,17 @@
     <OptionalFiles Include="$(DepsRoot)\bin\soup-3.0-0.dll" Condition="Exists('$(DepsRoot)\bin\soup-3.0-0.dll')" />
     <!-- Enchant is optional - may be installed separately -->
     <OptionalFiles Include="$(DepsRoot)\bin\libenchant-2.dll" Condition="Exists('$(DepsRoot)\bin\libenchant-2.dll')" />
+    <OptionalFiles Include="$(DepsRoot)\bin\libenchant.dll" Condition="Exists('$(DepsRoot)\bin\libenchant.dll')" />
     <!-- libcurl for OAuth2 (optional - may be installed separately) -->
     <OptionalFiles Include="$(LibCurlRoot)\bin\libcurl.dll" Condition="Exists('$(LibCurlRoot)\bin\libcurl.dll')" />
     <OptionalFiles Include="$(LibCurlRoot)\bin\libcurl-x64.dll" Condition="Exists('$(LibCurlRoot)\bin\libcurl-x64.dll')" />
+    <!-- libcurl imports libpsl, which imports ICU, so the whole chain
+         travels with libcurl.  Wildcards rather than Exists conditions:
+         the ICU DLLs carry their major version in the name, and a stale
+         literal would silently stage nothing. -->
+    <OptionalFiles Include="$(DepsRoot)\bin\psl-5.dll" Condition="Exists('$(DepsRoot)\bin\psl-5.dll')" />
+    <OptionalFiles Include="$(DepsRoot)\bin\icuuc*.dll" />
+    <OptionalFiles Include="$(DepsRoot)\bin\icudt*.dll" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
@@ -120,7 +130,6 @@
     <!-- Enchant hunspell provider (optional) -->
     <Copy SourceFiles="$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll" DestinationFolder="$(PoxChatRel)\lib\enchant-2" Condition="Exists('$(DepsRoot)\lib\enchant-2\enchant_hunspell.dll')" />
     <Copy SourceFiles="@(Locale)" DestinationFiles="@(Locale->'$(PoxChatRel)\share\locale\%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Copy SourceFiles="@(MSWindowsTheme)" DestinationFiles="@(MSWindowsTheme->'$(PoxChatRel)\share\themes\MS-Windows\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="@(LuaShare)" DestinationFiles="@(LuaShare->'$(PoxChatRel)\share\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="@(LuaLib)" DestinationFiles="@(LuaLib->'$(PoxChatRel)\lib\lua\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="@(Typelib)" DestinationFiles="@(Typelib->'$(PoxChatRel)\lib\girepository-1.0\%(Filename)%(Extension)')" />

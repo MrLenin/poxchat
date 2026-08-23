@@ -1,0 +1,191 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      installer:
+        description: Also build the Inno Setup installer
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  # Bump to invalidate the dependency cache without editing build-deps.ps1 --
+  # e.g. when a new gvsbuild release should be picked up.
+  DEPS_CACHE_EPOCH: '1'
+  BUILD_DIR: ${{ github.workspace }}\poxchat-build
+
+  # poxchat.props keeps its UserMacros environment-specific on purpose, so CI
+  # overrides them from the command line rather than editing the file.
+  # YourPython3Path is not here: common's pre-build event runs make-te.py and
+  # glib-genmarshal through it, and the interpreter's path is only known once
+  # setup-python has run, so each msbuild step passes it itself.
+  # PoxChatBuild moves the output tree inside the workspace; its default puts it
+  # a level above the checkout.
+  MSBUILD_PROPS: >-
+    /nologo /m /v:minimal
+    /p:Configuration=Release
+    /p:Platform=x64
+    /p:PoxChatBuild=${{ github.workspace }}\poxchat-build
+    /p:YourDepsPath=C:\gtk-build\gtk
+    /p:YourOpenSSLPath=C:\gtk-build\gtk\x64\release
+    /p:YourLibCurlPath=C:\gtk-build\gtk\x64\release
+    /p:YourJanssonPath=C:\gtk-build\jansson
+    /p:YourLibWebSocketsPath=C:\gtk-build\libwebsockets
+    /p:YourWinSparklePath=C:\gtk-build\WinSparkle
+    /p:YourCACertPath=C:\gtk-build\cert\cacert.pem
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The whole C:\gtk-build tree: install prefix, intermediates and source
+      # archives.  The intermediates belong in here because gvsbuild's
+      # --fast-build decides what to skip by reading .wingtk-built markers out
+      # of the build tree, not out of the prefix.
+      #
+      # A cold stack is three quarters of an hour, so restore-keys lets an
+      # edited build-deps.ps1 resume from the previous one rather than pay that
+      # again; bump DEPS_CACHE_EPOCH for a deliberate clean slate.
+      - name: Dependency stack
+        uses: actions/cache@v4
+        with:
+          path: C:\gtk-build
+          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ hashFiles('win32/ci/build-deps.ps1') }}
+          restore-keys: |
+            win-deps-${{ env.DEPS_CACHE_EPOCH }}-
+
+      # Always run, never skipped on a cache hit: with a complete stack restored
+      # this is a quick no-op, and it is the only thing that can tell a complete
+      # stack from a half-built one -- a partial hit through restore-keys is
+      # exactly that.
+      - name: Build dependency stack
+        run: .\win32\ci\build-deps.ps1
+
+      # poxchat.props names the import libraries it wants in DepLibs, and
+      # gvsbuild does not always spell them the same way -- listing what is
+      # actually in the prefix turns a one-name-per-run guessing game into a
+      # single diff against that list.
+      - name: Inventory the dependency prefix
+        run: |
+          $prefix = 'C:\gtk-build\gtk\x64\release'
+          Write-Host '--- lib ---'
+          (Get-ChildItem "$prefix\lib\*.lib" | ForEach-Object Name) -join ' '
+          Write-Host '--- bin ---'
+          (Get-ChildItem "$prefix\bin\*.dll", "$prefix\bin\*.exe" | ForEach-Object Name) -join ' '
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Read version
+        id: version
+        run: |
+          $line = Select-String -Path meson.build -Pattern "^\s+version: '([^']+)'," | Select-Object -First 1
+          if (-not $line) { throw 'no version in meson.build' }
+          "version=$($line.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
+      # Split by target so a failure names the piece that broke.  perl, python3
+      # and htm (the C# theme manager) are left out until the rest is green:
+      # they need a matching Strawberry Perl / CPython / .NET on the runner.
+      # lua is out too, for want of a LuaJIT gvsbuild can build -- see
+      # build-deps.ps1.
+      - name: Build core
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"poxchat\common;poxchat\fe-gtk;poxchat\fe-text"
+
+      - name: Build plugins
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"plugins\checksum;plugins\exec;plugins\fishlim;plugins\sysinfo;plugins\winamp;plugins\upd;plugins\notifications-winrt;external\libenchant_win8"
+
+      - name: Stage the distributable tree
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /p:YourPython3Path=$env:pythonLocation /t:"release\nls;release\copy"
+
+      # The smoke test below proves the tree runs, but STATUS_DLL_NOT_FOUND does
+      # not say which DLL is missing, so name the whole set first -- same
+      # reasoning as the inventory step: one runner cycle per missing file is
+      # the slow way to find them.
+      - name: Check the staged tree's imports
+        run: >-
+          .\win32\ci\check-imports.ps1
+          -Root "${{ env.BUILD_DIR }}\x64\rel"
+          -Prefix C:\gtk-build\gtk\x64\release\bin,C:\gtk-build\WinSparkle\x64
+
+      # The staged tree is what ships, so run the binaries from it: a missing
+      # DLL kills the process immediately with STATUS_DLL_NOT_FOUND (0xC0000135)
+      # rather than showing up later as a user unzipping a broken build.
+      #
+      # poxchat-text.exe --version prints and exits.  poxchat.exe --version puts
+      # the string in a modal dialog on Windows, so surviving past gtk_init is
+      # the pass condition there, and we kill it afterwards.
+      - name: Smoke test the staged tree
+        run: |
+          $rel = "${{ env.BUILD_DIR }}\x64\rel"
+
+          $text = Join-Path $rel 'poxchat-text.exe'
+          if (-not (Test-Path $text)) { throw 'poxchat-text.exe missing from the staged tree' }
+          & $text --version
+          if ($LASTEXITCODE -ne 0) {
+            throw ("poxchat-text.exe --version exited with 0x{0:X8}" -f $LASTEXITCODE)
+          }
+
+          $gui = Join-Path $rel 'poxchat.exe'
+          if (-not (Test-Path $gui)) { throw 'poxchat.exe missing from the staged tree' }
+          $proc = Start-Process -FilePath $gui -ArgumentList '--version' -PassThru
+          if ($proc.WaitForExit(30000)) {
+            if ($proc.ExitCode -ne 0) {
+              throw ("poxchat.exe --version exited with 0x{0:X8}" -f $proc.ExitCode)
+            }
+          } else {
+            Write-Host 'poxchat.exe reached its version dialog; killing it'
+            $proc.Kill()
+          }
+
+      # copy.vcxproj already drops a portable-mode marker in the tree, which is
+      # what makes it keep its config beside the binary.
+      - name: Package portable zip
+        id: portable
+        run: |
+          $rel = "${{ env.BUILD_DIR }}\x64\rel"
+          $name = "PoxChat-${{ steps.version.outputs.version }}-x64-portable.zip"
+          $out = Join-Path "${{ github.workspace }}" $name
+          7z a -tzip -mx=7 "$out" "$rel\*" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+          "path=$out" >> $env:GITHUB_OUTPUT
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: poxchat-x64-portable
+          path: ${{ steps.portable.outputs.path }}
+
+      - name: Build installer
+        if: inputs.installer
+        run: .\win32\ci\make-installer.ps1 -BuildDir "${{ env.BUILD_DIR }}" -Provision
+
+      - name: Upload installer
+        if: inputs.installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: poxchat-x64-installer
+          path: ${{ env.BUILD_DIR }}\x64\*.exe

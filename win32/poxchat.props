@@ -54,7 +54,10 @@
 		<Gtk>$(DepsRoot)\include\gtk-4.0;$(DepsRoot)\lib\gtk-4.0\include;$(DepsRoot)\include\cairo;$(DepsRoot)\include\harfbuzz;$(DepsRoot)\include\pango-1.0;$(DepsRoot)\include\gdk-pixbuf-2.0;$(DepsRoot)\include\graphene-1.0;$(DepsRoot)\lib\graphene-1.0\include</Gtk>
 		<!-- GTK4 libraries - note gtk-4.lib instead of gtk-3.lib, no separate gdk lib, added graphene -->
 		<!-- ATK is no longer used in GTK4 (accessibility is built-in) -->
-		<DepLibs>gtk-4.lib;glib-2.0.lib;gio-2.0.lib;gdk_pixbuf-2.0.lib;pangowin32-1.0.lib;pangocairo-1.0.lib;pango-1.0.lib;cairo.lib;gobject-2.0.lib;gmodule-2.0.lib;glib-2.0.lib;intl.lib;xml2.lib;libcrypto.lib;libssl.lib;graphene-1.0.lib;jansson.lib;websockets.lib;libcurl.lib;sqlite3.lib;wininet.lib;winmm.lib;ws2_32.lib</DepLibs>
+		<!-- crypt32 is for libwebsockets: windows-sockets.c reads the system
+		     certificate store through the Cert* API, and a static libwebsockets
+		     leaves those imports for whoever links it. -->
+		<DepLibs>gtk-4.lib;glib-2.0.lib;gio-2.0.lib;gdk_pixbuf-2.0.lib;pangowin32-1.0.lib;pangocairo-1.0.lib;pango-1.0.lib;cairo.lib;gobject-2.0.lib;gmodule-2.0.lib;glib-2.0.lib;intl.lib;xml2.lib;libcrypto.lib;libssl.lib;graphene-1.0.lib;jansson.lib;websockets.lib;libcurl.lib;sqlite3.lib;wininet.lib;winmm.lib;ws2_32.lib;crypt32.lib</DepLibs>
 		<DataDir>$(SolutionDir)..\data\\</DataDir>
 		<PoxChatBuild>$(SolutionDir)..\..\poxchat-build-gtk4</PoxChatBuild>
 		<PoxChatBin>$(PoxChatBuild)\$(PlatformName)\bin\</PoxChatBin>
@@ -103,8 +106,12 @@
 			<EnableCOMDATFolding>true</EnableCOMDATFolding>
 			<OptimizeReferences>true</OptimizeReferences>
 			<LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-			<!-- OpenSSL library path for all projects -->
-			<AdditionalLibraryDirectories>$(OpenSSLLib);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+			<!-- Every project that links $(DepLibs) needs every prefix the list
+			     names, so the search path lives here beside it rather than being
+			     repeated project by project.  jansson and libwebsockets in
+			     particular sit outside the gvsbuild prefix $(DepsRoot)\lib
+			     points at. -->
+			<AdditionalLibraryDirectories>$(OpenSSLLib);$(JanssonLib);$(LibWebSocketsLib);$(LibCurlLib);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
 		</Link>
 	</ItemDefinitionGroup>
 
