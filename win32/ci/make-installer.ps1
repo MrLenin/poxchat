@@ -9,7 +9,8 @@
 	separate, skippable step.
 
 	poxchat.iss.tt targets Inno Setup 5 and #includes idp.iss from the Inno
-	Download Plugin (which fetches vcredist/perl/python at install time).  The
+	Download Plugin (which fetches vcredist and the spelling dictionaries at
+	install time).  The
 	hosted runners ship Inno Setup 6 and no idp, so -Provision installs both:
 	IS5 from jrsoftware, idp from the mirror hexchat kept on its gvsbuild
 	releases, the upstream host having gone away years ago.
