@@ -1,3 +1,13 @@
+poxchat (3.0.0~alpha2-1) UNRELEASED; urgency=medium
+
+  * Second alpha. Virtual scrollback hardening and zstd-VFS crash
+    resilience with salvage tooling; reply, reaction and typing-indicator
+    polish; image upload; window-state persistence. CI now produces
+    Windows (portable zip + installer, with bundled Lua and Python
+    scripting) and macOS artifacts alongside the Linux packages.
+
+ -- Rubin <rubin@afternet.org>  Sun, 23 Aug 2026 15:24:30 -0700
+
 poxchat (3.0.0~alpha1-1) UNRELEASED; urgency=medium
 
   * First alpha of the PoxChat fork. PoxChat is a GTK4 fork of HexChat
