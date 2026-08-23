@@ -146,13 +146,14 @@ foreach ($file in Get-ChildItem -LiteralPath $Root -File) {
 	$beside[$file.Name.ToLowerInvariant()] = $true
 }
 
-# System32 covers the Windows SDK import libraries the tree links against;
-# api-ms-win-* / ext-ms-win-* are handled separately below, since the loader
-# resolves those from a schema rather than from files on disk.
+# System32 covers the Windows SDK import libraries the tree links against.
+# Not filtered to *.dll: gtk-4-1.dll binds to winspool.drv, and .cpl and .ocx
+# are equally bindable.  api-ms-win-* / ext-ms-win-* are handled separately
+# below, since the loader resolves those from a schema rather than from files.
 $system = @{}
 foreach ($dir in @("$env:SystemRoot\System32", "$env:SystemRoot\SysWOW64")) {
 	if (-not (Test-Path -LiteralPath $dir)) { continue }
-	foreach ($file in Get-ChildItem -LiteralPath $dir -Filter *.dll -File -ErrorAction SilentlyContinue) {
+	foreach ($file in Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue) {
 		$system[$file.Name.ToLowerInvariant()] = $true
 	}
 }
@@ -172,15 +173,32 @@ foreach ($dir in $Prefix) {
 $binaries = Get-ChildItem -LiteralPath $Root -File -Recurse |
 	Where-Object { $_.Extension -in '.exe', '.dll', '.pyd' }
 
-$missing = @{}
+# A missing DLL has dependencies of its own, and staging it only to find out
+# next run what it drags in is the same one-cycle-per-file trap.  So when one
+# turns up in the prefix, walk it too: the report names the whole chain.
+$queue = [System.Collections.Generic.Queue[object]]::new()
 foreach ($binary in $binaries) {
-	foreach ($import in Get-PeImports $binary.FullName) {
+	$queue.Enqueue([pscustomobject]@{
+		Path = $binary.FullName
+		Label = $binary.FullName.Substring($Root.Length).TrimStart('\')
+	})
+}
+
+$missing = @{}
+$followed = @{}
+while ($queue.Count -gt 0) {
+	$item = $queue.Dequeue()
+	foreach ($import in Get-PeImports $item.Path) {
 		$key = $import.ToLowerInvariant()
 		if ($beside.ContainsKey($key)) { continue }
 		if ($system.ContainsKey($key)) { continue }
 		if ($key -match '^(api|ext)-ms-win-') { continue }
 		if (-not $missing.ContainsKey($key)) { $missing[$key] = @() }
-		$missing[$key] += $binary.FullName.Substring($Root.Length).TrimStart('\')
+		$missing[$key] += $item.Label
+		if ($available.ContainsKey($key) -and -not $followed.ContainsKey($key)) {
+			$followed[$key] = $true
+			$queue.Enqueue([pscustomobject]@{ Path = $available[$key]; Label = $import })
+		}
 	}
 }
 

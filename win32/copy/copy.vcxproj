@@ -108,8 +108,13 @@
     <!-- libcurl for OAuth2 (optional - may be installed separately) -->
     <OptionalFiles Include="$(LibCurlRoot)\bin\libcurl.dll" Condition="Exists('$(LibCurlRoot)\bin\libcurl.dll')" />
     <OptionalFiles Include="$(LibCurlRoot)\bin\libcurl-x64.dll" Condition="Exists('$(LibCurlRoot)\bin\libcurl-x64.dll')" />
-    <!-- libcurl imports libpsl, so it travels with libcurl -->
+    <!-- libcurl imports libpsl, which imports ICU, so the whole chain
+         travels with libcurl.  Wildcards rather than Exists conditions:
+         the ICU DLLs carry their major version in the name, and a stale
+         literal would silently stage nothing. -->
     <OptionalFiles Include="$(DepsRoot)\bin\psl-5.dll" Condition="Exists('$(DepsRoot)\bin\psl-5.dll')" />
+    <OptionalFiles Include="$(DepsRoot)\bin\icuuc*.dll" />
+    <OptionalFiles Include="$(DepsRoot)\bin\icudt*.dll" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
