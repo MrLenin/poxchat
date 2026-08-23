@@ -26,8 +26,10 @@ param (
 	[string] $BuildRoot = 'C:\gtk-build',
 	[ValidateSet('x64')]
 	[string] $Platform = 'x64',
-	# Empty means "latest on PyPI".  Pin it when you want cache determinism.
-	[string] $GvsbuildVersion = '',
+	# Pinned rather than floating: $SeededArchives below names an exact pixman
+	# tarball, and that has to match the version this gvsbuild asks for.  Bump
+	# them together.
+	[string] $GvsbuildVersion = '2026.8.0',
 	[string] $JanssonTag = 'v2.15.1',
 	[string] $LibWebSocketsTag = 'v4.5.8',
 	[string] $WinSparkleVersion = '0.9.4',
@@ -49,6 +51,22 @@ $GvsbuildProjects = @(
 	'enchant',
 	'gettext',
 	'lgi'
+)
+
+# gvsbuild pulls each project's tarball from that project's own upstream, and
+# pixman's -- cairographics.org -- redirects to an HTTPS endpoint that is simply
+# down: following the redirect times out from the runners and from everywhere
+# else we tried.  No amount of retrying fixes an endpoint that is off, so seed
+# the archive instead.  Debian's orig tarball for pixman is the upstream file
+# byte for byte -- verified against the hash gvsbuild itself records -- and we
+# check the digest here so a substituted file fails loudly rather than quietly
+# building something nobody vetted.
+$SeededArchives = @(
+	@{
+		Name = 'pixman-0.46.4.tar.gz'
+		Url = 'http://deb.debian.org/debian/pool/main/p/pixman/pixman_0.46.4.orig.tar.gz'
+		Sha256 = 'd09c44ebc3bd5bee7021c79f922fe8fb2fb57f7320f55e97ff9914d2346a591c'
+	}
 )
 
 $prefix = Join-Path $BuildRoot "gtk\$Platform\release"
@@ -90,22 +108,40 @@ $package = if ($GvsbuildVersion) { "gvsbuild==$GvsbuildVersion" } else { 'gvsbui
 Invoke-Checked "pip install $package" { python -m pip install --upgrade --disable-pip-version-check $package }
 # --configuration release matters: gvsbuild defaults to debug-optimized, which
 # would land the prefix in ...\gtk\x64\debug-optimized instead of ...\release.
-#
-# The tarballs come from as many upstream hosts as there are projects, several
-# of them small volunteer servers -- cairographics.org, which serves pixman, is
-# a single box that times out regularly.  One unreachable host shouldn't cost a
-# whole GTK build, so retry; --fast-build makes the retries skip everything that
-# already succeeded, and the archives already fetched are kept either way.
+$gvsSrc = Join-Path $BuildRoot 'src'
+New-Item -ItemType Directory -Force -Path $gvsSrc | Out-Null
+foreach ($archive in $SeededArchives) {
+	$dest = Join-Path $gvsSrc $archive.Name
+	if (Test-Path $dest) {
+		Write-Host "$($archive.Name) already seeded"
+		continue
+	}
+	Write-Host "seeding $($archive.Name) from $($archive.Url)"
+	Invoke-WebRequest -Uri $archive.Url -OutFile $dest -UseBasicParsing
+	$digest = (Get-FileHash -Path $dest -Algorithm SHA256).Hash
+	if ($digest -ne $archive.Sha256.ToUpper()) {
+		Remove-Item $dest -Force
+		throw "$($archive.Name) from $($archive.Url) hashed $digest, expected $($archive.Sha256)"
+	}
+}
+
+# The remaining hosts are healthy but numerous, and a build this long shouldn't
+# die on one of them blinking.  --fast-build lets a retry resume rather than
+# start the whole stack again; fetched archives are kept either way.
+$gvsArgs = @(
+	'build',
+	'--build-dir', $BuildRoot,
+	'--platform', $Platform,
+	'--configuration', 'release',
+	'--enable-gi'
+)
 $attempts = 3
 for ($attempt = 1; $attempt -le $attempts; $attempt++) {
-	$extra = if ($attempt -gt 1) { @('--fast-build') } else { @() }
-	gvsbuild build `
-		--build-dir $BuildRoot `
-		--platform $Platform `
-		--configuration release `
-		--enable-gi `
-		@extra `
-		@GvsbuildProjects
+	$attemptArgs = @($gvsArgs)
+	if ($attempt -gt 1) { $attemptArgs += '--fast-build' }
+	$attemptArgs += $GvsbuildProjects
+
+	& gvsbuild @attemptArgs
 	if ($LASTEXITCODE -eq 0) { break }
 	if ($attempt -eq $attempts) {
 		throw "gvsbuild build failed with exit code $LASTEXITCODE after $attempts attempts"
