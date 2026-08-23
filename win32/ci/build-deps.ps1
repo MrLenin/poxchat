@@ -39,18 +39,24 @@ param (
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest crawls with the progress bar on
 
-# gvsbuild project names, not pkg-config names.  --enable-gi plus lgi give us
-# the typelibs and girepository dll the lua plugin and the installer expect.
+# gvsbuild project names, not pkg-config names.  gettext is here for msgfmt.exe,
+# which win32\nls compiles the .po catalogues with.
+#
+# luajit is absent, and with it lgi (which depends on it) and --enable-gi (which
+# exists to produce lgi's typelibs).  gvsbuild builds luajit by running
+# '.\msvcbuild' through CreateProcess, which cannot launch a .bat file and finds
+# nothing without the extension -- it fails identically every time, so the lua
+# plugin is out of the first build.  Re-adding it means building LuaJIT here the
+# way jansson and libwebsockets are built below; the installer script also names
+# lua and lgi files unconditionally, so that has to be settled at the same time.
 $GvsbuildProjects = @(
 	'gtk4',
 	'openssl',
 	'libxml2',
 	'sqlite',
-	'luajit',
 	'libcurl',
 	'enchant',
-	'gettext',
-	'lgi'
+	'gettext'
 )
 
 # gvsbuild pulls each project's tarball from that project's own upstream, and
@@ -143,17 +149,20 @@ foreach ($archive in $SeededArchives) {
 # The remaining hosts are healthy but numerous, and a build this long shouldn't
 # die on one of them blinking.  --fast-build lets a retry resume rather than
 # start the whole stack again; fetched archives are kept either way.
+# --fast-build from the outset: it skips any project whose .wingtk-built marker
+# is already in the build tree, so a restored cache resumes the stack instead of
+# recompiling it.  Its documented caveat -- stale results if the patches or the
+# build script change underneath it -- is covered by pinning $GvsbuildVersion.
 $gvsArgs = @(
 	'build',
 	'--build-dir', $BuildRoot,
 	'--platform', $Platform,
 	'--configuration', 'release',
-	'--enable-gi'
+	'--fast-build'
 )
 $attempts = 3
 for ($attempt = 1; $attempt -le $attempts; $attempt++) {
 	$attemptArgs = @($gvsArgs)
-	if ($attempt -gt 1) { $attemptArgs += '--fast-build' }
 	$attemptArgs += $GvsbuildProjects
 
 	& gvsbuild @attemptArgs

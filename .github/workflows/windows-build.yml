@@ -62,24 +62,36 @@ jobs:
         with:
           python-version: '3.12'
 
-      # A cold build of the GTK stack takes 1-2 hours; a warm one restores in
-      # minutes.  Only the install prefixes are cached, not gvsbuild's sources
-      # and intermediates, which are far larger and of no use to us.
+      # TEMPORARY, like the ci/** trigger: a rolling cache of the whole
+      # C:\gtk-build tree -- install prefix, intermediates and archives -- keyed
+      # per run and restored from the newest previous one.  A cold GTK stack is
+      # three quarters of an hour, and without this every failure part way
+      # through pays that again from scratch.  The intermediates are in here
+      # because gvsbuild's --fast-build decides what to skip by reading
+      # .wingtk-built markers out of the build tree, not the prefix.  The key
+      # deliberately omits the script hash, so editing build-deps.ps1 still
+      # resumes; bump DEPS_CACHE_EPOCH for a clean slate.  Once the build is
+      # green this becomes a plain actions/cache keyed on the script hash.
       - name: Restore dependency stack
-        id: deps-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: |
-            C:\gtk-build\gtk\x64\release
-            C:\gtk-build\jansson
-            C:\gtk-build\libwebsockets
-            C:\gtk-build\WinSparkle
-            C:\gtk-build\cert
-          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ hashFiles('win32/ci/build-deps.ps1') }}
+          path: C:\gtk-build
+          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ github.run_id }}
+          restore-keys: |
+            win-deps-${{ env.DEPS_CACHE_EPOCH }}-
 
+      # Always run, never skipped on a cache hit: with a complete stack restored
+      # this is a quick no-op, and it is the only thing that can tell a complete
+      # stack from a half-built one.
       - name: Build dependency stack
-        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: .\win32\ci\build-deps.ps1
+
+      - name: Save dependency stack
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: C:\gtk-build
+          key: win-deps-${{ env.DEPS_CACHE_EPOCH }}-${{ github.run_id }}
 
       - uses: microsoft/setup-msbuild@v2
 
@@ -93,11 +105,13 @@ jobs:
       # Split by target so a failure names the piece that broke.  perl, python3
       # and htm (the C# theme manager) are left out until the rest is green:
       # they need a matching Strawberry Perl / CPython / .NET on the runner.
+      # lua is out too, for want of a LuaJIT gvsbuild can build -- see
+      # build-deps.ps1.
       - name: Build core
         run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /t:"poxchat\common;poxchat\fe-gtk;poxchat\fe-text"
 
       - name: Build plugins
-        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /t:"plugins\checksum;plugins\exec;plugins\fishlim;plugins\sysinfo;plugins\winamp;plugins\upd;plugins\notifications-winrt;scripting\lua;external\libenchant_win8"
+        run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /t:"plugins\checksum;plugins\exec;plugins\fishlim;plugins\sysinfo;plugins\winamp;plugins\upd;plugins\notifications-winrt;external\libenchant_win8"
 
       - name: Stage the distributable tree
         run: msbuild win32\poxchat.sln ${{ env.MSBUILD_PROPS }} /t:"release\nls;release\copy"
