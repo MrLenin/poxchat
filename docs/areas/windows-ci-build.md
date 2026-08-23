@@ -9,7 +9,7 @@ when re-enabling one of the targets it currently leaves out.
 
 | Piece | Does |
 |-------|------|
-| `win32/ci/build-deps.ps1` | Builds the whole dependency stack into `C:\gtk-build` — gvsbuild for GTK4/OpenSSL/libxml2/sqlite/libcurl/enchant/gettext, then static jansson and libwebsockets, prebuilt WinSparkle, and the CA bundle |
+| `win32/ci/build-deps.ps1` | Builds the whole dependency stack into `C:\gtk-build` — gvsbuild for GTK4/OpenSSL/libxml2/sqlite/libcurl/enchant/gettext, then static jansson and libwebsockets, LuaJIT into the gvsbuild prefix, the CPython embeddable runtime, prebuilt WinSparkle, and the CA bundle |
 | `win32/ci/check-imports.ps1` | Walks PE imports of the staged tree and names every DLL it is missing |
 | `win32/ci/make-installer.ps1` | Generates `poxchat.iss` from its template and runs Inno Setup 5 |
 
@@ -71,19 +71,35 @@ prefix is a convenient corpus of real 32- and 64-bit PEs to test against.
 Watch for PowerShell-vs-C reflexes. `for ($i = 0; $i -lt $n; $i++, $p += 40)`
 is a parse error: the repeat clause takes one expression, not a comma list.
 
-## Currently left out
+## The scripting plugins
 
-- **lua** — gvsbuild builds LuaJIT by running `.\msvcbuild` through
-  `CreateProcess`, which cannot launch a `.bat` and finds nothing without the
-  extension. Taking lua back means building LuaJIT here the way jansson and
-  libwebsockets are built, and lgi and `--enable-gi` come with it.
-- **perl, python3, htm** — need a matching Strawberry Perl / CPython / .NET on
-  the runner.
-- **The installer.** `poxchat.iss.tt` names the lua, perl, python and
-  thememan payloads unconditionally, across `[Files]`, `[Components]`,
-  `[Registry]`, `[Run]`, `[Icons]` and the Pascal `[Code]` section. Until
-  those targets build, `-f installer=true` fails at Inno Setup. The portable
-  zip uploads before the installer step runs, so this costs nothing else.
+- **lua** builds against a LuaJIT that `build-deps.ps1` compiles itself and
+  installs into the gvsbuild prefix (gvsbuild's own recipe runs `.\msvcbuild`
+  through `CreateProcess`, which cannot launch a `.bat`, and fails identically
+  every time). lgi and `--enable-gi` are deliberately not built — the plugin
+  needs neither, they only ever provided GObject bindings to Lua scripts.
+- **python3** links the import library out of setup-python's install and ships
+  CPython's *embeddable package*, staged whole into the tree, so users need no
+  system Python. The plugin is a cffi embedding: `generate_plugin.py` needs
+  `cffi` in the build interpreter, and at run time `_cffi_backend.pyd`
+  (staged out of that interpreter's site-packages by `copy.vcxproj`) must sit
+  on sys.path — the `.` entry in `python313._pth` provides that.
+
+  The Python minor version is pinned in four places that must move together:
+  `python-version` in the workflow, `Python3Lib` in `win32/poxchat.props`,
+  `$PythonEmbedVersion`/`$PythonEmbedSha256` in `build-deps.ps1`, and the
+  `python313.*` names in `poxchat.iss.tt`.
+
+## Deliberately dropped
+
+- **perl** — dropped as a supported plugin on Windows; it would need a
+  matching Strawberry Perl on the runner and on every user's machine.
+- **htm / thememan** (the C# theme manager) — needs a .NET toolchain, and the
+  installer no longer offers it.
+
+The installer template names only payloads the build produces, so
+`-f installer=true` is expected to work; the portable zip still uploads before
+the installer step, so an installer failure costs nothing else.
 
 ## Traps worth remembering
 

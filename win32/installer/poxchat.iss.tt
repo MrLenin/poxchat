@@ -59,7 +59,6 @@ Name: "custom"; Description: "Custom Installation"; Flags: iscustom
 [Components]
 Name: "libs"; Description: "PoxChat"; Types: normal minimal custom; Flags: fixed
 Name: "xctext"; Description: "PoxChat-Text"; Types: custom; Flags: disablenouninstallwarning
-Name: "xtm"; Description: "PoxChat Theme Manager"; Types: normal custom; Flags: disablenouninstallwarning
 Name: "icons"; Description: "Create Shortcuts"; Types: custom; Flags: disablenouninstallwarning
 Name: "icons\desktopicon"; Description: "Create Desktop Shortcut"; Types: custom; Flags: disablenouninstallwarning
 Name: "icons\quicklaunchicon"; Description: "Create Quick Launch Shortcut"; Types: custom; Flags: disablenouninstallwarning
@@ -74,8 +73,7 @@ Name: "plugins\upd"; Description: "Update Checker"; Types: normal custom; Flags:
 Name: "plugins\winamp"; Description: "Winamp"; Types: custom; Flags: disablenouninstallwarning
 Name: "langs"; Description: "Language Interfaces"; Types: custom; Flags: disablenouninstallwarning
 Name: "langs\lua"; Description: "Lua"; Types: normal custom; Flags: disablenouninstallwarning
-Name: "langs\perl"; Description: "Perl (requires Perl 5.20)"; Types: custom; Flags: disablenouninstallwarning
-Name: "langs\python"; Description: "Python (requires Python 3.8)"; Types: custom; Flags: disablenouninstallwarning
+Name: "langs\python"; Description: "Python"; Types: normal custom; Flags: disablenouninstallwarning
 
 [Tasks]
 Name: portable; Description: "Yes"; GroupDescription: "Portable Mode: Stores configuration files within install directory for portable drives."; Flags: unchecked
@@ -88,22 +86,10 @@ Root: HKCR; Subkey: "irc\DefaultIcon"; ValueType: string; ValueName: ""; ValueDa
 Root: HKCR; Subkey: "irc\shell"; ValueType: string; ValueName: ""; ValueData: "open"; Flags: uninsdeletevalue; Tasks: not portable
 Root: HKCR; Subkey: "irc\shell\open\command"; ValueType: string; ValueName: ""; ValueData: "{app}\poxchat.exe --url=""%1"""; Flags: uninsdeletevalue; Tasks: not portable
 
-Root: HKCR; Subkey: ".hct"; ValueType: none; ValueName: ""; ValueData: ""; Flags: deletekey uninsdeletekey; Components:xtm; Tasks: not portable
-Root: HKCR; Subkey: ".hct"; ValueType: string; ValueName: ""; ValueData: "PoxChat Theme File"; Flags: uninsdeletevalue; Components:xtm; Tasks: not portable
-Root: HKCR; Subkey: ".hct"; ValueType: string; ValueName: "PoxChat Theme File"; ValueData: ""; Flags: uninsdeletevalue; Components:xtm; Tasks: not portable
-Root: HKCR; Subkey: ".hct\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\thememan.exe,0"; Flags: uninsdeletevalue; Components:xtm; Tasks: not portable
-Root: HKCR; Subkey: ".hct\shell"; ValueType: string; ValueName: ""; ValueData: "open"; Flags: uninsdeletevalue; Components:xtm; Tasks: not portable
-Root: HKCR; Subkey: ".hct\shell\open\command"; ValueType: string; ValueName: ""; ValueData: "{app}\thememan.exe ""%1"""; Flags: uninsdeletevalue; Components:xtm; Tasks: not portable
-
 [Run]
 Filename: "{app}\poxchat.exe"; Description: "Run PoxChat after closing the Wizard"; Flags: nowait postinstall skipifsilent
 Filename: "https://github.com/evilnet/poxchat/releases"; Description: "See what's changed"; Flags: shellexec runasoriginaluser postinstall skipifsilent unchecked
 Filename: "{tmp}\vcredist.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Redistributable"; Flags: skipifdoesntexist; Tasks: not portable
-Filename: "{tmp}\vcredist2013.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Redistributable"; Flags: skipifdoesntexist; Tasks: not portable
-Filename: "{tmp}\dotnet4.exe"; Parameters: "/q /norestart"; StatusMsg: "Installing .NET"; Components: xtm; Flags: skipifdoesntexist; Tasks: not portable
-Filename: "{tmp}\perl.msi"; StatusMsg: "Installing Perl"; Components: langs\perl; Flags: shellexec skipifdoesntexist; Tasks: not portable
-Filename: "{tmp}\python.msi"; StatusMsg: "Installing Python"; Components: langs\python; Flags: shellexec skipifdoesntexist; Tasks: not portable
-Filename: "{tmp}\python.exe"; Parameters: "InstallAllUsers=1 PrependPath=1"; StatusMsg: "Installing Python"; Components: langs\python; Flags: shellexec skipifdoesntexist; Tasks: not portable
 Filename: "{tmp}\spelling-dicts.exe"; Parameters: "/verysilent"; StatusMsg: "Installing Spelling Dictionaries"; Components: spell; Flags: skipifdoesntexist; Tasks: not portable
 
 [Files]
@@ -155,6 +141,22 @@ Source: "pangocairo-1.0-0.dll"; DestDir: "{app}"; Flags: ignoreversion; Componen
 Source: "pangoft2-1.0-0.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
 Source: "pangowin32-1.0-0.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
 Source: "zlib1.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "sqlite3.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "jpeg62.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "tiff.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "harfbuzz-subset.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "cairo-gobject-2.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "cairo-script-interpreter-2.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "rsvg-2-2.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "pixman-1-0.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+Source: "libexpat.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
+; copy.vcxproj stages these conditionally, so mirror its optionality here
+Source: "soup-3.0-0.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
+Source: "libcurl.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
+Source: "libcurl-x64.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
+Source: "psl-5.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
+Source: "icuuc*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
+Source: "icudt*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: libs
 
 Source: "plugins\hcnotifications-winrt.dll"; DestDir: "{app}\plugins"; Flags: ignoreversion; Components: libs
 
@@ -165,13 +167,8 @@ Source: "lib\enchant-2\*"; DestDir: "{app}\lib\enchant-2"; Flags: ignoreversion 
 
 ; GTK4 uses CSS theming only - no theme engine DLLs needed
 
-Source: "girepository-1.0-1.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\lua
+; LuaJIT only -- lgi and its typelibs are not built, see win32\ci\build-deps.ps1
 Source: "lua51.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\lua
-Source: "lib\lua\lgi\*.dll"; DestDir: "{app}\lib\lua\lgi"; Flags: ignoreversion; Components: langs\lua
-Source: "lib\girepository-1.0\*.typelib"; DestDir: "{app}\lib\girepository-1.0"; Flags: ignoreversion; Components: langs\lua
-Source: "share\lua\*.lua"; DestDir: "{app}\share\lua"; Flags: ignoreversion; Components: langs\lua
-Source: "share\lua\lgi\*.lua"; DestDir: "{app}\share\lua\lgi"; Flags: ignoreversion; Components: langs\lua
-Source: "share\lua\lgi\override\*.lua"; DestDir: "{app}\share\lua\lgi\override"; Flags: ignoreversion; Components: langs\lua
 Source: "plugins\hclua.dll"; DestDir: "{app}\plugins"; Flags: ignoreversion; Components: langs\lua
 
 Source: "plugins\hcchecksum.dll"; DestDir: "{app}\plugins"; Flags: ignoreversion; Components: plugins\checksum
@@ -188,16 +185,29 @@ Source: "WinSparkle.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: pl
 Source: "plugins\hcwinamp.dll"; DestDir: "{app}\plugins"; Flags: ignoreversion; Components: plugins\winamp
 Source: "share\system.png"; DestDir: "{app}\share"; Flags: ignoreversion; Components: plugins\sysinfo
 Source: "plugins\hcsysinfo.dll"; DestDir: "{app}\plugins"; Flags: ignoreversion; Components: plugins\sysinfo
-Source: "plugins\hcperl.dll"; DestDir: "{app}\plugins"; Flags: ignoreversion; Components: langs\perl
 
+; The python plugin is self-contained: hcpython3.dll links python313.dll and
+; the CI-staged embeddable runtime beside it supplies the interpreter and
+; stdlib -- python313._pth's '.' entry keeps {app} on sys.path, which is where
+; *.pyd (the stdlib's extension modules plus cffi's _cffi_backend) live.
+; python313 appears by name here on purpose; the version is pinned in
+; build-deps.ps1 and the names below move with it.
 Source: "python\*.py"; DestDir: "{app}\python"; Flags: ignoreversion; Components: langs\python
-
 Source: "plugins\hcpython3.dll"; DestDir: "{app}\plugins"; Flags: ignoreversion; Components: langs\python
-Source: "_cffi_backend.cp3*.pyd"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "python313.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "python3.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "python313.zip"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "python313._pth"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "*.pyd"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "libffi-8.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "libcrypto-3.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "libssl-3.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "vcruntime140.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "vcruntime140_1.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
+Source: "PYTHON-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion; Components: langs\python
 
 Source: "poxchat.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: libs
 Source: "poxchat-text.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: xctext
-Source: "thememan.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: xtm
 
 [Icons]
 Name: "{group}\PoxChat"; Filename: "{app}\poxchat.exe"; AppUserModelID: "PoxChat.Desktop.Notify"; Tasks: not portable; Check: not WizardNoIcons
@@ -206,7 +216,6 @@ Name: "{group}\PoxChat ChangeLog"; Filename: "{app}\changelog.url"; IconFilename
 Name: "{group}\PoxChat ReadMe"; Filename: "{app}\readme.url"; IconFilename: "{sys}\shell32.dll"; IconIndex: 23; Tasks: not portable; Check: not WizardNoIcons
 Name: "{group}\PoxChat Config Folder"; Filename: "%APPDATA%\PoxChat\"; Tasks: not portable; Check: not WizardNoIcons
 Name: "{group}\PoxChat-Text"; Filename: "{app}\poxchat-text.exe"; Components: xctext; Tasks: not portable; Check: not WizardNoIcons
-Name: "{group}\PoxChat Theme Manager"; Filename: "{app}\thememan.exe"; Components: xtm; Tasks: not portable; Check: not WizardNoIcons
 Name: "{group}\Uninstall PoxChat"; Filename: "{uninstallexe}"; Tasks: not portable; Check: not WizardNoIcons
 Name: "{commondesktop}\PoxChat"; Filename: "{app}\poxchat.exe"; AppUserModelID: "PoxChat.Desktop.Notify"; Components: icons\desktopicon; Tasks: not portable
 Name: "{commonappdata}\Microsoft\Internet Explorer\Quick Launch\PoxChat"; Filename: "{app}\poxchat.exe"; Components: icons\quicklaunchicon; Tasks: not portable
@@ -237,28 +246,10 @@ begin
 end;
 
 /////////////////////////////////////////////////////////////////////
-function CheckDLL(DLLName: String): Boolean;
-var
-	ResultCode: Integer;
-begin
-	if ExecAsOriginalUser(GetSysDir() + 'where.exe', '/Q ' + DLLName,
-						'', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-		Result := ResultCode = 0 // 0 is success
-	else
-		Result := False;
-end;
-
-/////////////////////////////////////////////////////////////////////
 function CheckVCInstall(): Boolean;
 begin
 	Result := FileExists(GetSysDir() + 'vcruntime140.dll');;
 end;
-
-function CheckVC2013Install(): Boolean;
-begin
-	Result := FileExists(GetSysDir() + 'msvcr120.dll');;
-end;
-
 
 /////////////////////////////////////////////////////////////////////
 function CheckSpellInstall(): Boolean;
@@ -275,22 +266,14 @@ begin
 end;
 
 /////////////////////////////////////////////////////////////////////
-function CheckDotNetInstall(): Boolean;
-begin
-	Result := RegKeyExists(HKLM, 'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4');
-end;
-
-/////////////////////////////////////////////////////////////////////
-// Sets up the automatic downloads
+// Sets up the automatic downloads.  The scripting runtimes ship inside the
+// installer these days -- LuaJIT and the embeddable CPython are ordinary
+// [Files] entries -- so only vcredist and the spelling dictionaries are
+// fetched at install time.
 /////////////////////////////////////////////////////////////////////
 procedure CurPageChanged(CurPageID: Integer);
 var
 	REDIST: String;
-	REDIST_2013: String;
-	PERL: String;
-	PY2: String;
-	PY3: String;
-	DOTNET: String;
 	SPELL: String;
 begin
   if(CurPageID = wpReady) then
@@ -302,40 +285,16 @@ begin
 
 #if APPARCH == "x64"
 		REDIST := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/vcredist_2015_x64.exe';
-		REDIST_2013 := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/vcredist_2013_x64.exe';
-		PERL := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/Perl.5.20.0.x64.msi';
-		PY3 := 'https://www.python.org/ftp/python/3.8.10/python-3.8.10-amd64.exe';
 #else
 		REDIST := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/vcredist_2015_x86.exe';
-		REDIST_2013 := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/vcredist_2013_x86.exe';
-		PERL := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/Perl.5.20.0.x86.msi';
-		PY3 := 'https://www.python.org/ftp/python/3.8.10/python-3.8.10.exe';
 #endif
-		DOTNET := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/dotnet_40.exe';
 		SPELL := 'https://github.com/hexchat/gvsbuild/releases/download/hexchat-2.16.2/HexChat.Spelling.Dictionaries.r2.exe';
 
 		if not CheckVCInstall() then
 			idpAddFile(REDIST, ExpandConstant('{tmp}\vcredist.exe'));
 
-		if IsComponentSelected('xtm') and not CheckDotNetInstall() then
-			idpAddFile(DOTNET, ExpandConstant('{tmp}\dotnet4.exe'));
-
 		if IsComponentSelected('spell') and not CheckSpellInstall() then
 			idpAddFile(SPELL, ExpandConstant('{tmp}\spelling-dicts.exe'));
-
-		if not WizardSilent() then
-		begin
-			if IsComponentSelected('langs\perl') and not CheckDLL('perl520.dll') then
-			begin
-				if not CheckVC2013Install() then
-					idpAddFile(REDIST_2013, ExpandConstant('{tmp}\vcredist2013.exe'));
-
-				idpAddFile(PERL, ExpandConstant('{tmp}\perl.msi'))
-			end;
-
-			if IsComponentSelected('langs\python\python3') and not CheckDLL('python38.dll') then
-				idpAddFile(PY3, ExpandConstant('{tmp}\python.exe'));
-		end;
 	end;
   end;
 end;
