@@ -855,9 +855,10 @@ void
 fe_get_bool (char *title, char *prompt, void *callback, void *userdata)
 {
 }
-void
+void *
 fe_get_str (char *prompt, char *def, void *callback, void *ud)
 {
+	return NULL;
 }
 void
 fe_get_int (char *prompt, int def, void *callback, void *ud)
@@ -975,5 +976,6 @@ void fe_scrollback_set_virtual (struct session *sess, void *db, const char *chan
                                 int total_entries, gint64 max_rowid) {}
 void fe_set_pending_db_rowid (struct session *sess, gint64 rowid) {}
 void fe_resolve_pending_dup (struct session *sess, gint64 old_rowid, gint64 new_rowid) {}
+void fe_set_batch_mode (struct session *sess, gboolean on) {}
 void fe_begin_multiline_group (struct session *sess) {}
 void fe_end_multiline_group (struct session *sess) {}
