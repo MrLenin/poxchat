@@ -54,18 +54,33 @@ $GvsbuildProjects = @(
 )
 
 # gvsbuild pulls each project's tarball from that project's own upstream, and
-# pixman's -- cairographics.org -- redirects to an HTTPS endpoint that is simply
-# down: following the redirect times out from the runners and from everywhere
-# else we tried.  No amount of retrying fixes an endpoint that is off, so seed
-# the archive instead.  Debian's orig tarball for pixman is the upstream file
-# byte for byte -- verified against the hash gvsbuild itself records -- and we
-# check the digest here so a substituted file fails loudly rather than quietly
-# building something nobody vetted.
+# two of those upstreams are simply down: cairographics.org (cairo, pixman) and
+# icon-theme.freedesktop.org (hicolor-icon-theme) both time out on connect, from
+# the runners and from every other network tried.  Retrying cannot revive a host
+# that is off, so seed those archives instead.
+#
+# Debian's orig tarballs are the upstream files byte for byte: every hash below
+# is the one gvsbuild itself records for that version, checked against what
+# Debian serves.  We verify the digest after download too, so a substituted file
+# fails loudly rather than quietly building something nobody vetted.
+#
+# These pin exact versions, which is why $GvsbuildVersion is pinned as well --
+# bump them together, and drop an entry once its upstream comes back.
 $SeededArchives = @(
 	@{
 		Name = 'pixman-0.46.4.tar.gz'
 		Url = 'http://deb.debian.org/debian/pool/main/p/pixman/pixman_0.46.4.orig.tar.gz'
 		Sha256 = 'd09c44ebc3bd5bee7021c79f922fe8fb2fb57f7320f55e97ff9914d2346a591c'
+	},
+	@{
+		Name = 'cairo-1.18.4.tar.xz'
+		Url = 'http://deb.debian.org/debian/pool/main/c/cairo/cairo_1.18.4.orig.tar.xz'
+		Sha256 = '445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb'
+	},
+	@{
+		Name = 'hicolor-icon-theme-0.18.tar.xz'
+		Url = 'http://deb.debian.org/debian/pool/main/h/hicolor-icon-theme/hicolor-icon-theme_0.18.orig.tar.xz'
+		Sha256 = 'db0e50a80aa3bf64bb45cbca5cf9f75efd9348cf2ac690b907435238c3cf81d7'
 	}
 )
 
