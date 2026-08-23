@@ -5,6 +5,8 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       installer:
@@ -212,12 +214,35 @@ jobs:
           path: ${{ steps.portable.outputs.path }}
 
       - name: Build installer
-        if: inputs.installer
+        if: inputs.installer || github.event_name == 'release'
         run: .\win32\ci\make-installer.ps1 -BuildDir "${{ env.BUILD_DIR }}" -Provision
 
       - name: Upload installer
-        if: inputs.installer
+        if: inputs.installer || github.event_name == 'release'
         uses: actions/upload-artifact@v4
         with:
           name: poxchat-x64-installer
           path: ${{ env.BUILD_DIR }}\x64\*.exe
+
+  # Attach the Windows artifacts to the release that triggered the run, the
+  # same way release.yml attaches the AppImage and debs.  A separate job so
+  # the build keeps its read-only token; only this upload needs write.  A
+  # release run reads the dependency cache from the default branch, so tagging
+  # after master's own run has completed keeps this off the cold path.
+  publish:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Upload to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PoxChat-*-portable.zip
+            PoxChat-*_x64.exe
