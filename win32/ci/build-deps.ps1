@@ -90,13 +90,28 @@ $package = if ($GvsbuildVersion) { "gvsbuild==$GvsbuildVersion" } else { 'gvsbui
 Invoke-Checked "pip install $package" { python -m pip install --upgrade --disable-pip-version-check $package }
 # --configuration release matters: gvsbuild defaults to debug-optimized, which
 # would land the prefix in ...\gtk\x64\debug-optimized instead of ...\release.
-Invoke-Checked 'gvsbuild build' {
+#
+# The tarballs come from as many upstream hosts as there are projects, several
+# of them small volunteer servers -- cairographics.org, which serves pixman, is
+# a single box that times out regularly.  One unreachable host shouldn't cost a
+# whole GTK build, so retry; --fast-build makes the retries skip everything that
+# already succeeded, and the archives already fetched are kept either way.
+$attempts = 3
+for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+	$extra = if ($attempt -gt 1) { @('--fast-build') } else { @() }
 	gvsbuild build `
 		--build-dir $BuildRoot `
 		--platform $Platform `
 		--configuration release `
 		--enable-gi `
+		@extra `
 		@GvsbuildProjects
+	if ($LASTEXITCODE -eq 0) { break }
+	if ($attempt -eq $attempts) {
+		throw "gvsbuild build failed with exit code $LASTEXITCODE after $attempts attempts"
+	}
+	Write-Warning "gvsbuild attempt $attempt failed with exit code $LASTEXITCODE; retrying"
+	Start-Sleep -Seconds 30
 }
 
 Write-Step 'jansson (static)'
