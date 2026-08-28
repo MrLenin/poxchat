@@ -1387,10 +1387,15 @@ mg_quit_dialog_tray_cb (GtkWidget *button, gpointer user_data)
 		prefs.hex_gui_tray = 1;
 		tray_apply_setup ();
 	}
-	tray_toggle_visibility (TRUE);
+	/* Destroy the dialog BEFORE hiding the main window.  The dialog is an
+	 * owned (transient) window; with server-side decorations, destroying
+	 * it while it is the foreground window makes Windows re-activate and
+	 * re-show its owner — which we just hid — leaving GTK's visibility
+	 * state (hidden) out of sync with the HWND (shown). */
 	hc_window_destroy_fn (GTK_WINDOW (quit_dialog));
 	quit_dialog = NULL;
 	quit_dialog_checkbox = NULL;
+	tray_toggle_visibility (TRUE);
 }
 
 static void
