@@ -16,10 +16,10 @@
 - Build: Release|x64 via the 64-bit MSBuild host (32-bit host OOMs on resources.c). From Git-Bash at repo root:
   ```bash
   MSBUILD="/c/Program Files/Microsoft Visual Studio/2022/Enterprise/MSBuild/Current/Bin/amd64/MSBuild.exe"
-  "$MSBUILD" win32/poxchat.sln //p:Configuration=Release //p:Platform=x64 //p:PreferredToolArchitecture=x64 //v:minimal //nologo 2>&1 \
+  "$MSBUILD" win32/poxchat.sln //p:Configuration=Release //p:Platform=x64 //p:PreferredToolArchitecture=x64 "//p:YourPython3Path=C:\Python314\\" //v:minimal //nologo 2>&1 \
     | grep -E "error C[0-9]|error [A-Z]" | grep -v "jansson\|lua.h\|cffi\|MSB3073\|MSB3027\|MSB3021"
   ```
-  Empty output = success. Exe: `C:\Users\johne\source\repos\poxchat-build-gtk4\x64\rel\poxchat.exe`.
+  Empty output = success **and** the exe mtime must advance (the filter hides the MSB3073 that a wrong Python path produces). Exe: `C:\Users\johne\source\repos\poxchat-build-gtk4\x64\rel\poxchat.exe`. The `YourPython3Path` override is required: tracked `win32/poxchat.props` points at CI's `C:\Python313`, this machine has `C:\Python314`.
 - Wire facts (from the server plan, verbatim): CAP name `draft/persistence`; value tokens `replay-control`, `list`, `attach`, `attach-cursor`; `PERSISTENCE ATTACH <profile> [<msgid>]` is accepted **pre-CAP-END only**; unsolicited `PERSISTENCE STATUS <client-setting> <effective-setting>` arrives after the last 005 and before MOTD-end; errors are `FAIL PERSISTENCE <CODE> [<context>] :<text>` with codes `ACCOUNT_REQUIRED`, `INVALID_PARAMETERS`, `INTERNAL_ERROR`, `CURSOR_UNKNOWN`, `CANNOT_DETACH`; batch types `draft/persistence` (JOIN/TOPIC/NAMES burst) then `evilnet.github.io/bouncer-replay` (outer wrapper; inner per-target `chathistory` batches carry the wrapper's ref as `outer_batch`).
 - Server auto-replay never fires for a client that negotiated `draft/chathistory` **unless** that client supplied an ATTACH cursor. So the bouncer-replay batch appears only after Task 5 goes live, but Tasks 1–2 must already tolerate it.
 - Every `CAP END` guard site (inbound.c:3159-3183, 3199-3218, 3444-3448; proto-irc.c:1113-1118) stays consistent: we do **not** add a new `waiting_on_*` gate. ATTACH is pipelined immediately before the SASL-success `CAP END`; the server holds registration until it has processed the flight, so no reply is awaited.
