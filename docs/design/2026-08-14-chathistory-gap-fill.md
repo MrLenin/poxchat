@@ -356,3 +356,90 @@ Against Nefarious/X3 (AfterNET):
   lands here).
 - A background sweeper that fills all recorded gaps without scrolling — possible later
   add-on on the same ledger.
+
+## 13. Addendum (2026-08-28): Nefarious "seamless sessions" capability map
+
+Source: https://gist.github.com/MrLenin/8d644eb37878d7bcaa91d1a68ae23d94 (fork
+`ircv3.2-upgrade`, commits `9bc57d4` attach-cursor, `414b147`/`9fbcb3b` webpush,
+`8336ec4` TLS resumption). Server-side facts that bear on this design:
+
+- **One msgid per event across every delivery path** (live, replay, chathistory,
+  playback), HLC-seeded and totally ordered. Our three-layer dedup already assumes
+  this; the ledger may prefer msgid refs over timestamps with confidence.
+- **`draft/persistence` with `attach-cursor`:** `PERSISTENCE ATTACH <profile> [<msgid>]`
+  in the registration flight makes the server push *unsolicited* standard
+  `chathistory`-type batches (channels, then PMs) from that single global anchor,
+  wrapped in an `evilnet.github.io/bouncer-replay` batch. Per-buffer truncation is
+  newest-biased and signalled only by msgid discontinuity. Unknown cursor →
+  `FAIL PERSISTENCE CURSOR_UNKNOWN`, server falls back to last-activity replay.
+- **Simple-client auto-replay** is gated on the client *lacking* `draft/chathistory`,
+  so it never fires for us. Without `draft/persistence` we are on the gist's
+  "smart client, no cursor" path — which is exactly what §4 models today.
+
+### Impact on this design
+
+1. **Unsolicited replay must be classified as the LATEST phase.** Today
+   `chathistory_process_batch` derives `is_catchup` from `sess->catchup_in_progress`,
+   which is FALSE for a batch we never requested: the §4 reconnect witness would never
+   record, and `chathistory_request_complete` would pop an unrelated pending request.
+   Rule: a `chathistory` batch whose `outer_batch` is a `bouncer-replay` wrapper (or
+   that arrives with no matching `ch_pending`/in-flight request) is treated as a
+   LATEST result for its target — witness check, `catchup_lower_bound` bridge test,
+   and gap recording all apply; it must not consume the request queue.
+   `inbound_batch_end` needs a `bouncer-replay` case that is a pure container
+   (children handled on their own END; wrapper END = "replay complete" → run the
+   `chathistory_latest_pending == 0` eager-close entry point once).
+2. **Truncation is a witnessed gap by construction.** Discontinuity between stored
+   newest and replay oldest is §4's existing test; the gist's per-buffer
+   `CHATHISTORY AFTER` fallback is our eager-close/lazy-fill. No new mechanism, but
+   the gap's `start_msgid` is the correct AFTER anchor if we ever add AFTER as a
+   third request shape (BETWEEN/BEFORE remain sufficient).
+3. **Future (not this design): adopt `draft/persistence` + `attach-cursor`.** Add the
+   cap; on reconnect send `PERSISTENCE ATTACH <profile> <global newest stored msgid>`
+   (global across buffers — `history_msgid_to_timestamp` is target-independent) and
+   **suppress** `chathistory_schedule_deferred` + `chathistory_request_targets_on_reconnect`
+   when the server advertises `attach-cursor`, since the server-driven replay
+   supersedes both. Handle `FAIL PERSISTENCE CURSOR_UNKNOWN` by falling back to the
+   current deferred-LATEST path. The gap ledger's per-channel newest msgid is the
+   right source for the anchor (min over channels is *not* wanted — the anchor must
+   be the globally newest; per-channel holes are then found by discontinuity → gaps).
+4. Already aligned, no action: `draft/event-playback`, `batch`, `labeled-response`,
+   `server-time`, msgid dedup. `draft/read-marker` stays out of scope (§12);
+   `draft/webpush` is mobile-only.
+
+### 13.1 Server-side `draft/persistence` unification plan (context added 2026-08-28)
+
+From the Nefarious "draft/persistence unification" plan (Phases 1–4 shipped;
+base protocol is ircv3-specifications#503 + MrLenin gist 814a674c):
+
+- **CAP value tokens** on `draft/persistence`: `replay-control`, `list`, `attach`,
+  `attach-cursor`. Feature-detect by token, not by cap presence.
+- **Registration timing:** `PERSISTENCE ATTACH <profile> [<msgid>]` is accepted
+  **pre-CAP-END only** (UNREG handler slot, SASL-complete window). In our flow that
+  means it must be sent from the cap-negotiation path in `inbound.c` after SASL
+  success and *before* the `CAP END` at inbound.c:3182/3217 (and the SASL-success
+  `CAP END` at proto-irc.c:1117) — not from the 001/376 hooks.
+- **Unsolicited `PERSISTENCE STATUS <client> <effective>`** arrives after the last 005
+  and before MOTD-end for authenticated clients that negotiated the cap. We have no
+  handler; it would currently surface as an unknown-command line. Needs a
+  `process_named_msg` case that records `serv->persistence_effective` (this is the
+  authoritative "am I on a held bouncer session" signal — better than the
+  JOIN-timestamp inference at inbound.c:787 / `bouncer_inferred`).
+- **Two wrapper batches on revive**, in order: `draft/persistence` (JOIN/TOPIC/NAMES
+  channel-state burst) then `evilnet.github.io/bouncer-replay` (nested per-target
+  `chathistory` batches; suppressed when empty). `inbound_batch_add_message`
+  (inbound.c:2465) already passes unknown-type batch contents through, so the
+  channel-state burst is processed live — correct. But those JOINs will trigger
+  `chathistory_schedule_deferred` per channel; once we send an attach cursor, that
+  scheduling must be suppressed when inside a `draft/persistence` batch and
+  `attach-cursor` was advertised, otherwise every buffer gets LATEST-fetched *and*
+  server-replayed (dedup absorbs it, but it doubles reconnect traffic).
+- **`PERSISTENCE REPLAY SET OFF`** exists but is moot for us: server auto-replay is
+  gated on the client *lacking* `draft/chathistory`; the only replay a
+  chathistory client receives is the explicit-cursor one it asked for.
+- **Profiles:** a session is a named configuration profile with its own channel
+  list; `/JOIN`/`/PART` grow/shrink the active profile; delivery is filtered by the
+  profile's effective channel list. Client-side implication: the network config's
+  `persistent_server` flag should eventually become "attach profile *name*", and
+  our auto-join list is redundant with the profile's list when attached. Out of
+  scope here; note for the cap-adoption task in §13 item 3.

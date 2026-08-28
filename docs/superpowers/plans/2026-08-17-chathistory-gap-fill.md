@@ -560,6 +560,19 @@ git commit -m "scrollback: gap ledger table + API with standalone test harness"
 
 ### Task 3: Reconnect witness recording + prefs (spec §4 creation)
 
+> **Amendment 2026-08-28 (spec §13):** Nefarious can also deliver reconnect
+> history *unsolicited* — `chathistory`-type batches nested in an
+> `evilnet.github.io/bouncer-replay` wrapper (when a `draft/persistence`
+> `attach-cursor` client attaches; we do not send that yet, but the batch shape
+> must not corrupt state if it ever arrives). In `chathistory_process_batch`,
+> classify a `chathistory` batch whose `outer_batch` resolves to a
+> `bouncer-replay` wrapper, or that matches no in-flight request for its target,
+> as a LATEST-phase result: run the witness check and gap recording below, and
+> do **not** call `chathistory_request_complete` for it. Add a `bouncer-replay`
+> case to `inbound_batch_end` that is a pure container; its END is the single
+> "replay complete" point for `chathistory_check_before_catchup`. Add a test
+> line for this in the Task 3 manual checklist.
+
 Record the offline hole as a `witnessed` gap when the join-time LATEST batch lands, and let the existing BEFORE pagination shrink it. Adds the `hex_irc_gapfill` master pref and the budget pref (used in Task 4).
 
 **Files:**
