@@ -512,7 +512,7 @@ tcp_sendf_labeled_tracked (server *serv, const char *command,
 }
 
 /* Send labeled+tracked command with extra client tags merged into the @ block.
- * tag_key and tag_value are a single tag to prepend (e.g. "+draft/reply", "msgid123").
+ * tag_key and tag_value are a single tag to prepend (e.g. "+reply", "msgid123").
  * The fmt should NOT contain a leading @.
  */
 char *

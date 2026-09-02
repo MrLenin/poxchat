@@ -370,7 +370,7 @@ inbound_action (session *sess, char *chan, char *from, char *ip, char *text,
 	/* If this action is a reply, prefix the text with the reply sentinel
 	 * (U+FDD0 noncharacter); xtext vector-draws the arrow.  See inbound_chanmsg. */
 	if (prefs.hex_irc_reply_show && tags_data->all_tags &&
-	    g_hash_table_lookup (tags_data->all_tags, "+draft/reply"))
+	    tags_lookup_reply (tags_data->all_tags))
 	{
 		reply_arrow_text = g_strconcat ("\xef\xb7\x90 ", text, NULL);
 		text = reply_arrow_text;
@@ -466,11 +466,10 @@ inbound_action (session *sess, char *chan, char *from, char *ip, char *text,
 									  tags_data->timestamp);
 
 check_action_reply:
-	/* IRCv3 +draft/reply on ACTIONs — same current_msgid restore as check_reply */
+	/* IRCv3 +reply on ACTIONs — same current_msgid restore as check_reply */
 	if (prefs.hex_irc_reply_show && tags_data->all_tags)
 	{
-		const char *reply_msgid = g_hash_table_lookup (tags_data->all_tags,
-		                                                "+draft/reply");
+		const char *reply_msgid = tags_lookup_reply (tags_data->all_tags);
 		if (reply_msgid)
 		{
 			if (tags_data->msgid && !sess->current_msgid)
@@ -522,7 +521,7 @@ inbound_chanmsg (server *serv, session *sess, char *chan, char *from,
 	 * copy/paste strips it back out.  Keep the bytes in sync with
 	 * XTEXT_REPLY_SENTINEL (fe-gtk/xtext-render.h).  Caller still owns `text`. */
 	if (prefs.hex_irc_reply_show && tags_data->all_tags &&
-	    g_hash_table_lookup (tags_data->all_tags, "+draft/reply"))
+	    tags_lookup_reply (tags_data->all_tags))
 	{
 		reply_arrow_text = g_strconcat ("\xef\xb7\x90 ", text, NULL);
 		text = reply_arrow_text;
@@ -585,7 +584,7 @@ inbound_chanmsg (server *serv, session *sess, char *chan, char *from,
 									  0, tags_data->timestamp);
 
 check_reply:
-	/* IRCv3 +draft/reply: attach reply context to the just-emitted message.
+	/* IRCv3 +reply: attach reply context to the just-emitted message.
 	 * EMIT_SIGNAL → PrintTextTimeStamp → fe_print_text clears current_msgid,
 	 * but fe_reply_context_set needs it to find the correct entry (especially
 	 * in sorted-insert mode where the entry may not be the last one).
@@ -593,8 +592,7 @@ check_reply:
 	 */
 	if (prefs.hex_irc_reply_show && tags_data->all_tags)
 	{
-		const char *reply_msgid = g_hash_table_lookup (tags_data->all_tags,
-		                                                "+draft/reply");
+		const char *reply_msgid = tags_lookup_reply (tags_data->all_tags);
 		if (reply_msgid)
 		{
 			if (tags_data->msgid && !sess->current_msgid)
@@ -2533,6 +2531,65 @@ inbound_batch_add_message (server *serv, const char *prefix, const char *command
 	return TRUE;
 }
 
+/* IRCv3 +reply (ratified; formerly +draft/reply).  We send the ratified
+ * name and accept either on receipt, since older clients still emit the
+ * draft one.  Returns NULL for a missing or empty tag. */
+const char *
+tags_lookup_reply (GHashTable *tags)
+{
+	const char *v;
+
+	if (!tags)
+		return NULL;
+	v = g_hash_table_lookup (tags, "+reply");
+	if (!v)
+		v = g_hash_table_lookup (tags, "+draft/reply");
+	return (v && v[0]) ? v : NULL;
+}
+
+/* IRCv3 +channel-context: a PRIVMSG/NOTICE addressed to us may carry the
+ * channel it relates to.  Returns that channel's session when the tag is
+ * present, names a valid channel, and we have that channel open; the
+ * message is then shown there as if it were a channel message.  Callers
+ * must only apply this to messages addressed to a user, per the spec. */
+session *
+inbound_channel_context (server *serv, const message_tags_data *tags_data)
+{
+	const char *chan;
+
+	if (!tags_data || !tags_data->all_tags)
+		return NULL;
+	chan = g_hash_table_lookup (tags_data->all_tags, "+channel-context");
+	if (!chan || !is_channel (serv, chan))
+		return NULL;
+	return find_channel (serv, chan);
+}
+
+/* draft/account-registration: the server told us (ACCOUNTREQUIRED ISUPPORT
+ * token, or FAIL * ACCOUNT_REQUIRED at the end of registration) that we can't
+ * connect without logging into an account.  Tell the user what to do. */
+void
+inbound_account_required_hint (server *serv, session *sess)
+{
+	gboolean sasl;
+
+	if (!sess)
+		sess = serv->server_session;
+	if (!sess)
+		return;
+
+	sasl = serv->loginmethod == LOGIN_SASL ||
+	       serv->loginmethod == LOGIN_SASLEXTERNAL ||
+	       serv->loginmethod == LOGIN_SASL_SCRAM_SHA_1 ||
+	       serv->loginmethod == LOGIN_SASL_SCRAM_SHA_256 ||
+	       serv->loginmethod == LOGIN_SASL_SCRAM_SHA_512 ||
+	       serv->loginmethod == LOGIN_SASL_OAUTHBEARER;
+	if (!sasl)
+		PrintText (sess, _("This server requires an account. Choose a SASL login method for this network in the Network List.\n"));
+	if (serv->accreg_before_connect)
+		PrintText (sess, _("If you don't have an account yet, you can create one before connecting with /REGISTER.\n"));
+}
+
 /* IRCv3 +typing indicator helpers */
 
 #define TYPING_EXPIRE_US       (6 * G_USEC_PER_SEC)
@@ -2707,12 +2764,12 @@ inbound_tagmsg (server *serv, char *to, char *nick, char *ip,
 skip_typing:
 	/* Handle +draft/react and +draft/unreact tags for reactions
 	 * Reactions are sent as TAGMSG with both +draft/react=<text>
-	 * and +draft/reply=<target_msgid> to identify the target message.
+	 * and +reply=<target_msgid> to identify the target message.
 	 * See https://ircv3.net/specs/client-tags/react
 	 */
 	react_value = g_hash_table_lookup (tags_data->all_tags, "+draft/react");
 	unreact_value = g_hash_table_lookup (tags_data->all_tags, "+draft/unreact");
-	reply_msgid = g_hash_table_lookup (tags_data->all_tags, "+draft/reply");
+	reply_msgid = tags_lookup_reply (tags_data->all_tags);
 
 	if (react_value && reply_msgid)
 	{

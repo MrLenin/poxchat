@@ -1397,7 +1397,7 @@ react_emoji_picked_cb (GtkWidget *chooser, const char *emoji, gpointer user_data
 	if (sess->server->have_message_tags)
 	{
 		char *escaped = escape_tag_value (emoji);
-		char *tags = g_strdup_printf ("+draft/react=%s;+draft/reply=%s", escaped, sess->react_target_msgid);
+		char *tags = g_strdup_printf ("+draft/react=%s;+reply=%s", escaped, sess->react_target_msgid);
 		tcp_sendf_with_raw_tags (sess->server, "TAGMSG", sess->channel, tags,
 		                         "TAGMSG %s\r\n", sess->channel);
 		g_free (tags);

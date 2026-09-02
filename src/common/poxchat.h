@@ -748,6 +748,7 @@ typedef struct server
 	unsigned int have_pre_away:1;	/* IRCv3 draft/pre-away capability */
 	unsigned int have_extended_isupport:1; /* IRCv3 draft/extended-isupport capability */
 	unsigned int utf8only:1;		/* Server requires UTF-8 encoding (ISUPPORT UTF8ONLY) */
+	unsigned int account_required:1;	/* ISUPPORT draft/ACCOUNTREQUIRED: must log in to register */
 	unsigned int have_except:1;	/* ban exemptions +e */
 	unsigned int have_invite:1;	/* invite exemptions +I */
 	unsigned int have_cert:1;	/* have loaded a cert */

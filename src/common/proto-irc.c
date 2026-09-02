@@ -349,7 +349,7 @@ irc_user_whois (server *serv, char *nicks)
 static void
 irc_message (server *serv, char *channel, char *text)
 {
-	/* IRCv3 +draft/reply: if the session has reply state set, include the tag */
+	/* IRCv3 +reply: if the session has reply state set, include the tag */
 	session *sess = find_channel (serv, channel);
 	if (!sess)
 		sess = find_dialog (serv, channel);
@@ -357,7 +357,7 @@ irc_message (server *serv, char *channel, char *text)
 	if (sess && sess->reply_msgid && serv->have_message_tags)
 	{
 		tcp_sendf_with_tags (serv, "PRIVMSG", channel,
-		                     "+draft/reply", sess->reply_msgid,
+		                     "+reply", sess->reply_msgid,
 		                     "PRIVMSG %s :%s\r\n", channel, text);
 		g_clear_pointer (&sess->reply_msgid, g_free);
 		g_clear_pointer (&sess->reply_nick, g_free);
@@ -373,7 +373,7 @@ irc_message (server *serv, char *channel, char *text)
 static void
 irc_action (server *serv, char *channel, char *act)
 {
-	/* IRCv3 +draft/reply: same treatment for /me actions */
+	/* IRCv3 +reply: same treatment for /me actions */
 	session *sess = find_channel (serv, channel);
 	if (!sess)
 		sess = find_dialog (serv, channel);
@@ -381,7 +381,7 @@ irc_action (server *serv, char *channel, char *act)
 	if (sess && sess->reply_msgid && serv->have_message_tags)
 	{
 		tcp_sendf_with_tags (serv, "ACTION", channel,
-		                     "+draft/reply", sess->reply_msgid,
+		                     "+reply", sess->reply_msgid,
 		                     "PRIVMSG %s :\001ACTION %s\001\r\n", channel, act);
 		g_clear_pointer (&sess->reply_msgid, g_free);
 		g_clear_pointer (&sess->reply_nick, g_free);
@@ -1372,6 +1372,11 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 			if (g_strcmp0(word[3], "*") == 0)
 			{
 				EMIT_SIGNAL_TIMESTAMP (XP_TE_FAIL, sess, word[4], text, NULL, NULL, NULL, tags_data->timestamp);
+				/* draft/account-registration: registration refused until we
+				 * log in.  Point the user at the fix instead of leaving a
+				 * bare FAIL line. */
+				if (g_ascii_strcasecmp (word[4], "ACCOUNT_REQUIRED") == 0)
+					inbound_account_required_hint (serv, sess);
 			} else
 			{
 				EMIT_SIGNAL_TIMESTAMP (XP_TE_FAILCMD, sess, word[3], word[4], text, NULL, NULL, tags_data->timestamp);
@@ -1499,7 +1504,18 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 					return;
 
 				if (!ignore_check (word[1], IG_NOTI))
-					inbound_notice (serv, word[3], nick, text, ip, tags_data->identified, tags_data);
+				{
+					char *to = word[3];
+					/* IRCv3 +channel-context: show a private notice in the
+					 * channel it relates to. */
+					if (!is_channel (serv, to))
+					{
+						session *ctx = inbound_channel_context (serv, tags_data);
+						if (ctx)
+							to = ctx->channel;
+					}
+					inbound_notice (serv, to, nick, text, ip, tags_data->identified, tags_data);
+				}
 			}
 			return;
 
@@ -1549,8 +1565,7 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 								}
 								if (ctx_sess && prefs.hex_irc_reply_show && tags_data->all_tags)
 								{
-									const char *reply_msgid = g_hash_table_lookup (tags_data->all_tags,
-									                                                "+draft/reply");
+									const char *reply_msgid = tags_lookup_reply (tags_data->all_tags);
 									if (reply_msgid)
 										fe_reply_context_set (ctx_sess, reply_msgid);
 								}
@@ -1645,8 +1660,7 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 								/* Attach reply context to the confirmed entry */
 								if (chan_sess && prefs.hex_irc_reply_show && tags_data->all_tags)
 								{
-									const char *reply_msgid = g_hash_table_lookup (tags_data->all_tags,
-									                                                "+draft/reply");
+									const char *reply_msgid = tags_lookup_reply (tags_data->all_tags);
 									if (reply_msgid)
 										fe_reply_context_set (chan_sess, reply_msgid);
 								}
@@ -1665,6 +1679,20 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 						{
 							if (ignore_check (word[1], IG_PRIV))
 								return;
+
+							/* IRCv3 +channel-context: a private message from
+							 * someone else that names a channel we're in is
+							 * displayed in that channel as a channel message. */
+							if (serv->p_cmp (nick, serv->nick))
+							{
+								session *ctx = inbound_channel_context (serv, tags_data);
+								if (ctx)
+								{
+									inbound_chanmsg (serv, ctx, ctx->channel, nick, text, FALSE,
+									                 tags_data->identified, tags_data);
+									return;
+								}
+							}
 
 							/* Self-message: bouncer/echo-message echoing our own
 							 * PRIVMSG back.  Route to a dialog with the TARGET
@@ -1686,8 +1714,7 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 									}
 									if (dlg_sess && prefs.hex_irc_reply_show && tags_data->all_tags)
 									{
-										const char *reply_msgid = g_hash_table_lookup (tags_data->all_tags,
-										                                                "+draft/reply");
+										const char *reply_msgid = tags_lookup_reply (tags_data->all_tags);
 										if (reply_msgid)
 											fe_reply_context_set (dlg_sess, reply_msgid);
 									}

@@ -915,6 +915,16 @@ inbound_005 (server * serv, char *word[], const message_tags_data *tags_data)
 			{
 				server_set_encoding (serv, "UTF-8");
 			}
+		} else if (g_strcmp0 (tokname, "draft/ACCOUNTREQUIRED") == 0 ||
+		           g_strcmp0 (tokname, "ACCOUNTREQUIRED") == 0)
+		{
+			/* draft/account-registration: connection registration can't
+			 * complete without logging in.  Normally only seen before
+			 * registration via draft/extended-isupport; once we're already
+			 * logged in there is nothing to say. */
+			serv->account_required = tokadding;
+			if (tokadding && !serv->end_of_motd)
+				inbound_account_required_hint (serv, NULL);
 		} else if (g_strcmp0 (tokname, "UTF8ONLY") == 0)
 		{
 			/* Server requires UTF-8 encoding - force it and track the flag */

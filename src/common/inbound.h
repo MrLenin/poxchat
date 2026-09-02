@@ -118,6 +118,15 @@ gboolean inbound_batch_add_message (server *serv, const char *prefix, const char
                                     char *word[], char *word_eol[], int word_count,
                                     const message_tags_data *tags_data);
 
+/* IRCv3 +reply lookup (accepts +reply and legacy +draft/reply) */
+const char *tags_lookup_reply (GHashTable *tags);
+
+/* IRCv3 +channel-context: channel session a private message belongs to, or NULL */
+session *inbound_channel_context (server *serv, const message_tags_data *tags_data);
+
+/* draft/account-registration: ACCOUNTREQUIRED / FAIL * ACCOUNT_REQUIRED guidance */
+void inbound_account_required_hint (server *serv, session *sess);
+
 /* IRCv3 TAGMSG support */
 void inbound_tagmsg (server *serv, char *to, char *nick, char *ip,
                      const message_tags_data *tags_data);

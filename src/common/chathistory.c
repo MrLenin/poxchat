@@ -45,6 +45,14 @@ static void chathistory_replay_mode (session *sess, char *nick,
                                      int param_count,
                                      const message_tags_data *tags_data);
 
+/* draft/chathistory-context: server-appended companion message (react,
+ * redact, edit...) that follows its parent and doesn't count toward limits. */
+static gboolean
+batch_msg_is_context (const batch_message *m)
+{
+	return m->tags && g_hash_table_contains (m->tags, "draft/chathistory-context");
+}
+
 /* Get effective limit for a CHATHISTORY request.
  * Prefers the server-advertised ISUPPORT CHATHISTORY=N value (the server is
  * telling us the optimal batch size).  Falls back to CHATHISTORY_DEFAULT_LIMIT
@@ -1900,20 +1908,26 @@ chathistory_process_batch (server *serv, batch_info *batch)
 	 * also ensures batch_oldest_msgid is captured correctly below. */
 	batch->messages = g_slist_sort (batch->messages, compare_batch_msg_timestamp);
 
-	if (batch->messages)
+	/* Pagination cursors and the "did the server hit its limit" count must
+	 * only consider real history entries.  draft/chathistory-context messages
+	 * (reacts, redactions, edits the server appends after their parent) are
+	 * not counted against the request limit and may lie outside the requested
+	 * range, so using one as a cursor would skip or repeat history. */
+	raw_count = 0;
 	{
-		batch_message *first_msg = batch->messages->data;
-		if (first_msg && first_msg->msgid)
-			batch_oldest_msgid = first_msg->msgid;
+		GSList *iter;
+		for (iter = batch->messages; iter; iter = iter->next)
+		{
+			batch_message *m = iter->data;
+			if (!m || batch_msg_is_context (m))
+				continue;
+			raw_count++;
+			if (!batch_oldest_msgid && m->msgid)
+				batch_oldest_msgid = m->msgid;
+			if (m->msgid)
+				batch_newest_msgid = m->msgid;
+		}
 	}
-	{
-		GSList *last = g_slist_last (batch->messages);
-		batch_message *last_msg = last ? last->data : NULL;
-		if (last_msg && last_msg->msgid)
-			batch_newest_msgid = last_msg->msgid;
-	}
-
-	raw_count = g_slist_length (batch->messages);
 
 	/* Keep history_loading TRUE until finish_batch_processing clears it —
 	 * this prevents new requests from being sent during chunked processing. */

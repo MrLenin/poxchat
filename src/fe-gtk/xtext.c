@@ -5314,7 +5314,7 @@ gtk_xtext_render_subline (GtkXText *xtext, int y, textentry *ent,
 			{
 				/* Reply-arrow placeholder: clear the U+FFFC cell and vector-draw.
 				 * Gated on ent->reply so a stray/injected sentinel that isn't an
-				 * actual +draft/reply can't conjure an arrow (it renders blank). */
+				 * actual +reply can't conjure an arrow (it renders blank). */
 				xtext_set_source_color (xtext, XTEXT_BG);
 				cairo_rectangle (xtext->cr, sprite_x, sprite_y,
 				                 xtext->fontsize, xtext->fontsize);
@@ -13551,7 +13551,7 @@ gtk_xtext_entry_remove_reaction (xtext_buffer *buf, textentry *ent,
 }
 
 /* IRCv3 reply context: set reply metadata on an entry.
- * Called when an incoming PRIVMSG/NOTICE has a +draft/reply tag.
+ * Called when an incoming PRIVMSG/NOTICE has a +reply tag.
  */
 void
 gtk_xtext_entry_set_reply (xtext_buffer *buf, textentry *ent,

@@ -2482,7 +2482,7 @@ cmd_react (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 
 	escaped = escape_tag_value (reaction);
 	{
-		char *tags = g_strdup_printf ("+draft/react=%s;+draft/reply=%s", escaped, msgid);
+		char *tags = g_strdup_printf ("+draft/react=%s;+reply=%s", escaped, msgid);
 		tcp_sendf_with_raw_tags (serv, "TAGMSG", sess->channel, tags,
 		                         "TAGMSG %s\r\n", sess->channel);
 		g_free (tags);
@@ -2536,7 +2536,7 @@ cmd_unreact (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 
 	escaped = escape_tag_value (reaction);
 	{
-		char *tags = g_strdup_printf ("+draft/unreact=%s;+draft/reply=%s", escaped, msgid);
+		char *tags = g_strdup_printf ("+draft/unreact=%s;+reply=%s", escaped, msgid);
 		tcp_sendf_with_raw_tags (serv, "TAGMSG", sess->channel, tags,
 		                         "TAGMSG %s\r\n", sess->channel);
 		g_free (tags);
@@ -3148,7 +3148,7 @@ cmd_me (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 	if (captured_reply_msgid)
 	{
 		self_reply_tags = g_hash_table_new (g_str_hash, g_str_equal);
-		g_hash_table_insert (self_reply_tags, (gpointer)"+draft/reply",
+		g_hash_table_insert (self_reply_tags, (gpointer)"+reply",
 		                     captured_reply_msgid);
 		reply_tags.all_tags = self_reply_tags;
 		self_tags = &reply_tags;
@@ -4392,7 +4392,7 @@ cmd_tagmsg (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 	{
 		PrintText (sess, "Usage: /TAGMSG <target> <tags>\n");
 		PrintText (sess, "Example: /TAGMSG #channel +typing=active\n");
-		PrintText (sess, "Example: /TAGMSG #channel +draft/react=👍;+draft/reply=msgid123\n");
+		PrintText (sess, "Example: /TAGMSG #channel +draft/react=👍;+reply=msgid123\n");
 		return TRUE;
 	}
 
@@ -4951,7 +4951,7 @@ const struct commands xc_cmds[] = {
 	{"REGISTER", cmd_register, 1, 0, 1, N_("REGISTER <account> [<email>|*] <password>, register a new account on the server (requires draft/account-registration)")},
 	{"RELOAD", cmd_reload, 0, 0, 1, N_("RELOAD <name>, reloads a plugin or script")},
 	{"REPLY", cmd_reply, 1, 0, 1,
-	 N_("REPLY [msgid] <text>, sends a reply to a message (IRCv3 +draft/reply)")},
+	 N_("REPLY [msgid] <text>, sends a reply to a message (IRCv3 +reply)")},
 	{"SAY", cmd_say, 0, 0, 1,
 	 N_("SAY <text>, sends the text to the object in the current window")},
 	{"SEND", cmd_send, 0, 0, 1, N_("SEND <nick> [<file>]")},
@@ -5430,7 +5430,7 @@ handle_say (session *sess, char *text, int check_spch)
 	int len;
 	int newcmdlen;
 	message_tags_data no_tags = MESSAGE_TAGS_DATA_INIT;
-	/* Synthesize +draft/reply tag for self-echo when sending a reply so
+	/* Synthesize +reply tag for self-echo when sending a reply so
 	 * inbound_chanmsg prepends the reply sentinel (U+FDD0) on local display.
 	 * p_message (irc_message) consumes sess->reply_msgid, so capture it
 	 * up front and free at function exit. */
@@ -5441,7 +5441,7 @@ handle_say (session *sess, char *text, int check_spch)
 	if (captured_reply_msgid)
 	{
 		self_reply_tags = g_hash_table_new (g_str_hash, g_str_equal);
-		g_hash_table_insert (self_reply_tags, (gpointer)"+draft/reply",
+		g_hash_table_insert (self_reply_tags, (gpointer)"+reply",
 		                     captured_reply_msgid);
 		reply_tags.all_tags = self_reply_tags;
 		self_tags = &reply_tags;
@@ -5458,7 +5458,7 @@ handle_say (session *sess, char *text, int check_spch)
 	    sess->server->have_message_tags && sess->channel[0])
 	{
 		char *escaped = escape_tag_value (text);
-		char *tags = g_strdup_printf ("+draft/react=%s;+draft/reply=%s",
+		char *tags = g_strdup_printf ("+draft/react=%s;+reply=%s",
 		                               escaped, sess->react_target_msgid);
 		tcp_sendf_with_raw_tags (sess->server, "TAGMSG", sess->channel, tags,
 		                         "TAGMSG %s\r\n", sess->channel);
