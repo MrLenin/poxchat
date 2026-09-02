@@ -140,6 +140,39 @@ function Get-SourceTree ([string] $Url, [string] $Name) {
 Write-Step 'gvsbuild: GTK4 and friends'
 $package = if ($GvsbuildVersion) { "gvsbuild==$GvsbuildVersion" } else { 'gvsbuild' }
 Invoke-Checked "pip install $package" { python -m pip install --upgrade --disable-pip-version-check $package }
+
+# Our own GTK4 patches (win32\ci\patches\gtk4-*.patch).  gvsbuild has no hook
+# for extra patches, so they are added to the installed package: copied next
+# to gvsbuild's own gtk4 patches and prepended to the Gtk4 project's patch
+# list, which gvsbuild applies with `patch -p1` when it unpacks the tarball.
+# Two things follow from that.  A patch is applied only when gtk4 is built
+# from scratch -- a restored cache with gtk4 already built keeps the old DLL,
+# so bump DEPS_CACHE_EPOCH in the workflow whenever a patch here changes.
+# And a patch is written against the GTK version the pinned gvsbuild builds;
+# when $GvsbuildVersion moves, re-check each patch against the new tarball
+# and drop the ones upstream has absorbed.
+$gvsPkg = (python -c 'import gvsbuild, os; print(os.path.dirname(gvsbuild.__file__))').Trim()
+if (-not (Test-Path $gvsPkg)) { throw "gvsbuild package not found at '$gvsPkg'" }
+$gtkProject = Join-Path $gvsPkg 'projects\gtk.py'
+$gtk4PatchDir = Join-Path $gvsPkg 'patches\gtk4'
+New-Item -ItemType Directory -Force -Path $gtk4PatchDir | Out-Null
+foreach ($patch in Get-ChildItem -Path (Join-Path $PSScriptRoot 'patches') -Filter 'gtk4-*.patch') {
+	Copy-Item -Path $patch.FullName -Destination $gtk4PatchDir -Force
+	$project = Get-Content -Path $gtkProject -Raw
+	if ($project.Contains($patch.Name)) {
+		Write-Host "$($patch.Name) already listed"
+		continue
+	}
+	$classAt = $project.IndexOf('class Gtk4(')
+	if ($classAt -lt 0) { throw "no Gtk4 project in $gtkProject" }
+	$listAt = $project.IndexOf('patches=[', $classAt)
+	if ($listAt -lt 0) { throw "Gtk4 project in $gtkProject has no patches list" }
+	$insertAt = $listAt + 'patches=['.Length
+	$project = $project.Substring(0, $insertAt) + "`n                `"$($patch.Name)`"," + $project.Substring($insertAt)
+	Set-Content -Path $gtkProject -Value $project -NoNewline
+	Write-Host "added $($patch.Name) to the Gtk4 project"
+}
+Invoke-Checked 'gvsbuild project file still imports' { python -c 'import gvsbuild.projects.gtk' }
 # --configuration release matters: gvsbuild defaults to debug-optimized, which
 # would land the prefix in ...\gtk\x64\debug-optimized instead of ...\release.
 $gvsSrc = Join-Path $BuildRoot 'src'

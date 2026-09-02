@@ -27,8 +27,11 @@ defaults:
 
 env:
   # Bump to invalidate the dependency cache without editing build-deps.ps1 --
-  # e.g. when a new gvsbuild release should be picked up.
-  DEPS_CACHE_EPOCH: '1'
+  # e.g. when a new gvsbuild release should be picked up, and whenever a
+  # patch under win32/ci/patches changes (a restored cache keeps the DLL it
+  # was built with; see build-deps.ps1).
+  # 2: gtk4-0003 (maximized toplevel resize on popover open)
+  DEPS_CACHE_EPOCH: '2'
   BUILD_DIR: ${{ github.workspace }}\poxchat-build
 
   # poxchat.props keeps its UserMacros environment-specific on purpose, so CI
