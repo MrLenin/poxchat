@@ -265,6 +265,20 @@ void scrollback_reply_list_free (GSList *list);
 scrollback_reply *scrollback_load_reply_by_msgid (scrollback_db *db, const char *channel,
                                                   const char *msgid);
 
+/**
+ * Batched lookups for a window of messages (virtual-scrollback
+ * re-materialization).  One IN(...) query per few hundred msgids instead
+ * of one probe per entry.  Both return a hash table the caller destroys
+ * with g_hash_table_destroy; values are owned by the table.
+ *   replies:   msgid -> scrollback_reply*
+ *   reactions: target_msgid -> GSList* of scrollback_reaction*
+ * NULL only when the channel is unknown.
+ */
+GHashTable *scrollback_load_replies_for_msgs (scrollback_db *db, const char *channel,
+                                              GSList *msgs);
+GHashTable *scrollback_load_reactions_for_msgs (scrollback_db *db, const char *channel,
+                                                GSList *msgs);
+
 /* --- Virtual scrollback query functions --- */
 
 /**

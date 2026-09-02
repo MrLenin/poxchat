@@ -63,6 +63,9 @@ struct scrollback_db {
 	/* Virtual scrollback support */
 	sqlite3_stmt *stmt_count;
 	sqlite3_stmt *stmt_load_range;
+	sqlite3_stmt *stmt_load_range_fwd;	/* keyset: rows at/after an anchor, ascending */
+	sqlite3_stmt *stmt_load_range_bwd;	/* keyset: rows at/before an anchor, descending */
+	GHashTable *chan_cache;			/* channel_id -> sb_chan_cache (counts + ordinal anchors) */
 	sqlite3_stmt *stmt_max_rowid;
 	sqlite3_stmt *stmt_index_of_rowid;
 	sqlite3_stmt *stmt_search_text;
@@ -113,6 +116,205 @@ get_db_path (const char *network)
 }
 
 /* --- Channel ID resolver --- */
+
+/* --- Per-channel ordinal cache ---------------------------------------
+ *
+ * The virtual scrollback addresses rows by ordinal (position in
+ * (timestamp, id) order).  Two things made that expensive on the GUI
+ * thread: COUNT(*) on every layout pass, and LIMIT/OFFSET paging that
+ * walks `offset` index rows through the decompressing VFS on every
+ * scroll step.  This cache remembers, per channel:
+ *
+ *   - the row count and newest timestamp, so a pure append (timestamp
+ *     >= newest) just bumps the count instead of re-counting;
+ *   - a bounded set of (ordinal -> (timestamp, id)) anchors taken from
+ *     the edges of every range loaded, so a later load near a known
+ *     ordinal can seek from the anchor with a keyset predicate and only
+ *     skip the short distance between them.
+ *
+ * Anything that can shift ordinals (an insert that isn't an append, any
+ * delete) invalidates the channel's entry; the next count/load rebuilds
+ * it.  Ordinals are only ever consumed on the GUI thread, so no locking. */
+
+#define SB_ANCHOR_MAX 128
+
+typedef struct {
+	int ordinal;
+	gint64 ts;
+	gint64 id;
+} sb_anchor;
+
+typedef struct {
+	int count;			/* -1 = unknown */
+	gint64 max_ts;		/* newest timestamp when count was taken/bumped */
+	GArray *anchors;	/* sb_anchor, sorted by ordinal */
+} sb_chan_cache;
+
+static void
+chan_cache_free (gpointer data)
+{
+	sb_chan_cache *c = data;
+	if (c->anchors)
+		g_array_free (c->anchors, TRUE);
+	g_free (c);
+}
+
+static sb_chan_cache *
+chan_cache_get (scrollback_db *db, gint64 channel_id, gboolean create)
+{
+	sb_chan_cache *c;
+
+	if (!db->chan_cache)
+	{
+		if (!create)
+			return NULL;
+		db->chan_cache = g_hash_table_new_full (g_int64_hash, g_int64_equal,
+		                                        g_free, chan_cache_free);
+	}
+	c = g_hash_table_lookup (db->chan_cache, &channel_id);
+	if (!c && create)
+	{
+		gint64 *key = g_new (gint64, 1);
+		*key = channel_id;
+		c = g_new0 (sb_chan_cache, 1);
+		c->count = -1;
+		c->anchors = g_array_new (FALSE, FALSE, sizeof (sb_anchor));
+		g_hash_table_insert (db->chan_cache, key, c);
+	}
+	return c;
+}
+
+static void
+chan_cache_invalidate (scrollback_db *db, gint64 channel_id)
+{
+	sb_chan_cache *c = chan_cache_get (db, channel_id, FALSE);
+	if (!c)
+		return;
+	c->count = -1;
+	c->max_ts = 0;
+	g_array_set_size (c->anchors, 0);
+}
+
+static void
+chan_cache_invalidate_all (scrollback_db *db)
+{
+	if (db->chan_cache)
+		g_hash_table_remove_all (db->chan_cache);
+}
+
+/* Record that row (ts, id) sits at `ordinal`.  Keeps the array sorted and
+ * bounded: when full, the anchor farthest from the newcomer is dropped,
+ * which keeps the cluster around where the user is actually scrolling. */
+static void
+chan_cache_add_anchor (sb_chan_cache *c, int ordinal, gint64 ts, gint64 id)
+{
+	sb_anchor a;
+	guint i;
+
+	if (!c || c->count < 0 || ordinal < 0)
+		return;
+
+	for (i = 0; i < c->anchors->len; i++)
+	{
+		sb_anchor *e = &g_array_index (c->anchors, sb_anchor, i);
+		if (e->ordinal == ordinal)
+		{
+			e->ts = ts;
+			e->id = id;
+			return;
+		}
+		if (e->ordinal > ordinal)
+			break;
+	}
+
+	if (c->anchors->len >= SB_ANCHOR_MAX)
+	{
+		guint far_i = 0;
+		int far_d = -1;
+		guint j;
+		for (j = 0; j < c->anchors->len; j++)
+		{
+			int d = ABS (g_array_index (c->anchors, sb_anchor, j).ordinal - ordinal);
+			if (d > far_d)
+			{
+				far_d = d;
+				far_i = j;
+			}
+		}
+		g_array_remove_index (c->anchors, far_i);
+		if (far_i < i)
+			i--;
+	}
+
+	a.ordinal = ordinal;
+	a.ts = ts;
+	a.id = id;
+	g_array_insert_val (c->anchors, i, a);
+}
+
+/* Best anchor at or before `ordinal` (largest ordinal <= it), and best at
+ * or after `end` (smallest ordinal >= it).  Either may be NULL. */
+static void
+chan_cache_find_anchors (sb_chan_cache *c, int ordinal, int end,
+                         sb_anchor **before, sb_anchor **after)
+{
+	guint i;
+
+	*before = NULL;
+	*after = NULL;
+	if (!c || c->count < 0)
+		return;
+
+	for (i = 0; i < c->anchors->len; i++)
+	{
+		sb_anchor *e = &g_array_index (c->anchors, sb_anchor, i);
+		if (e->ordinal <= ordinal)
+			*before = e;
+		if (e->ordinal >= end)
+		{
+			*after = e;
+			break;
+		}
+	}
+}
+
+/* Count + newest timestamp for a channel, from cache or a fresh scan. */
+static sb_chan_cache *
+chan_cache_ensure_count (scrollback_db *db, gint64 channel_id)
+{
+	sb_chan_cache *c = chan_cache_get (db, channel_id, TRUE);
+
+	if (c->count >= 0)
+		return c;
+
+	sqlite3_reset (db->stmt_count);
+	sqlite3_bind_int64 (db->stmt_count, 1, channel_id);
+	if (sqlite3_step (db->stmt_count) == SQLITE_ROW)
+	{
+		c->count = sqlite3_column_int (db->stmt_count, 0);
+		c->max_ts = sqlite3_column_int64 (db->stmt_count, 1);
+	}
+	else
+		c->count = 0;
+	return c;
+}
+
+/* A row was stored: keep the cache coherent without a rescan when the
+ * row lands at the end of the channel's order. */
+static void
+chan_cache_note_insert (scrollback_db *db, gint64 channel_id, gint64 ts)
+{
+	sb_chan_cache *c = chan_cache_get (db, channel_id, FALSE);
+	if (!c || c->count < 0)
+		return;
+	if (c->count == 0 || ts >= c->max_ts)
+	{
+		c->count++;
+		c->max_ts = ts;
+	}
+	else
+		chan_cache_invalidate (db, channel_id);
+}
 
 static gint64
 scrollback_get_channel_id (scrollback_db *sdb, const char *channel)
@@ -216,6 +418,11 @@ init_database (scrollback_db *sdb)
 	/* Inner DB uses MEMORY journal — atomicity comes from the outer
 	 * (compressed) DB's own transactions via the zstd VFS. */
 	sqlite3_exec (sdb->db, "PRAGMA journal_mode=MEMORY;", NULL, NULL, NULL);
+	/* The zstd VFS has no page cache of its own: every miss here is an
+	 * outer-DB lookup plus a decompress.  SQLite's default (~2 MB) is far
+	 * too small for a scroll through a large channel; give the inner
+	 * connection a real working set (negative = KiB). */
+	sqlite3_exec (sdb->db, "PRAGMA cache_size=-32768;", NULL, NULL, NULL);
 
 	rc = sqlite3_exec (sdb->db, schema, NULL, NULL, &errmsg);
 
@@ -572,7 +779,7 @@ prepare_statements (scrollback_db *sdb)
 
 	/* Virtual scrollback: total message count */
 	rc = sqlite3_prepare_v2 (sdb->db,
-		"SELECT COUNT(*) FROM messages WHERE channel_id = ?",
+		"SELECT COUNT(*), IFNULL(MAX(timestamp), 0) FROM messages WHERE channel_id = ?",
 		-1, &sdb->stmt_count, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
@@ -583,6 +790,27 @@ prepare_statements (scrollback_db *sdb)
 		"is_user_msg "
 		"FROM messages WHERE channel_id = ? ORDER BY timestamp ASC, id ASC LIMIT ? OFFSET ?",
 		-1, &sdb->stmt_load_range, NULL);
+	if (rc != SQLITE_OK) goto fail;
+
+	/* Keyset variants of load_range: seek from a known (timestamp, id)
+	 * anchor (inclusive) and only OFFSET the short remaining distance.
+	 * Same column list and (timestamp, id) ordering as stmt_load_range;
+	 * the backward one is walked in reverse and the result flipped. */
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT id, timestamp, msgid, text, redacted_by, redact_reason, redact_time, "
+		"is_user_msg "
+		"FROM messages WHERE channel_id = ?1 AND "
+		"(timestamp > ?2 OR (timestamp = ?2 AND id >= ?3)) "
+		"ORDER BY timestamp ASC, id ASC LIMIT ?4 OFFSET ?5",
+		-1, &sdb->stmt_load_range_fwd, NULL);
+	if (rc != SQLITE_OK) goto fail;
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT id, timestamp, msgid, text, redacted_by, redact_reason, redact_time, "
+		"is_user_msg "
+		"FROM messages WHERE channel_id = ?1 AND "
+		"(timestamp < ?2 OR (timestamp = ?2 AND id <= ?3)) "
+		"ORDER BY timestamp DESC, id DESC LIMIT ?4 OFFSET ?5",
+		-1, &sdb->stmt_load_range_bwd, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
 	/* Virtual scrollback: maximum row ID for a channel */
@@ -652,6 +880,9 @@ finalize_statements (scrollback_db *sdb)
 	if (sdb->stmt_redact) sqlite3_finalize (sdb->stmt_redact);
 	if (sdb->stmt_count) sqlite3_finalize (sdb->stmt_count);
 	if (sdb->stmt_load_range) sqlite3_finalize (sdb->stmt_load_range);
+	if (sdb->stmt_load_range_fwd) sqlite3_finalize (sdb->stmt_load_range_fwd);
+	if (sdb->stmt_load_range_bwd) sqlite3_finalize (sdb->stmt_load_range_bwd);
+	if (sdb->chan_cache) g_hash_table_destroy (sdb->chan_cache);
 	if (sdb->stmt_max_rowid) sqlite3_finalize (sdb->stmt_max_rowid);
 	if (sdb->stmt_index_of_rowid) sqlite3_finalize (sdb->stmt_index_of_rowid);
 	if (sdb->stmt_search_text) sqlite3_finalize (sdb->stmt_search_text);
@@ -944,6 +1175,8 @@ scrollback_db_save (scrollback_db *db, const char *channel,
 	if (sqlite3_changes (db->db) == 0)
 		return -1;
 
+	chan_cache_note_insert (db, channel_id, (gint64) timestamp);
+
 	return (gint64) sqlite3_last_insert_rowid (db->db);
 }
 
@@ -975,6 +1208,8 @@ scrollback_db_load (scrollback_db *db, const char *channel, int limit)
 			g_warning ("Failed to purge pending entries: %s", errmsg);
 			sqlite3_free (errmsg);
 		}
+		else if (sqlite3_changes (db->db) > 0)
+			chan_cache_invalidate (db, channel_id);
 		sqlite3_free (sql);
 	}
 
@@ -1135,7 +1370,13 @@ scrollback_delete_by_rowid (scrollback_db *db, gint64 rowid)
 	sqlite3_bind_int64 (stmt, 1, rowid);
 	rc = sqlite3_step (stmt);
 	sqlite3_finalize (stmt);
-	return (rc == SQLITE_DONE && sqlite3_changes (db->db) > 0);
+	if (rc == SQLITE_DONE && sqlite3_changes (db->db) > 0)
+	{
+		/* No channel in hand; ordinals after the row shifted. */
+		chan_cache_invalidate_all (db);
+		return TRUE;
+	}
+	return FALSE;
 }
 
 gboolean
@@ -1231,6 +1472,7 @@ scrollback_clear (scrollback_db *db, const char *channel)
 		sqlite3_finalize (stmt);
 	}
 
+	chan_cache_invalidate (db, channel_id);
 	sqlite3_reset (db->stmt_clear);
 	sqlite3_bind_int64 (db->stmt_clear, 1, channel_id);
 	sqlite3_step (db->stmt_clear);
@@ -1709,6 +1951,171 @@ scrollback_reply_list_free (GSList *list)
 	g_slist_free_full (list, (GDestroyNotify)scrollback_reply_free);
 }
 
+/* --- Batched reply/reaction lookup for a window of messages ---
+ *
+ * Re-materializing a scrolled-in range used to probe replies and
+ * reactions once per entry (two statements x hundreds of rows per scroll
+ * step).  These build one IN (...) query per chunk of msgids and hand
+ * back hash tables the caller consults instead. */
+
+#define SB_IN_CHUNK 400
+
+static GPtrArray *
+collect_msgids (GSList *msgs)
+{
+	GPtrArray *ids = g_ptr_array_new ();
+	GSList *it;
+	for (it = msgs; it; it = it->next)
+	{
+		scrollback_msg *m = it->data;
+		if (m && m->msgid && m->msgid[0])
+			g_ptr_array_add (ids, m->msgid);
+	}
+	return ids;
+}
+
+static char *
+build_in_sql (const char *prefix, guint n, const char *suffix)
+{
+	GString *sql = g_string_new (prefix);
+	guint i;
+	g_string_append (sql, " IN (");
+	for (i = 0; i < n; i++)
+		g_string_append (sql, i ? ",?" : "?");
+	g_string_append (sql, ")");
+	if (suffix)
+		g_string_append (sql, suffix);
+	return g_string_free (sql, FALSE);
+}
+
+static void
+reaction_list_free_cb (gpointer data)
+{
+	scrollback_reaction_list_free ((GSList *) data);
+}
+
+GHashTable *
+scrollback_load_replies_for_msgs (scrollback_db *db, const char *channel, GSList *msgs)
+{
+	GHashTable *out;
+	GPtrArray *ids;
+	gint64 channel_id;
+	guint pos;
+
+	if (!db || !channel)
+		return NULL;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return NULL;
+
+	out = g_hash_table_new_full (g_str_hash, g_str_equal, NULL,
+	                             (GDestroyNotify) scrollback_reply_free);
+	ids = collect_msgids (msgs);
+
+	for (pos = 0; pos < ids->len; pos += SB_IN_CHUNK)
+	{
+		guint n = MIN (SB_IN_CHUNK, ids->len - pos);
+		char *sql = build_in_sql (
+			"SELECT msgid, target_msgid, target_nick, target_preview "
+			"FROM replies WHERE channel_id = ? AND msgid", n, NULL);
+		sqlite3_stmt *stmt = NULL;
+		guint i;
+
+		if (sqlite3_prepare_v2 (db->db, sql, -1, &stmt, NULL) == SQLITE_OK)
+		{
+			sqlite3_bind_int64 (stmt, 1, channel_id);
+			for (i = 0; i < n; i++)
+				sqlite3_bind_text (stmt, 2 + i, g_ptr_array_index (ids, pos + i),
+				                   -1, SQLITE_STATIC);
+			while (sqlite3_step (stmt) == SQLITE_ROW)
+			{
+				scrollback_reply *r = g_new0 (scrollback_reply, 1);
+				r->msgid = g_strdup ((const char *) sqlite3_column_text (stmt, 0));
+				r->target_msgid = g_strdup ((const char *) sqlite3_column_text (stmt, 1));
+				r->target_nick = g_strdup ((const char *) sqlite3_column_text (stmt, 2));
+				r->target_preview = g_strdup ((const char *) sqlite3_column_text (stmt, 3));
+				g_hash_table_replace (out, r->msgid, r);
+			}
+		}
+		if (stmt)
+			sqlite3_finalize (stmt);
+		g_free (sql);
+	}
+
+	g_ptr_array_free (ids, TRUE);
+	return out;
+}
+
+GHashTable *
+scrollback_load_reactions_for_msgs (scrollback_db *db, const char *channel, GSList *msgs)
+{
+	GHashTable *out;
+	GPtrArray *ids;
+	gint64 channel_id;
+	guint pos;
+
+	if (!db || !channel)
+		return NULL;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return NULL;
+
+	out = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+	                             reaction_list_free_cb);
+	ids = collect_msgids (msgs);
+
+	for (pos = 0; pos < ids->len; pos += SB_IN_CHUNK)
+	{
+		guint n = MIN (SB_IN_CHUNK, ids->len - pos);
+		char *sql = build_in_sql (
+			"SELECT target_msgid, reaction_text, nick, is_self "
+			"FROM reactions WHERE channel_id = ? AND target_msgid", n,
+			" ORDER BY target_msgid, reaction_text");
+		sqlite3_stmt *stmt = NULL;
+		guint i;
+
+		if (sqlite3_prepare_v2 (db->db, sql, -1, &stmt, NULL) == SQLITE_OK)
+		{
+			sqlite3_bind_int64 (stmt, 1, channel_id);
+			for (i = 0; i < n; i++)
+				sqlite3_bind_text (stmt, 2 + i, g_ptr_array_index (ids, pos + i),
+				                   -1, SQLITE_STATIC);
+			while (sqlite3_step (stmt) == SQLITE_ROW)
+			{
+				const char *target = (const char *) sqlite3_column_text (stmt, 0);
+				scrollback_reaction *r;
+				GSList *lst;
+				char *key;
+
+				if (!target)
+					continue;
+				r = g_new0 (scrollback_reaction, 1);
+				r->target_msgid = g_strdup (target);
+				r->reaction_text = g_strdup ((const char *) sqlite3_column_text (stmt, 1));
+				r->nick = g_strdup ((const char *) sqlite3_column_text (stmt, 2));
+				r->is_self = sqlite3_column_int (stmt, 3) != 0;
+
+				/* Steal the list so the table's destroy notify doesn't
+				 * free it while we append (ORDER BY keeps rows grouped). */
+				if (g_hash_table_lookup_extended (out, target, (gpointer *) &key, (gpointer *) &lst))
+				{
+					g_hash_table_steal (out, target);
+					lst = g_slist_append (lst, r);
+					g_hash_table_insert (out, key, lst);
+				}
+				else
+					g_hash_table_insert (out, g_strdup (target), g_slist_append (NULL, r));
+			}
+		}
+		if (stmt)
+			sqlite3_finalize (stmt);
+		g_free (sql);
+	}
+
+	g_ptr_array_free (ids, TRUE);
+	return out;
+}
+
 /* --- Virtual scrollback query functions --- */
 
 int
@@ -1723,11 +2130,7 @@ scrollback_count (scrollback_db *db, const char *channel)
 	if (channel_id < 0)
 		return 0;
 
-	sqlite3_reset (db->stmt_count);
-	sqlite3_bind_int64 (db->stmt_count, 1, channel_id);
-
-	if (sqlite3_step (db->stmt_count) == SQLITE_ROW)
-		count = sqlite3_column_int (db->stmt_count, 0);
+	count = chan_cache_ensure_count (db, channel_id)->count;
 
 	return count;
 }
@@ -1736,7 +2139,9 @@ GSList *
 scrollback_load_range (scrollback_db *db, const char *channel, int offset, int limit)
 {
 	GSList *list = NULL;
+	sqlite3_stmt *stmt;
 	int rc;
+	int n = 0;
 
 	if (!db || !channel)
 		return NULL;
@@ -1747,42 +2152,111 @@ scrollback_load_range (scrollback_db *db, const char *channel, int offset, int l
 
 	if (limit <= 0)
 		limit = 500;
+	if (offset < 0)
+		offset = 0;
 
-	sqlite3_reset (db->stmt_load_range);
-	sqlite3_bind_int64 (db->stmt_load_range, 1, channel_id);
-	sqlite3_bind_int (db->stmt_load_range, 2, limit);
-	sqlite3_bind_int (db->stmt_load_range, 3, offset);
-
-	while ((rc = sqlite3_step (db->stmt_load_range)) == SQLITE_ROW)
+	/* Pick the cheapest way to reach `offset`: a plain OFFSET walk costs
+	 * `offset` index rows; seeking from a cached anchor costs only the
+	 * distance between the anchor and the requested edge. */
 	{
-		scrollback_msg *msg = g_new0 (scrollback_msg, 1);
+		sb_chan_cache *c = chan_cache_ensure_count (db, channel_id);
+		int end = offset + limit - 1;
+		sb_anchor *before, *after;
+		int cost_plain = offset;
+		int cost_fwd = G_MAXINT, cost_bwd = G_MAXINT;
+		gboolean backward = FALSE;
 
-		msg->id = sqlite3_column_int64 (db->stmt_load_range, 0);
-		msg->channel = g_strdup (channel);
-		msg->timestamp = (time_t)sqlite3_column_int64 (db->stmt_load_range, 1);
+		if (c->count <= 0 || offset >= c->count)
+			return NULL;
+		if (end > c->count - 1)
+			end = c->count - 1;
+		limit = end - offset + 1;
 
-		const char *msgid_text = (const char *)sqlite3_column_text (db->stmt_load_range, 2);
-		msg->msgid = msgid_text ? g_strdup (msgid_text) : NULL;
+		chan_cache_find_anchors (c, offset, end, &before, &after);
+		if (before)
+			cost_fwd = offset - before->ordinal;
+		if (after)
+			cost_bwd = after->ordinal - end;
 
-		msg->text = g_strdup ((const char *)sqlite3_column_text (db->stmt_load_range, 3));
-
+		if (cost_fwd <= cost_plain && cost_fwd <= cost_bwd)
 		{
-			const char *rby = (const char *)sqlite3_column_text (db->stmt_load_range, 4);
-			const char *rreason = (const char *)sqlite3_column_text (db->stmt_load_range, 5);
-			msg->redacted_by = rby ? g_strdup (rby) : NULL;
-			msg->redact_reason = rreason ? g_strdup (rreason) : NULL;
-			msg->redact_time = (time_t)sqlite3_column_int64 (db->stmt_load_range, 6);
+			stmt = db->stmt_load_range_fwd;
+			sqlite3_reset (stmt);
+			sqlite3_bind_int64 (stmt, 1, channel_id);
+			sqlite3_bind_int64 (stmt, 2, before->ts);
+			sqlite3_bind_int64 (stmt, 3, before->id);
+			sqlite3_bind_int (stmt, 4, limit);
+			sqlite3_bind_int (stmt, 5, cost_fwd);
 		}
-		msg->is_user_msg = sqlite3_column_int (db->stmt_load_range, 7) ? TRUE : FALSE;
+		else if (cost_bwd < cost_plain)
+		{
+			stmt = db->stmt_load_range_bwd;
+			backward = TRUE;
+			sqlite3_reset (stmt);
+			sqlite3_bind_int64 (stmt, 1, channel_id);
+			sqlite3_bind_int64 (stmt, 2, after->ts);
+			sqlite3_bind_int64 (stmt, 3, after->id);
+			sqlite3_bind_int (stmt, 4, limit);
+			sqlite3_bind_int (stmt, 5, cost_bwd);
+		}
+		else
+		{
+			stmt = db->stmt_load_range;
+			sqlite3_reset (stmt);
+			sqlite3_bind_int64 (stmt, 1, channel_id);
+			sqlite3_bind_int (stmt, 2, limit);
+			sqlite3_bind_int (stmt, 3, offset);
+		}
 
-		/* ASC order — append to maintain chronological order */
-		list = g_slist_prepend (list, msg);
+		while ((rc = sqlite3_step (stmt)) == SQLITE_ROW)
+		{
+			scrollback_msg *msg = g_new0 (scrollback_msg, 1);
+
+			msg->id = sqlite3_column_int64 (stmt, 0);
+			msg->channel = g_strdup (channel);
+			msg->timestamp = (time_t)sqlite3_column_int64 (stmt, 1);
+
+			const char *msgid_text = (const char *)sqlite3_column_text (stmt, 2);
+			msg->msgid = msgid_text ? g_strdup (msgid_text) : NULL;
+
+			msg->text = g_strdup ((const char *)sqlite3_column_text (stmt, 3));
+
+			{
+				const char *rby = (const char *)sqlite3_column_text (stmt, 4);
+				const char *rreason = (const char *)sqlite3_column_text (stmt, 5);
+				msg->redacted_by = rby ? g_strdup (rby) : NULL;
+				msg->redact_reason = rreason ? g_strdup (rreason) : NULL;
+				msg->redact_time = (time_t)sqlite3_column_int64 (stmt, 6);
+			}
+			msg->is_user_msg = sqlite3_column_int (stmt, 7) ? TRUE : FALSE;
+
+			list = g_slist_prepend (list, msg);
+			n++;
+		}
+
+		if (rc != SQLITE_DONE)
+			g_warning ("Error loading scrollback range: %s", sqlite3_errmsg (db->db));
+
+		/* Prepending ASC rows yields DESC; prepending DESC rows yields ASC. */
+		if (!backward)
+			list = g_slist_reverse (list);
+
+		/* Remember both edges of what we just walked: the next scroll step
+		 * will ask for a range adjacent to this one. */
+		if (n > 0)
+		{
+			scrollback_msg *first = list->data;
+			scrollback_msg *last = g_slist_last (list)->data;
+			/* A short read (stale count) leaves the walked rows hugging
+			 * the anchor we started from, so derive ordinals from that
+			 * side rather than assuming the full span came back. */
+			int first_ord = backward ? end - n + 1 : offset;
+			chan_cache_add_anchor (c, first_ord, (gint64) first->timestamp, first->id);
+			chan_cache_add_anchor (c, first_ord + n - 1, (gint64) last->timestamp, last->id);
+		}
 	}
 
-	if (rc != SQLITE_DONE)
-		g_warning ("Error loading scrollback range: %s", sqlite3_errmsg (db->db));
-
-	return g_slist_reverse (list);
+	return list;
 }
 
 gint64

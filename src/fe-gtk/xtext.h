@@ -251,6 +251,8 @@ typedef struct {
 	int insert_hint_lines;			/* cumulative display lines up to insert_hint */
 	void *virt_db;					/* scrollback_db* (void* to avoid header dependency) */
 	char *virt_channel;				/* channel name for DB queries */
+	GHashTable *virt_prefetch_replies;	/* msgid -> scrollback_reply*, live only while a range loads */
+	GHashTable *virt_prefetch_reactions;	/* msgid -> GSList<scrollback_reaction*>, same lifetime */
 
 	int total_entries;				/* total messages in DB for this channel */
 	int mat_first_index;			/* 0-based index of text_first in total order */

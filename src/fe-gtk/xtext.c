@@ -12136,8 +12136,11 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	 * add234 so set_reply's update_weight234 can find this entry. */
 	if (msg->msgid && msg->msgid[0] && buf->virt_db)
 	{
-		scrollback_reply *r = scrollback_load_reply_by_msgid (
-			(scrollback_db *)buf->virt_db, buf->virt_channel, msg->msgid);
+		gboolean owned = !buf->virt_prefetch_replies;
+		scrollback_reply *r = owned
+			? scrollback_load_reply_by_msgid ((scrollback_db *)buf->virt_db,
+			                                  buf->virt_channel, msg->msgid)
+			: g_hash_table_lookup (buf->virt_prefetch_replies, msg->msgid);
 		if (r)
 		{
 			guint64 target_id = 0;
@@ -12150,7 +12153,8 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 			gtk_xtext_entry_set_reply (buf, ent, r->target_msgid,
 			                            r->target_nick, r->target_preview,
 			                            target_id);
-			scrollback_reply_free (r);
+			if (owned)
+				scrollback_reply_free (r);
 		}
 	}
 
@@ -12160,8 +12164,11 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	 * rebuild loses them on the new entry. */
 	if (msg->msgid && msg->msgid[0] && buf->virt_db)
 	{
-		GSList *reactions = scrollback_load_reactions_by_msgid (
-			(scrollback_db *)buf->virt_db, buf->virt_channel, msg->msgid);
+		gboolean owned = !buf->virt_prefetch_reactions;
+		GSList *reactions = owned
+			? scrollback_load_reactions_by_msgid ((scrollback_db *)buf->virt_db,
+			                                      buf->virt_channel, msg->msgid)
+			: g_hash_table_lookup (buf->virt_prefetch_reactions, msg->msgid);
 		GSList *it;
 		for (it = reactions; it; it = it->next)
 		{
@@ -12169,7 +12176,8 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 			gtk_xtext_entry_add_reaction (buf, ent, r->reaction_text,
 			                              r->nick, r->is_self);
 		}
-		scrollback_reaction_list_free (reactions);
+		if (owned)
+			scrollback_reaction_list_free (reactions);
 	}
 
 	/* Re-apply visual redaction from the DB.  The initial scrollback load
@@ -12237,6 +12245,31 @@ gtk_xtext_virt_evict_tail (xtext_buffer *buf)
 	gtk_xtext_kill_ent (buf, ent);
 }
 
+/* Batch the reply/reaction lookups for a freshly loaded range so
+ * gtk_xtext_virt_materialize_msg does hash lookups instead of two DB
+ * probes per entry.  Bracket every load-then-materialize loop with
+ * these; the tables live only until _end. */
+static void
+gtk_xtext_virt_prefetch_end (xtext_buffer *buf)
+{
+	g_clear_pointer (&buf->virt_prefetch_replies, g_hash_table_destroy);
+	g_clear_pointer (&buf->virt_prefetch_reactions, g_hash_table_destroy);
+}
+
+static void
+gtk_xtext_virt_prefetch_begin (xtext_buffer *buf, GSList *msgs)
+{
+	scrollback_db *db = (scrollback_db *) buf->virt_db;
+
+	gtk_xtext_virt_prefetch_end (buf);
+	if (!db || !msgs)
+		return;
+	buf->virt_prefetch_replies =
+		scrollback_load_replies_for_msgs (db, buf->virt_channel, msgs);
+	buf->virt_prefetch_reactions =
+		scrollback_load_reactions_for_msgs (db, buf->virt_channel, msgs);
+}
+
 /* Re-center the materialization window on a distant target range.
  * Used when the wanted range is disjoint from the current window: walking
  * the gap would materialize (then immediately evict) every entry in
@@ -12292,6 +12325,8 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 		XT_PERF ("recenter-bail empty-load want=[%d,%d]", want_start, want_end);
 		return FALSE;	/* DB error / empty range — keep the old window */
 	}
+
+	gtk_xtext_virt_prefetch_begin (buf, msgs);
 
 	poxchat_timing_log ("recenter buf=%p want=[%d..%d] old_mat_first=%d",
 	                    (void *)buf, want_start, want_end, buf->mat_first_index);
@@ -12356,6 +12391,7 @@ gtk_xtext_virt_recenter (xtext_buffer *buf, int want_start, int want_end)
 			buf->text_last = ent;
 		}
 	}
+	gtk_xtext_virt_prefetch_end (buf);
 	scrollback_msg_list_free (msgs);
 
 #if XTEXT_VIRT_PERF_LOG
@@ -12463,6 +12499,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 	{
 		int count = mat_start - want_start;
 		GSList *msgs = scrollback_load_range (db, buf->virt_channel, want_start, count);
+		gtk_xtext_virt_prefetch_begin (buf, msgs);
 		GSList *iter;
 		textentry *chain_first = NULL, *chain_last = NULL;
 		int loaded = 0;
@@ -12501,6 +12538,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		}
 
 		buf->mat_first_index = want_start;
+		gtk_xtext_virt_prefetch_end (buf);
 		scrollback_msg_list_free (msgs);
 
 		/* Create day separators between the newly prepended entries and
@@ -12547,6 +12585,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 	{
 		int count = want_end - mat_end;
 		GSList *msgs = scrollback_load_range (db, buf->virt_channel, mat_end + 1, count);
+		gtk_xtext_virt_prefetch_begin (buf, msgs);
 		GSList *iter;
 		int loaded = 0;
 
@@ -12571,6 +12610,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			loaded++;
 		}
 
+		gtk_xtext_virt_prefetch_end (buf);
 		scrollback_msg_list_free (msgs);
 	}
 	else if (want_end > mat_end && BUF_MAT_COUNT (buf) == 0)
@@ -12578,6 +12618,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		/* Nothing materialized yet — initial load */
 		int count = want_end - want_start + 1;
 		GSList *msgs = scrollback_load_range (db, buf->virt_channel, want_start, count);
+		gtk_xtext_virt_prefetch_begin (buf, msgs);
 		GSList *iter;
 
 		buf->mat_first_index = want_start;
@@ -12602,6 +12643,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			gtk_xtext_maybe_insert_gap_marker (buf, ent);
 		}
 
+		gtk_xtext_virt_prefetch_end (buf);
 		scrollback_msg_list_free (msgs);
 	}
 
