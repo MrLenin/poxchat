@@ -235,6 +235,8 @@ struct _HexInputEditPriv
 
 	/* Dirty flags */
 	gboolean parse_dirty;	/* text changed, need re-parse */
+	gboolean layout_dirty;	/* layout text/attrs must be rebuilt */
+	int layout_width;		/* width the layout was last wrapped for */
 
 	/* Undo/redo */
 	GPtrArray *undo_stack;		/* array of UndoSnapshot* */
@@ -246,6 +248,7 @@ struct _HexInputEditPriv
 	GHashTable           *dict_hash;	/* lang tag → EnchantDict* */
 	GSList               *dict_list;	/* list of active EnchantDict* */
 	gboolean              spell_checked;	/* spell checking enabled */
+	GHashTable           *spell_memo;	/* word → verdict; see word_misspelled */
 
 	/* Spell context menu state (valid while popover is open) */
 	char                 *spell_word;		/* misspelled word (owned) */
@@ -293,15 +296,44 @@ default_word_check (HexInputEdit *edit, const gchar *word)
 	return result;
 }
 
+/* Verdicts are memoized per word. spell_check_attrs re-checks the whole
+ * buffer on every layout rebuild, and an Enchant lookup costs on the order
+ * of a millisecond, so without the memo every keystroke in a long message
+ * re-pays for every word already checked (measured: 44 s for a 300 KB
+ * paste). Cleared whenever a verdict could change: dictionary changes and
+ * additions to the personal word list. */
+#define SPELL_MEMO_MAX 8192
+#define SPELL_CHECK_MAX_BYTES (64 * 1024)
+
+static void
+spell_memo_clear (HexInputEditPriv *priv)
+{
+	if (priv->spell_memo)
+		g_hash_table_remove_all (priv->spell_memo);
+}
+
 static gboolean
 word_misspelled (HexInputEdit *edit, const char *word)
 {
+	HexInputEditPriv *priv = edit->priv;
 	gboolean ret = FALSE;
+	gpointer memo;
 
 	if (!word || !*word)
 		return FALSE;
 
+	if (!priv->spell_memo)
+		priv->spell_memo = g_hash_table_new_full (g_str_hash, g_str_equal,
+		                                          g_free, NULL);
+	else if (g_hash_table_lookup_extended (priv->spell_memo, word, NULL, &memo))
+		return GPOINTER_TO_INT (memo) != 0;
+
 	g_signal_emit (edit, signals[SIGNAL_WORD_CHECK], 0, word, &ret);
+
+	if (g_hash_table_size (priv->spell_memo) >= SPELL_MEMO_MAX)
+		g_hash_table_remove_all (priv->spell_memo);
+	g_hash_table_insert (priv->spell_memo, g_strdup (word),
+	                     GINT_TO_POINTER (ret ? 1 : 0));
 	return ret;
 }
 
@@ -322,6 +354,11 @@ spell_check_attrs (HexInputEdit *edit, PangoAttrList *attrs)
 	if (!priv->dict_list)
 		return;
 	if (!priv->stripped_str || priv->stripped_len <= 0)
+		return;
+	/* A buffer this large only gets here through the paste confirmation;
+	 * checking it costs seconds per word-pass and nobody proofreads it by
+	 * underline. Skip rather than stall. */
+	if (priv->stripped_len > SPELL_CHECK_MAX_BYTES)
 		return;
 
 	text = (const char *) priv->stripped_str;
@@ -519,20 +556,60 @@ reparse_text (HexInputEdit *edit)
 	priv->parse_dirty = FALSE;
 }
 
-/* Update the PangoLayout for rendering. */
+/* Apply the wrap width. Cheaper than a text reset (Pango only drops its
+ * line cache), so it is keyed separately on the width. */
+static void
+set_layout_width (HexInputEditPriv *priv, int width)
+{
+	priv->layout_width = width;
+
+	/* Wrapping for multiline */
+	if (priv->multiline && width > 2 * HPAD)
+	{
+		pango_layout_set_width (priv->layout, (width - 2 * HPAD) * PANGO_SCALE);
+		pango_layout_set_wrap (priv->layout, PANGO_WRAP_WORD_CHAR);
+	}
+	else
+	{
+		pango_layout_set_width (priv->layout, -1);
+	}
+}
+
+/* Update the PangoLayout for rendering.
+ *
+ * Called from snapshot, measure, size_allocate, ensure_cursor_visible and
+ * the line queries — several times per keystroke. Everything below the
+ * dirty checks is O(buffer) (pango_layout_set_text re-itemizes and
+ * re-shapes the whole string, and spell_check_attrs hits Enchant for every
+ * word), so it must only run when something that feeds the layout actually
+ * changed. A 1 MB paste turned that per-frame cost into a multi-second
+ * stall per event and hung the GUI thread indefinitely. */
 static void
 update_layout (HexInputEdit *edit, int width)
 {
 	HexInputEditPriv *priv = edit->priv;
 
 	if (priv->parse_dirty)
+	{
 		reparse_text (edit);
+		priv->layout_dirty = TRUE;
+	}
 
 	if (!priv->layout)
 	{
 		PangoContext *pctx = gtk_widget_get_pango_context (GTK_WIDGET (edit));
 		priv->layout = pango_layout_new (pctx);
+		priv->layout_dirty = TRUE;
+		priv->layout_width = -2;	/* force the width branch below */
 	}
+
+	if (!priv->layout_dirty)
+	{
+		if (width != priv->layout_width)
+			set_layout_width (priv, width);
+		return;
+	}
+	priv->layout_dirty = FALSE;
 
 	/* Set text */
 	if (priv->stripped_str && priv->stripped_len > 0)
@@ -612,16 +689,7 @@ update_layout (HexInputEdit *edit, int width)
 	if (priv->font_desc)
 		pango_layout_set_font_description (priv->layout, priv->font_desc);
 
-	/* Wrapping for multiline */
-	if (priv->multiline && width > 2 * HPAD)
-	{
-		pango_layout_set_width (priv->layout, (width - 2 * HPAD) * PANGO_SCALE);
-		pango_layout_set_wrap (priv->layout, PANGO_WRAP_WORD_CHAR);
-	}
-	else
-	{
-		pango_layout_set_width (priv->layout, -1);
-	}
+	set_layout_width (priv, width);
 }
 
 /* =============================== */
@@ -654,6 +722,7 @@ static void
 mark_dirty (HexInputEdit *edit)
 {
 	edit->priv->parse_dirty = TRUE;
+	edit->priv->layout_dirty = TRUE;
 	g_free (edit->priv->cached_text);
 	edit->priv->cached_text = NULL;
 	ensure_cursor_visible (edit);
@@ -882,6 +951,7 @@ im_preedit_changed_cb (GtkIMContext *ctx, gpointer data)
 	                                   &priv->preedit_str,
 	                                   &priv->preedit_attrs,
 	                                   &priv->preedit_cursor);
+	priv->layout_dirty = TRUE;	/* preedit is spliced into the layout text */
 	gtk_widget_queue_draw (GTK_WIDGET (edit));
 }
 
@@ -998,6 +1068,119 @@ find_word_boundary_right (const char *str, int len, int pos)
 	return (int)(p - str);
 }
 
+/* =============================== */
+/* === Large-paste confirmation === */
+/* =============================== */
+
+/* A paste over the line threshold (prefs.hex_gui_input_paste_lines) or this
+ * many bytes is held back behind a confirmation. The threshold exists
+ * because nothing else bounds the buffer: a stray clipboard once delivered a
+ * 1.1 MB terminal transcript here, and Enter on that would have sent 20k
+ * lines to the server. The intended resolution is to offer an upload
+ * (draft FILEHOST once ircd and client support it); until then the dialog
+ * is Paste / Cancel only. */
+#define PASTE_CONFIRM_BYTES (32 * 1024)
+
+typedef struct {
+	HexInputEdit *edit;		/* ref held while the dialog is up */
+	char *text;				/* the pending clipboard text (owned) */
+} pending_paste;
+
+static void
+pending_paste_free (pending_paste *pp)
+{
+	g_free (pp->text);
+	g_object_unref (pp->edit);
+	g_free (pp);
+}
+
+static void
+paste_confirm_cb (GObject *source, GAsyncResult *result, gpointer data)
+{
+	pending_paste *pp = data;
+	int choice = gtk_alert_dialog_choose_finish (GTK_ALERT_DIALOG (source),
+	                                             result, NULL);
+
+	/* Button 1 is Paste; 0 is Cancel, -1 is dismissed. */
+	if (choice == 1 && pp->edit->priv->editable)
+	{
+		insert_at_cursor (pp->edit, pp->text, -1);
+		reset_blink (pp->edit);
+	}
+	pending_paste_free (pp);
+}
+
+/* Returns TRUE if `text` is big enough to need confirmation before it goes
+ * into the buffer, reporting its line count and size. Single-line widgets
+ * (topic, key, limit entries) strip newlines on insert, so only the byte
+ * guard applies to them. */
+static gboolean
+paste_needs_confirm (HexInputEdit *edit, const char *text,
+                     int *lines_out, gsize *bytes_out)
+{
+	int lines = 1;
+	gsize bytes = strlen (text);
+	const char *p;
+
+	if (prefs.hex_gui_input_paste_lines == 0)
+		return FALSE;
+
+	if (edit->priv->multiline)
+	{
+		for (p = text; *p; p++)
+		{
+			if (*p == '\n')
+				lines++;
+		}
+		/* A trailing newline does not start another line */
+		if (bytes > 0 && text[bytes - 1] == '\n')
+			lines--;
+	}
+
+	*lines_out = lines;
+	*bytes_out = bytes;
+	return lines > (int) prefs.hex_gui_input_paste_lines
+	    || bytes > PASTE_CONFIRM_BYTES;
+}
+
+static void
+paste_confirm_ask (HexInputEdit *edit, char *text, int lines, gsize bytes)
+{
+	const char *buttons[] = { _("_Cancel"), _("_Paste"), NULL };
+	GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (edit));
+	GtkAlertDialog *dialog;
+	pending_paste *pp;
+	char *size = g_format_size (bytes);
+
+	pp = g_new0 (pending_paste, 1);
+	pp->edit = g_object_ref (edit);
+	pp->text = text;
+
+	if (lines > 1)
+	{
+		dialog = gtk_alert_dialog_new (_("Paste %d lines (%s)?"), lines, size);
+		gtk_alert_dialog_set_detail (dialog,
+			_("This is larger than a normal message. Every line will be "
+			  "sent to the channel when you press Enter."));
+	}
+	else
+	{
+		dialog = gtk_alert_dialog_new (_("Paste %s of text?"), size);
+		gtk_alert_dialog_set_detail (dialog,
+			_("This is much larger than a normal message."));
+	}
+	gtk_alert_dialog_set_buttons (dialog, buttons);
+	gtk_alert_dialog_set_cancel_button (dialog, 0);
+	gtk_alert_dialog_set_default_button (dialog, 1);
+	gtk_alert_dialog_set_modal (dialog, TRUE);
+
+	gtk_alert_dialog_choose (dialog,
+	                         GTK_IS_WINDOW (root) ? GTK_WINDOW (root) : NULL,
+	                         NULL, paste_confirm_cb, pp);
+	g_object_unref (dialog);
+	g_free (size);
+}
+
 /* Async paste callback */
 static void
 paste_text_ready_cb (GObject *source, GAsyncResult *result, gpointer data)
@@ -1005,9 +1188,17 @@ paste_text_ready_cb (GObject *source, GAsyncResult *result, gpointer data)
 	HexInputEdit *edit = HEX_INPUT_EDIT (data);
 	GdkClipboard *clip = GDK_CLIPBOARD (source);
 	char *text = gdk_clipboard_read_text_finish (clip, result, NULL);
+	int lines;
+	gsize bytes;
 
 	if (text && text[0])
 	{
+		if (paste_needs_confirm (edit, text, &lines, &bytes))
+		{
+			paste_confirm_ask (edit, text, lines, bytes);	/* takes text */
+			g_object_unref (edit);
+			return;
+		}
 		insert_at_cursor (edit, text, -1);
 		reset_blink (edit);
 	}
@@ -1401,6 +1592,7 @@ action_spell_add (GtkWidget *widget, const char *name, GVariant *param)
 		return;
 
 	enchant_dict_add_to_personal (priv->spell_dict, priv->spell_word, -1);
+	spell_memo_clear (priv);
 	mark_dirty (edit);  /* recheck to remove underline */
 }
 
@@ -2088,84 +2280,88 @@ hex_input_edit_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 	/* Horizontal text origin (HPAD with single-line scroll offset) */
 	double text_x = HPAD - priv->scroll_x;
 
-	/* Selection highlight */
-	int sel_start_byte, sel_end_byte;
-	if (get_selection_bytes (priv, &sel_start_byte, &sel_end_byte) &&
-	    priv->raw_to_stripped_map)
+	/* Selection range in stripped (layout) coordinates, if any */
+	int sel_s = -1, sel_e = -1;
 	{
-		int sel_s = xtext_raw_to_stripped (priv->raw_to_stripped_map,
-		                                   priv->text->len, sel_start_byte);
-		int sel_e = xtext_raw_to_stripped (priv->raw_to_stripped_map,
-		                                   priv->text->len, sel_end_byte);
-
-		/* Get pixel ranges from Pango for each line */
-		PangoLayoutIter *iter = pango_layout_get_iter (priv->layout);
-		do {
-			PangoRectangle line_ext;
-			pango_layout_iter_get_line_extents (iter, NULL, &line_ext);
-			int line_y = PANGO_PIXELS (line_ext.y) + (int)text_y;
-			int line_h = PANGO_PIXELS (line_ext.height);
-
-			int line_start = pango_layout_iter_get_index (iter);
-			PangoLayoutLine *pline = pango_layout_iter_get_line_readonly (iter);
-			int line_end = line_start + pline->length;
-
-			int s = MAX (sel_s, line_start);
-			int e = MIN (sel_e, line_end);
-
-			if (s < e)
-			{
-				int sx, ex;
-				pango_layout_line_index_to_x (pline, s, FALSE, &sx);
-				pango_layout_line_index_to_x (pline, e, FALSE, &ex);
-				if (sx > ex) { int t = sx; sx = ex; ex = t; }
-
-				gdk_cairo_set_source_rgba (cr, &pal[XTEXT_MARK_BG]);
-				cairo_rectangle (cr,
-				                 text_x + PANGO_PIXELS (sx), line_y,
-				                 PANGO_PIXELS (ex - sx), line_h);
-				cairo_fill (cr);
-			}
-		} while (pango_layout_iter_next_line (iter));
-		pango_layout_iter_free (iter);
+		int sel_start_byte, sel_end_byte;
+		if (get_selection_bytes (priv, &sel_start_byte, &sel_end_byte) &&
+		    priv->raw_to_stripped_map)
+		{
+			sel_s = xtext_raw_to_stripped (priv->raw_to_stripped_map,
+			                               priv->text->len, sel_start_byte);
+			sel_e = xtext_raw_to_stripped (priv->raw_to_stripped_map,
+			                               priv->text->len, sel_end_byte);
+		}
 	}
 
-	/* Text */
-	cairo_move_to (cr, text_x, text_y);
-	gdk_cairo_set_source_rgba (cr, &pal[XTEXT_FG]);
-	pango_cairo_show_layout (cr, priv->layout);
-
-	/* Wrap continuation indicators — draw a small "↳" for wrapped lines
-	 * (lines that don't start after a newline). Actual newlines from
-	 * Shift+Enter get no indicator. */
-	if (priv->multiline && priv->layout &&
-	    pango_layout_get_line_count (priv->layout) > 1)
+	/* Selection, text and wrap indicators in one pass over only the lines
+	 * that intersect the widget. Drawing the whole layout with
+	 * pango_cairo_show_layout costs O(lines) every frame, and the caret
+	 * blink forces a frame twice a second; with a 10k-line buffer that alone
+	 * kept the GUI thread saturated. Iterating the offscreen lines is cheap
+	 * (extents only); rendering them is not. */
+	if (priv->layout)
 	{
-		PangoLayoutIter *wi = pango_layout_get_iter (priv->layout);
+		PangoLayoutIter *iter = pango_layout_get_iter (priv->layout);
+		const char *ltxt = pango_layout_get_text (priv->layout);
 		int line_idx = 0;
 		do {
-			if (line_idx > 0)
+			PangoRectangle logical;
+			pango_layout_iter_get_line_extents (iter, NULL, &logical);
+			double line_y = text_y + PANGO_PIXELS (logical.y);
+			double line_h = PANGO_PIXELS (logical.height);
+
+			if (line_y > height)
+				break;
+			if (line_y + line_h >= 0)
 			{
-				int byte_idx = pango_layout_iter_get_index (wi);
-				const char *ltxt = pango_layout_get_text (priv->layout);
-				/* Wrapped line: previous char is NOT a newline */
-				if (byte_idx > 0 && ltxt[byte_idx - 1] != '\n')
+				PangoLayoutLine *pline = pango_layout_iter_get_line_readonly (iter);
+				int line_start = pango_layout_iter_get_index (iter);
+				int line_end = line_start + pline->length;
+				double baseline = text_y +
+					PANGO_PIXELS (pango_layout_iter_get_baseline (iter));
+
+				/* Selection highlight behind this line's text */
+				if (sel_s >= 0)
 				{
-					PangoRectangle ext;
-					pango_layout_iter_get_line_extents (wi, NULL, &ext);
-					double iy = text_y + PANGO_PIXELS (ext.y);
-					double ih = PANGO_PIXELS (ext.height);
-					/* Draw a small right-arrow in the left padding area */
+					int s = MAX (sel_s, line_start);
+					int e = MIN (sel_e, line_end);
+					if (s < e)
+					{
+						int sx, ex;
+						pango_layout_line_index_to_x (pline, s, FALSE, &sx);
+						pango_layout_line_index_to_x (pline, e, FALSE, &ex);
+						if (sx > ex) { int t = sx; sx = ex; ex = t; }
+
+						gdk_cairo_set_source_rgba (cr, &pal[XTEXT_MARK_BG]);
+						cairo_rectangle (cr,
+						                 text_x + PANGO_PIXELS (sx), line_y,
+						                 PANGO_PIXELS (ex - sx), line_h);
+						cairo_fill (cr);
+					}
+				}
+
+				/* Text */
+				cairo_move_to (cr, text_x + PANGO_PIXELS (logical.x), baseline);
+				gdk_cairo_set_source_rgba (cr, &pal[XTEXT_FG]);
+				pango_cairo_show_layout_line (cr, pline);
+
+				/* Wrap continuation indicator — a small chevron in the left
+				 * padding for lines that continue a wrapped line (the previous
+				 * char is not a newline). Actual newlines from Shift+Enter get
+				 * no indicator. */
+				if (priv->multiline && line_idx > 0 && line_start > 0 &&
+				    ltxt[line_start - 1] != '\n')
+				{
 					GdkRGBA dim = pal[XTEXT_FG];
 					dim.alpha *= 0.35f;
 					gdk_cairo_set_source_rgba (cr, &dim);
-					/* Simple ">" chevron, vertically centered */
 					double cx = 3.0;
-					double cy = iy + ih * 0.3;
+					double cy = line_y + line_h * 0.3;
 					double bx = cx + 5.0;
-					double by = iy + ih * 0.5;
+					double by = line_y + line_h * 0.5;
 					double dx = cx;
-					double dy = iy + ih * 0.7;
+					double dy = line_y + line_h * 0.7;
 					cairo_move_to (cr, cx, cy);
 					cairo_line_to (cr, bx, by);
 					cairo_line_to (cr, dx, dy);
@@ -2174,8 +2370,8 @@ hex_input_edit_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 				}
 			}
 			line_idx++;
-		} while (pango_layout_iter_next_line (wi));
-		pango_layout_iter_free (wi);
+		} while (pango_layout_iter_next_line (iter));
+		pango_layout_iter_free (iter);
 	}
 
 	/* Emoji sprites */
@@ -2208,6 +2404,9 @@ hex_input_edit_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 			double ey = text_y + PANGO_PIXELS (pos.y);
 			double ew = PANGO_PIXELS (pos.width);
 			double eh = PANGO_PIXELS (pos.height);
+
+			if (ey + eh < 0 || ey > height)
+				continue;	/* scrolled out of view */
 
 			/* Center sprite in cell */
 			int sw = cairo_image_surface_get_width (surf);
@@ -2305,15 +2504,31 @@ hex_input_edit_measure (GtkWidget *widget, GtkOrientation orientation,
 		/* Vertical: compute based on actual content lines, clamped to max_lines.
 		 * for_size is the allocated width; if unconstrained (-1), report single-line
 		 * height since we can't know the wrap width yet. */
+		int max_lines = priv->max_lines > 0 ? priv->max_lines : 5;
 		int line_count = 1;
 		if (priv->multiline && for_size > 0)
 		{
-			update_layout (edit, for_size);
-			if (priv->layout)
-				line_count = pango_layout_get_line_count (priv->layout);
+			/* GTK measures height-for-width at the minimum width and at
+			 * intermediate widths as well as the allocated one, and each
+			 * distinct width re-wraps the whole buffer. A narrower width can
+			 * only wrap into more lines, so once the current layout already
+			 * fills max_lines the clamped answer cannot change: skip the
+			 * O(buffer) relayout rather than repeat it three times per
+			 * keystroke. */
+			if (priv->layout && !priv->layout_dirty && !priv->parse_dirty &&
+			    for_size <= priv->layout_width &&
+			    pango_layout_get_line_count (priv->layout) >= max_lines)
+			{
+				line_count = max_lines;
+			}
+			else
+			{
+				update_layout (edit, for_size);
+				if (priv->layout)
+					line_count = pango_layout_get_line_count (priv->layout);
+			}
 		}
 
-		int max_lines = priv->max_lines > 0 ? priv->max_lines : 5;
 		int one_line = priv->line_height + 2 * VPAD;
 		int nat_lines = MIN (line_count, max_lines);
 
@@ -2408,6 +2623,8 @@ hex_input_edit_finalize (GObject *obj)
 	g_free (priv->spell_word);
 
 	/* Spell checking cleanup */
+	if (priv->spell_memo)
+		g_hash_table_destroy (priv->spell_memo);
 	if (priv->dict_hash)
 		g_hash_table_destroy (priv->dict_hash);
 	if (hie_have_enchant && priv->broker)
@@ -2857,6 +3074,7 @@ hex_input_edit_set_multiline (HexInputEdit *edit, gboolean multiline)
 {
 	g_return_if_fail (HEX_IS_INPUT_EDIT (edit));
 	edit->priv->multiline = multiline;
+	edit->priv->layout_width = -2;	/* wrap mode changed; re-apply width */
 	gtk_widget_queue_resize (GTK_WIDGET (edit));
 }
 
@@ -2905,6 +3123,7 @@ hex_input_edit_set_palette (HexInputEdit *edit, const GdkRGBA *palette)
 {
 	g_return_if_fail (HEX_IS_INPUT_EDIT (edit));
 	edit->priv->palette = palette;
+	edit->priv->layout_dirty = TRUE;	/* colour attrs are baked into the layout */
 	gtk_widget_queue_draw (GTK_WIDGET (edit));
 }
 
@@ -3097,6 +3316,7 @@ activate_language_internal (HexInputEdit *edit, const gchar *lang)
 
 	priv->dict_list = g_slist_append (priv->dict_list, dict);
 	g_hash_table_insert (priv->dict_hash, g_strdup (lang), dict);
+	spell_memo_clear (priv);
 	return TRUE;
 }
 
@@ -3184,5 +3404,6 @@ hex_input_edit_deactivate_language (HexInputEdit *edit, const gchar *lang)
 		priv->dict_list = NULL;
 	}
 
+	spell_memo_clear (priv);
 	mark_dirty (edit);
 }
