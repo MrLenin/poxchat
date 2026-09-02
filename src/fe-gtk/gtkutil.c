@@ -688,7 +688,12 @@ gtkutil_window_new (char *title, char *role, int width, int height, int flags)
 		                  parent_window);
 	}
 
-	gtk_window_present (GTK_WINDOW (win));
+	/* Callers that go on to build the window's content should pass
+	 * GTKUTIL_WINDOW_NO_PRESENT and present it themselves once it is
+	 * complete. Presenting an empty toplevel here shows a blank (white on
+	 * Windows) client for as long as the construction takes. */
+	if (!(flags & GTKUTIL_WINDOW_NO_PRESENT))
+		gtk_window_present (GTK_WINDOW (win));
 
 	return win;
 }

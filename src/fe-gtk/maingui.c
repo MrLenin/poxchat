@@ -5244,8 +5244,12 @@ mg_create_tabwindow (session *sess)
 	GtkWidget *win;
 	GtkWidget *table;
 
+	/* Not presented until the end of this function: the content is built
+	 * below, and a presented-but-empty toplevel is a white flash on
+	 * Windows for the whole construction (~0.5 s measured). */
 	win = gtkutil_window_new ("PoxChat", NULL, prefs.hex_gui_win_width,
-									  prefs.hex_gui_win_height, 0);
+									  prefs.hex_gui_win_height,
+									  GTKUTIL_WINDOW_NO_PRESENT);
 	sess->gui->window = win;
 
 #ifdef HAVE_GTK_MAC

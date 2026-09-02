@@ -36,6 +36,9 @@ GtkWidget *gtkutil_entry_new (int max, GtkWidget * box, void *callback,
 										gpointer userdata);
 void show_and_unfocus (GtkWidget * wid);
 void gtkutil_set_icon (GtkWidget *win);
+/* gtkutil_window_new flags: 2 = transient for the main window,
+ * GTKUTIL_WINDOW_NO_PRESENT = leave the window unpresented (caller presents). */
+#define GTKUTIL_WINDOW_NO_PRESENT 4
 GtkWidget *gtkutil_window_new (char *title, char *role, int width, int height, int flags);
 gboolean gtkutil_close_request_focus_parent (GtkWindow *win, gpointer parent);
 GtkApplication *fe_get_application (void);
