@@ -66,6 +66,8 @@ struct scrollback_db {
 	sqlite3_stmt *stmt_load_range_fwd;	/* keyset: rows at/after an anchor, ascending */
 	sqlite3_stmt *stmt_load_range_bwd;	/* keyset: rows at/before an anchor, descending */
 	GHashTable *chan_cache;			/* channel_id -> sb_chan_cache (counts + ordinal anchors) */
+	sqlite3_stmt *stmt_row_key;		/* (timestamp) of one rowid */
+	sqlite3_stmt *stmt_count_span;	/* rows in ((ts,id) lo, (ts,id) hi] for a channel */
 	sqlite3_stmt *stmt_max_rowid;
 	sqlite3_stmt *stmt_index_of_rowid;
 	sqlite3_stmt *stmt_search_text;
@@ -813,6 +815,19 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_load_range_bwd, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
+	/* index_of_rowid via anchors: the row's own key, then the number of
+	 * rows in the half-open span (lo, hi] between an anchor and it. */
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT timestamp FROM messages WHERE id = ?",
+		-1, &sdb->stmt_row_key, NULL);
+	if (rc != SQLITE_OK) goto fail;
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT COUNT(*) FROM messages WHERE channel_id = ?1 AND "
+		"(timestamp > ?2 OR (timestamp = ?2 AND id > ?3)) AND "
+		"(timestamp < ?4 OR (timestamp = ?4 AND id <= ?5))",
+		-1, &sdb->stmt_count_span, NULL);
+	if (rc != SQLITE_OK) goto fail;
+
 	/* Virtual scrollback: maximum row ID for a channel */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT MAX(id) FROM messages WHERE channel_id = ?",
@@ -882,6 +897,8 @@ finalize_statements (scrollback_db *sdb)
 	if (sdb->stmt_load_range) sqlite3_finalize (sdb->stmt_load_range);
 	if (sdb->stmt_load_range_fwd) sqlite3_finalize (sdb->stmt_load_range_fwd);
 	if (sdb->stmt_load_range_bwd) sqlite3_finalize (sdb->stmt_load_range_bwd);
+	if (sdb->stmt_row_key) sqlite3_finalize (sdb->stmt_row_key);
+	if (sdb->stmt_count_span) sqlite3_finalize (sdb->stmt_count_span);
 	if (sdb->chan_cache) g_hash_table_destroy (sdb->chan_cache);
 	if (sdb->stmt_max_rowid) sqlite3_finalize (sdb->stmt_max_rowid);
 	if (sdb->stmt_index_of_rowid) sqlite3_finalize (sdb->stmt_index_of_rowid);
@@ -2291,6 +2308,83 @@ scrollback_get_index_of_rowid (scrollback_db *db, const char *channel, gint64 ro
 	gint64 channel_id = scrollback_get_channel_id (db, channel);
 	if (channel_id < 0)
 		return 0;
+
+	/* Seek from the nearest cached anchor when one is closer than the
+	 * start of the channel: count only the rows between them. */
+	{
+		sb_chan_cache *c = chan_cache_ensure_count (db, channel_id);
+		gint64 ts = 0;
+		gboolean have_ts = FALSE;
+
+		sqlite3_reset (db->stmt_row_key);
+		sqlite3_bind_int64 (db->stmt_row_key, 1, rowid);
+		if (sqlite3_step (db->stmt_row_key) == SQLITE_ROW)
+		{
+			ts = sqlite3_column_int64 (db->stmt_row_key, 0);
+			have_ts = TRUE;
+		}
+
+		if (have_ts && c && c->count > 0 && c->anchors->len > 0)
+		{
+			sb_anchor *before = NULL, *after = NULL;
+			guint i;
+			int span;
+
+			for (i = 0; i < c->anchors->len; i++)
+			{
+				sb_anchor *e = &g_array_index (c->anchors, sb_anchor, i);
+				gboolean le = e->ts < ts || (e->ts == ts && e->id <= rowid);
+				if (le)
+					before = e;
+				else
+				{
+					after = e;
+					break;
+				}
+			}
+
+			/* Anchor at the row itself */
+			if (before && before->ts == ts && before->id == rowid)
+				return before->ordinal;
+
+			/* Prefer counting forward from the anchor below the row; the
+			 * span is bounded by the next anchor above either way. */
+			if (before)
+			{
+				/* rows in (before, row] */
+				sqlite3_reset (db->stmt_count_span);
+				sqlite3_bind_int64 (db->stmt_count_span, 1, channel_id);
+				sqlite3_bind_int64 (db->stmt_count_span, 2, before->ts);
+				sqlite3_bind_int64 (db->stmt_count_span, 3, before->id);
+				sqlite3_bind_int64 (db->stmt_count_span, 4, ts);
+				sqlite3_bind_int64 (db->stmt_count_span, 5, rowid);
+				if (sqlite3_step (db->stmt_count_span) == SQLITE_ROW)
+				{
+					span = sqlite3_column_int (db->stmt_count_span, 0);
+					index = before->ordinal + span;
+					chan_cache_add_anchor (c, index, ts, rowid);
+					return index;
+				}
+			}
+			else if (after)
+			{
+				/* rows in (row, after] */
+				sqlite3_reset (db->stmt_count_span);
+				sqlite3_bind_int64 (db->stmt_count_span, 1, channel_id);
+				sqlite3_bind_int64 (db->stmt_count_span, 2, ts);
+				sqlite3_bind_int64 (db->stmt_count_span, 3, rowid);
+				sqlite3_bind_int64 (db->stmt_count_span, 4, after->ts);
+				sqlite3_bind_int64 (db->stmt_count_span, 5, after->id);
+				if (sqlite3_step (db->stmt_count_span) == SQLITE_ROW)
+				{
+					span = sqlite3_column_int (db->stmt_count_span, 0);
+					index = after->ordinal - span;
+					chan_cache_add_anchor (c, index, ts, rowid);
+					return index;
+				}
+			}
+		}
+	}
 
 	sqlite3_reset (db->stmt_index_of_rowid);
 	sqlite3_bind_int64 (db->stmt_index_of_rowid, 1, channel_id);
