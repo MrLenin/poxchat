@@ -2784,6 +2784,52 @@ scrollback_gap_drop_msgids (scrollback_db *db, gint64 gap_id)
 	return changed;
 }
 
+int
+scrollback_gap_reset (scrollback_db *db, const char *channel, gint64 gap_id)
+{
+	sqlite3_stmt *stmt;
+	gint64 channel_id;
+	int changed = 0;
+
+	if (!db || !channel)
+		return 0;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return 0;
+
+	if (sqlite3_prepare_v2 (db->db,
+		"UPDATE gaps SET state = ?3, attempts = 0, last_attempt = 0, "
+		"start_msgid = NULL, end_msgid = NULL "
+		"WHERE channel_id = ?1 AND (?2 = 0 OR id = ?2)",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return 0;
+
+	sqlite3_bind_int64 (stmt, 1, channel_id);
+	sqlite3_bind_int64 (stmt, 2, gap_id > 0 ? gap_id : 0);
+	sqlite3_bind_int (stmt, 3, SCROLLBACK_GAP_WITNESSED);
+	if (sqlite3_step (stmt) == SQLITE_DONE)
+		changed = sqlite3_changes (db->db);
+	sqlite3_finalize (stmt);
+	return changed;
+}
+
+void
+scrollback_gap_bootstrap_reset (scrollback_db *db, const char *channel)
+{
+	gint64 channel_id;
+	char *sql;
+
+	if (!db || !channel)
+		return;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return;
+	sql = sqlite3_mprintf ("UPDATE channels SET gap_bootstrap_done = 0 WHERE id = %lld",
+	                       (long long) channel_id);
+	sqlite3_exec (db->db, sql, NULL, NULL, NULL);
+	sqlite3_free (sql);
+}
+
 /* Position of a gap's end bound in the same (timestamp, id) ordinal
  * space scrollback_load_range uses: COUNT(*) of messages strictly
  * before end_ts.  Ties at end_ts are the end-flanking row itself and

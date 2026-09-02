@@ -57,6 +57,7 @@
 #include "chanopt.h"
 #include "chathistory.h"
 #include "proto-irc.h"
+#include "scrollback.h"
 
 #define TBUFSIZE 4096
 
@@ -2435,6 +2436,77 @@ cmd_markread (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 			tcp_sendf (serv, "MARKREAD %s\r\n", target);
 	}
 
+	return TRUE;
+}
+
+/* /GAPS — inspect and reset the chathistory gap ledger for this tab.
+ *   /GAPS              list the ledger rows
+ *   /GAPS RESET [id]   put all (or one) back to witnessed, no anchors
+ *   /GAPS RESCAN       clear the bootstrap latch and rescan for holes */
+static int
+cmd_gaps (struct session *sess, char *tbuf, char *word[], char *word_eol[])
+{
+	const char *network;
+	scrollback_db *db;
+	const char *sub = word[2];
+
+	if (!sess->server || !sess->channel[0])
+	{
+		notj_msg (sess);
+		return TRUE;
+	}
+	network = server_get_network (sess->server, FALSE);
+	db = network ? scrollback_open (network) : NULL;
+	if (!db)
+	{
+		PrintText (sess, _("No scrollback database for this network.\n"));
+		return TRUE;
+	}
+
+	if (!g_ascii_strcasecmp (sub, "RESET"))
+	{
+		gint64 id = word[3][0] ? g_ascii_strtoll (word[3], NULL, 10) : 0;
+		int n = scrollback_gap_reset (db, sess->channel, id);
+		PrintTextf (sess, _("Reset %d gap(s); they will be retried on timestamps.\n"), n);
+		fe_gap_updated (sess, 0);
+		return TRUE;
+	}
+	if (!g_ascii_strcasecmp (sub, "RESCAN"))
+	{
+		int n;
+		scrollback_gap_bootstrap_reset (db, sess->channel);
+		n = scrollback_gap_bootstrap (db, sess->channel,
+			(gint64) prefs.hex_irc_gapfill_bootstrap_hours * 3600);
+		PrintTextf (sess, _("Rescanned scrollback: %d new gap(s) recorded.\n"), n);
+		fe_gap_updated (sess, 0);
+		return TRUE;
+	}
+
+	{
+		GList *gaps = scrollback_gap_list (db, sess->channel), *it;
+		int n = 0;
+		for (it = gaps; it; it = it->next)
+		{
+			scrollback_gap *g = it->data;
+			char sbuf[32], ebuf[32];
+			struct tm *tm;
+			time_t t;
+			const char *state = g->state == SCROLLBACK_GAP_DEAD ? "dead"
+				: g->state == SCROLLBACK_GAP_CANDIDATE ? "candidate" : "witnessed";
+
+			t = (time_t) g->start_ts; tm = localtime (&t);
+			strftime (sbuf, sizeof (sbuf), "%Y-%m-%d %H:%M", tm);
+			t = (time_t) g->end_ts; tm = localtime (&t);
+			strftime (ebuf, sizeof (ebuf), "%Y-%m-%d %H:%M", tm);
+			PrintTextf (sess, "gap %" G_GINT64_FORMAT ": %s .. %s  %s  attempts=%d  anchors=%s/%s\n",
+			            g->id, sbuf, ebuf, state, g->attempts,
+			            g->start_msgid ? "msgid" : "ts", g->end_msgid ? "msgid" : "ts");
+			n++;
+		}
+		scrollback_gap_list_free (gaps);
+		if (!n)
+			PrintText (sess, _("No gaps recorded for this channel.\n"));
+	}
 	return TRUE;
 }
 
@@ -4958,6 +5030,8 @@ const struct commands xc_cmds[] = {
 	 N_("QUIT [<reason>], disconnects from the current server")},
 	{"QUOTE", cmd_quote, 1, 0, 1,
 	 N_("QUOTE <text>, sends the text in raw form to the server")},
+	{"GAPS", cmd_gaps, 1, 0, 1,
+	 N_("GAPS [RESET [id]|RESCAN], lists, resets or rescans the chathistory gap ledger for this tab")},
 	{"REACT", cmd_react, 1, 0, 1,
 	 N_("REACT <emoji> [msgid], sends a reaction to a message (IRCv3 +draft/react)")},
 #ifdef USE_OPENSSL

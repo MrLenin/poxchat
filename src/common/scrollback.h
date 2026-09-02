@@ -452,6 +452,21 @@ void scrollback_gap_delete (scrollback_db *db, gint64 gap_id);
 gboolean scrollback_gap_drop_msgids (scrollback_db *db, gint64 gap_id);
 
 /**
+ * Put a channel's gaps (or one gap when gap_id > 0) back into the
+ * witnessed state with a clean attempt counter and no msgid anchors, so
+ * the fill machinery tries them again from scratch on timestamps.
+ *
+ * @return Number of rows reset.
+ */
+int scrollback_gap_reset (scrollback_db *db, const char *channel, gint64 gap_id);
+
+/**
+ * Clear the channel's gap-bootstrap latch so scrollback_gap_bootstrap
+ * will scan it again.
+ */
+void scrollback_gap_bootstrap_reset (scrollback_db *db, const char *channel);
+
+/**
  * Position of a gap's end bound in the same (timestamp, id) ordinal
  * space scrollback_load_range uses: the count of messages strictly
  * before end_ts.  Used as a proximity margin, so the tie-at-end_ts
