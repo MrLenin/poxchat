@@ -4942,6 +4942,8 @@ const struct commands xc_cmds[] = {
 #endif
 	{"FLUSHQ", cmd_flushq, 0, 0, 1,
 	 N_("FLUSHQ, flushes the current server's send queue")},
+	{"GAPS", cmd_gaps, 1, 0, 1,
+	 N_("GAPS [RESET [id]|RESCAN], lists, resets or rescans the chathistory gap ledger for this tab")},
 	{"GATE", cmd_gate, 0, 0, 1,
 	 N_("GATE <host> [<port>], proxies through a host, port defaults to 23")},
 	{"GETBOOL", cmd_getbool, 0, 0, 1, "GETBOOL <command> <title> <text>"},
@@ -5030,8 +5032,6 @@ const struct commands xc_cmds[] = {
 	 N_("QUIT [<reason>], disconnects from the current server")},
 	{"QUOTE", cmd_quote, 1, 0, 1,
 	 N_("QUOTE <text>, sends the text in raw form to the server")},
-	{"GAPS", cmd_gaps, 1, 0, 1,
-	 N_("GAPS [RESET [id]|RESCAN], lists, resets or rescans the chathistory gap ledger for this tab")},
 	{"REACT", cmd_react, 1, 0, 1,
 	 N_("REACT <emoji> [msgid], sends a reaction to a message (IRCv3 +draft/react)")},
 #ifdef USE_OPENSSL
