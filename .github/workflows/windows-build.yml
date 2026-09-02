@@ -31,7 +31,7 @@ env:
   # patch under win32/ci/patches changes (a restored cache keeps the DLL it
   # was built with; see build-deps.ps1).
   # 2: gtk4-0003 (maximized toplevel resize on popover open)
-  DEPS_CACHE_EPOCH: '2'
+  DEPS_CACHE_EPOCH: '3'
   BUILD_DIR: ${{ github.workspace }}\poxchat-build
 
   # poxchat.props keeps its UserMacros environment-specific on purpose, so CI
