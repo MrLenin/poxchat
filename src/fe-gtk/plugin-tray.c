@@ -77,7 +77,6 @@ static struct tray tray_instance;
 static gboolean tray_initialized = FALSE;
 static gint flash_tag = 0;
 static TrayStatus tray_status = TS_NONE;
-static guint tray_idle_tag = 0;
 
 /* Icon file paths */
 static char icon_path_normal[MAX_PATH];
@@ -525,21 +524,6 @@ tray_build_menu (void)
 	menu_items[i].submenu = NULL;
 }
 
-static gboolean
-tray_idle_handler (gpointer data)
-{
-	if (!tray_initialized)
-		return G_SOURCE_REMOVE;
-
-	if (tray_loop (0) == -1)
-	{
-		tray_initialized = FALSE;
-		return G_SOURCE_REMOVE;
-	}
-
-	return G_SOURCE_CONTINUE;
-}
-
 static void
 tray_init_icon_paths (void)
 {
@@ -601,8 +585,13 @@ tray_init_impl (void)
 
 	tray_initialized = TRUE;
 
-	/* Set up idle handler to process tray events */
-	tray_idle_tag = g_idle_add (tray_idle_handler, NULL);
+	/* No message pump of our own. The tray's hidden HWND is created on this
+	 * thread, and GDK's Win32 event source already drains the whole thread
+	 * queue (PeekMessage with a NULL hwnd) and DispatchMessage()s every
+	 * message to its window procedure, the tray's included. A tray_loop()
+	 * call from g_idle_add competed with GDK for the same queue and ran
+	 * continuously, ~90% of a core while idle. tray_exit() never posts
+	 * WM_QUIT, so the pump's return value could not signal anything either. */
 
 	/* Set initial tooltip */
 	tray_stop_flash ();
@@ -617,12 +606,6 @@ tray_cleanup (void)
 	GList *l;
 
 	tray_stop_flash ();
-
-	if (tray_idle_tag)
-	{
-		g_source_remove (tray_idle_tag);
-		tray_idle_tag = 0;
-	}
 
 	/* Clear the hidden dialogs list (remove weak refs) */
 	for (l = hidden_dialogs; l != NULL; l = l->next)
