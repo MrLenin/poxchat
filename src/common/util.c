@@ -83,6 +83,21 @@ file_part (char *file)
 	}
 }
 
+/* TRUE when text contains a newline that is not its final character.
+ * format_event terminates every event text with '\n', and that
+ * terminator is persisted to scrollback verbatim -- so "contains a
+ * newline" is not a multiline test; "contains an interior newline" is. */
+gboolean
+text_has_interior_newline (const char *text)
+{
+	const char *nl;
+
+	if (!text)
+		return FALSE;
+	nl = strchr (text, '\n');
+	return nl != NULL && nl[1] != '\0';
+}
+
 void
 path_part (char *file, char *path, int pathlen)
 {

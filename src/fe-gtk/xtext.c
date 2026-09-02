@@ -6250,6 +6250,15 @@ gtk_xtext_render_collapse_indicator (GtkXText *xtext, textentry *ent,
 	int total_sublines = g_slist_length (ent->sublines);
 	int hidden = total_sublines - COLLAPSE_PREVIEW_LINES;
 
+	/* Nothing to hide: the collapse state is stale (see
+	 * gtk_xtext_collapse_reevaluate); clear the row rather than print a
+	 * negative count. */
+	if (collapsed && hidden <= 0)
+	{
+		xtext_draw_bg (xtext, 0, y - xtext->font->ascent, win_width + MARGIN, xtext->fontsize);
+		return;
+	}
+
 	if (collapsed)
 		g_snprintf (buf, sizeof (buf), "\xe2\x96\xbc Show more (%d lines)", hidden);
 	else
@@ -6940,6 +6949,23 @@ gtk_xtext_save (GtkXText * xtext, int fh)
 	}
 }
 
+/* Drop a collapse decision that its wrap no longer supports.  Auto-
+ * collapse runs once, at link/materialize time, against the sublines of
+ * that moment; a later reflow to a wider viewport can leave an entry
+ * "collapsed" with fewer lines than the preview, which rendered as
+ * "Show more (-2 lines)" under ordinary messages.  Call after sublines
+ * are recomputed and before display_lines is derived from them. */
+static void
+gtk_xtext_collapse_reevaluate (textentry *ent)
+{
+	if (!ent->collapsible && !ent->collapsed)
+		return;
+	if ((int) g_slist_length (ent->sublines) > COLLAPSE_PREVIEW_LINES)
+		return;
+	ent->collapsible = FALSE;
+	ent->collapsed = FALSE;
+}
+
 /* count how many lines 'ent' will take (with wraps) */
 
 static int
@@ -6958,6 +6984,7 @@ gtk_xtext_lines_taken (xtext_buffer *buf, textentry * ent)
 	    win_width >= ent->indent + ent->str_width &&
 	    !(ent->stripped_str && memchr (ent->stripped_str, '\n', ent->stripped_len)))
 	{
+		gtk_xtext_collapse_reevaluate (ent);
 		ent->sublines_width = buf->window_width;
 		ent->display_lines = 1 + ent->extra_lines_above
 			+ ent->extra_lines_below + (ent->collapsible ? 1 : 0);
@@ -6971,6 +6998,7 @@ gtk_xtext_lines_taken (xtext_buffer *buf, textentry * ent)
 	    !(ent->stripped_str && memchr (ent->stripped_str, '\n', ent->stripped_len)))
 	{
 		ent->sublines = g_slist_append (ent->sublines, GINT_TO_POINTER (ent->str_len));
+		gtk_xtext_collapse_reevaluate (ent);
 		ent->sublines_width = buf->window_width;
 		ent->display_lines = 1 + ent->extra_lines_above
 			+ ent->extra_lines_below + (ent->collapsible ? 1 : 0);
@@ -7015,6 +7043,7 @@ gtk_xtext_lines_taken (xtext_buffer *buf, textentry * ent)
 		if (text_len <= 0)
 		{
 			ent->sublines = g_slist_append (NULL, GINT_TO_POINTER (ent->str_len));
+			gtk_xtext_collapse_reevaluate (ent);
 			ent->sublines_width = buf->window_width;
 			ent->display_lines = 1 + ent->extra_lines_above
 				+ ent->extra_lines_below + (ent->collapsible ? 1 : 0);
@@ -7073,6 +7102,7 @@ gtk_xtext_lines_taken (xtext_buffer *buf, textentry * ent)
 		}
 
 		ent->sublines = g_slist_reverse (sublines_rev);
+		gtk_xtext_collapse_reevaluate (ent);
 		ent->sublines_width = buf->window_width;
 		ent_update_display_lines (ent);
 
@@ -7169,6 +7199,7 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
 				    win_width >= ent->indent + ent->str_width &&
 				    !(ent->stripped_str && memchr (ent->stripped_str, '\n', ent->stripped_len)))
 				{
+					gtk_xtext_collapse_reevaluate (ent);
 					ent->sublines_width = buf->window_width;
 					ent->display_lines = 1 + ent->extra_lines_above
 						+ ent->extra_lines_below + (ent->collapsible ? 1 : 0);
@@ -11525,6 +11556,13 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 
 	text_len = (int)strlen (msg->text);
 
+	/* Drop the format_event '\n' terminator that is persisted with every
+	 * row, so a re-materialized entry matches the live one (PrintTextRaw
+	 * splits it off before the entry is built).  Left in, it defeats
+	 * lines_taken's single-line fast path and forces a Pango pass. */
+	if (text_len > 0 && msg->text[text_len - 1] == '\n')
+		text_len--;
+
 	/* Find the \t separator between nick and message text */
 	tab = strchr (msg->text, '\t');
 	if (tab)
@@ -11598,8 +11636,11 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	 * auto-collapse and multiline semantics), but a re-materialized entry
 	 * lost that mark and rendered permanently expanded.  A group never
 	 * spans entries, so the entry's own rowid is a stable, unique group
-	 * id across evict/rematerialize cycles and restarts. */
-	if (strchr (msg->text, '\n'))
+	 * id across evict/rematerialize cycles and restarts.  Interior
+	 * newline only: every stored row ends with the format_event '\n'
+	 * terminator, and treating that as multiline made every ordinary
+	 * message auto-collapse-eligible. */
+	if (text_has_interior_newline (msg->text))
 		ent->group_id = ent->entry_id;
 
 	/* Compute sublines */

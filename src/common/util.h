@@ -43,6 +43,7 @@ char *expand_homedir (char *file);
 void path_part (char *file, char *path, int pathlen);
 int match (const char *mask, const char *string);
 char *file_part (char *file);
+gboolean text_has_interior_newline (const char *text);
 void for_files (const char *dirname, const char *mask, void callback (char *file));
 int rfc_casecmp (const char *, const char *);
 int rfc_ncasecmp (char *, char *, int);

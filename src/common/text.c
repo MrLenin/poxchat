@@ -398,7 +398,9 @@ scrollback_load (session *sess)
 					display_text = stripped;
 				}
 
-				has_nl = (strchr (display_text, '\n') != NULL);
+				/* Interior newline only: every stored row ends with the
+				 * format_event '\n' terminator, which is not multiline. */
+				has_nl = text_has_interior_newline (display_text);
 				if (has_nl)
 					fe_begin_multiline_group (sess);
 				/* Phase 4: set DB rowid so entry_id matches for virtual scrollback */
