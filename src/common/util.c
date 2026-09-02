@@ -559,6 +559,9 @@ buf_get_line (char *ibuf, char **buf, int *position, int len)
 	}
 	pos--;
 	ibuf[pos] = 0;
+	/* tolerate CRLF files: drop the '\r' before the '\n' too */
+	if (pos > spos && ibuf[pos - 1] == '\r')
+		ibuf[pos - 1] = 0;
 	*buf = &ibuf[spos];
 	pos++;
 	*position = pos;

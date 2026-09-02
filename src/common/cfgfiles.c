@@ -189,7 +189,7 @@ cfg_get_str (char *cfg, const char *var, char *dest, int dest_len)
 	{
 		if (!g_ascii_strncasecmp (buffer, cfg, strlen (var) + 1))
 		{
-			char *value, t;
+			char *value, *end, t;
 			cfg += strlen (var);
 			while (*cfg == ' ')
 				cfg++;
@@ -202,10 +202,18 @@ cfg_get_str (char *cfg, const char *var, char *dest, int dest_len)
 			value = cfg;
 			while (*cfg != 0 && *cfg != '\n')
 				cfg++;
-			t = *cfg;
-			*cfg = 0;
+			/* A CRLF file (Notepad, PowerShell Set-Content) would otherwise
+			 * hand every string pref a trailing '\r': fonts, paths, and a
+			 * text_background of "\r" that fails to load before the main
+			 * window exists and leaves an untitled "Cannot open:" dialog
+			 * behind it. */
+			end = cfg;
+			if (end > value && end[-1] == '\r')
+				end--;
+			t = *end;
+			*end = 0;
 			safe_strcpy (dest, value, dest_len);
-			*cfg = t;
+			*end = t;
 			return cfg;
 		}
 		while (*cfg != 0 && *cfg != '\n')
