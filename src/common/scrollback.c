@@ -2191,6 +2191,31 @@ scrollback_gap_delete (scrollback_db *db, gint64 gap_id)
 	sqlite3_finalize (stmt);
 }
 
+/* Forget a gap's msgid anchors and reset its backoff so the next request
+ * uses timestamp refs.  Returns TRUE if there was a msgid to drop. */
+gboolean
+scrollback_gap_drop_msgids (scrollback_db *db, gint64 gap_id)
+{
+	sqlite3_stmt *stmt;
+	gboolean changed = FALSE;
+
+	if (!db || gap_id <= 0)
+		return FALSE;
+
+	if (sqlite3_prepare_v2 (db->db,
+		"UPDATE gaps SET start_msgid = NULL, end_msgid = NULL, "
+		"attempts = 0, last_attempt = 0 "
+		"WHERE id = ? AND (start_msgid IS NOT NULL OR end_msgid IS NOT NULL)",
+		-1, &stmt, NULL) != SQLITE_OK)
+		return FALSE;
+
+	sqlite3_bind_int64 (stmt, 1, gap_id);
+	if (sqlite3_step (stmt) == SQLITE_DONE)
+		changed = sqlite3_changes (db->db) > 0;
+	sqlite3_finalize (stmt);
+	return changed;
+}
+
 /* Position of a gap's end bound in the same (timestamp, id) ordinal
  * space scrollback_load_range uses: COUNT(*) of messages strictly
  * before end_ts.  Ties at end_ts are the end-flanking row itself and

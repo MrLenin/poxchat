@@ -473,6 +473,35 @@ chathistory_request_older (session *sess)
 	g_free (ref);
 }
 
+gboolean chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir);
+
+/* A gap-fill request anchored on msgids came back empty or FAILed.
+ * Servers answer an unknown msgid with an empty batch rather than an
+ * error (Nefarious: the flanking message aged out of retention, so the
+ * reference resolves to nothing even though the span itself may still
+ * be served).  Before dead-marking, forget the msgids and re-ask with
+ * the timestamps we also hold.  Returns TRUE if a retry was submitted;
+ * the caller then leaves the ledger state alone. */
+static gboolean
+gap_fill_retry_with_timestamps (session *sess, gint64 gap_id, int gap_dir)
+{
+	const char *network;
+	scrollback_db *db;
+
+	if (!sess || !sess->server || gap_id <= 0 ||
+	    !sess->history_request_used_msgid ||
+	    sess->server->chathistory_suppressed)
+		return FALSE;
+
+	network = server_get_network (sess->server, FALSE);
+	db = network ? scrollback_open (network) : NULL;
+	if (!db || !scrollback_gap_drop_msgids (db, gap_id))
+		return FALSE;
+
+	fe_gap_updated (sess, gap_id);
+	return chathistory_request_gap_fill (sess, gap_id, gap_dir);
+}
+
 /* Gap fill: request history for a recorded hole, anchored at the edge
  * the user approached from so adjacent content arrives first.
  * approach_dir: -1 = gap is above the viewport (user scrolling up),
@@ -489,7 +518,7 @@ chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
 	scrollback_db *db;
 	scrollback_gap gap;
 	char *near_ref, *far_ref;
-	gboolean near_is_msgid;
+	gboolean near_is_msgid, far_is_msgid;
 	chreq *req;
 	gint64 wait;
 
@@ -533,7 +562,8 @@ chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
 		near_ref = near_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.end_msgid)
 			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.end_ts);
-		far_ref = (gap.start_msgid && gap.start_msgid[0])
+		far_is_msgid = (gap.start_msgid && gap.start_msgid[0]);
+		far_ref = far_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.start_msgid)
 			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.start_ts);
 	}
@@ -543,7 +573,8 @@ chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
 		near_ref = near_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.start_msgid)
 			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.start_ts);
-		far_ref = (gap.end_msgid && gap.end_msgid[0])
+		far_is_msgid = (gap.end_msgid && gap.end_msgid[0]);
+		far_ref = far_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.end_msgid)
 			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.end_ts);
 	}
@@ -558,9 +589,11 @@ chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
 	}
 	else
 	{
+		/* used_msgid covers either anchor: an unresolvable msgid on
+		 * the far end makes the server return empty just as surely. */
 		req = chreq_new (CHREQ_BETWEEN, near_ref, far_ref,
 		                 prefs.hex_irc_chathistory_lines,
-		                 CHREQ_PRI_USER, FALSE, near_is_msgid);
+		                 CHREQ_PRI_USER, FALSE, near_is_msgid || far_is_msgid);
 	}
 	req->gap_id = gap_id;
 	req->gap_dir = approach_dir;
@@ -1295,6 +1328,8 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 		chreq_type failed_type = sess->ch_active ? sess->ch_active->type
 		                                         : CHREQ_LATEST;
 		gint64 failed_gap_id = sess->ch_active ? sess->ch_active->gap_id : 0;
+		int failed_gap_dir = sess->ch_active ? sess->ch_active->gap_dir : 0;
+		gboolean between_latched = FALSE;
 
 		/* Repeated-FAIL brake: an auth-walled or broken server would
 		 * otherwise get re-asked on every join and every scroll. */
@@ -1309,7 +1344,10 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 		     g_ascii_strcasecmp (code, "NEED_MORE_PARAMS") == 0 ||
 		     g_ascii_strcasecmp (code, "INVALID_PARAMS") == 0 ||
 		     g_ascii_strcasecmp (code, "INVALID_MSGREFTYPES") == 0))
+		{
 			serv->chathistory_between_unsupported = TRUE;
+			between_latched = TRUE;
+		}
 
 		/* Clear active request and advance queue */
 		chathistory_request_complete (sess);
@@ -1326,6 +1364,16 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 		{
 			const char *gnet = server_get_network (serv, FALSE);
 			scrollback_db *gdb = gnet ? scrollback_open (gnet) : NULL;
+
+			/* The msgid anchors themselves may be what the server
+			 * choked on; re-anchor on timestamps before counting a
+			 * strike.  Not when the FAIL was BETWEEN-unsupported: the
+			 * msgids are fine and the BEFORE/AFTER fallback keeps them. */
+			if (!between_latched &&
+			    gap_fill_retry_with_timestamps (sess, failed_gap_id,
+			                                    failed_gap_dir))
+				return;
+
 			if (gdb)
 			{
 				scrollback_gap g;
@@ -1865,6 +1913,13 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		{
 			const char *gnet = server_get_network (serv, FALSE);
 			scrollback_db *gdb = gnet ? scrollback_open (gnet) : NULL;
+
+			/* An unknown msgid anchor yields an empty batch, not a
+			 * FAIL.  Re-ask on timestamps once before giving up. */
+			if (gap_fill_retry_with_timestamps (sess, active_gap_id,
+			                                    active_gap_dir))
+				return;
+
 			if (gdb)
 			{
 				scrollback_gap_set_state (gdb, active_gap_id, SCROLLBACK_GAP_DEAD);

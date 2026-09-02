@@ -428,6 +428,16 @@ int scrollback_gap_touch (scrollback_db *db, gint64 gap_id);
 void scrollback_gap_delete (scrollback_db *db, gint64 gap_id);
 
 /**
+ * Forget a gap's msgid anchors (keeping its timestamps) and reset its
+ * attempt counter/backoff, so the next fill request anchors on
+ * timestamps.  Used when the server no longer resolves the msgids
+ * (e.g. the flanking rows fell outside its retention window).
+ *
+ * @return TRUE if the row had at least one msgid to drop.
+ */
+gboolean scrollback_gap_drop_msgids (scrollback_db *db, gint64 gap_id);
+
+/**
  * Position of a gap's end bound in the same (timestamp, id) ordinal
  * space scrollback_load_range uses: the count of messages strictly
  * before end_ts.  Used as a proximity margin, so the tie-at-end_ts
