@@ -46,3 +46,6 @@ win32/copy/copy.vcxproj.filters
 win32/Directory.Build.props
 # zstd VFS crash-consistency harness build/run outputs
 tools/out/
+
+# CI applies these to gvsbuild projects; keep them despite the *.patch rule above
+!win32/ci/patches/*.patch

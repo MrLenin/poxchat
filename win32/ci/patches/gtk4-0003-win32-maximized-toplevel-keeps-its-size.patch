@@ -1,0 +1,121 @@
+From: PoxChat <poxchat@evilnet.org>
+Subject: [PATCH] win32: a maximized toplevel keeps the size Windows gave it
+
+Every toplevel layout pass in gdk_win32_toplevel_compute_size() recomputes
+the size GTK would like and, when it differs from what the HWND has,
+issues a SetWindowPos with that size. For a maximized window that size is
+the remembered restored size, and SetWindowPos with an explicit size on a
+maximized HWND either shrinks the window in place (still flagged zoomed)
+or restores it outright. Any relayout triggers it; opening a popover is
+the reliable one, because the popup surface requests a layout of its
+parent.
+
+The special case added for GNOME/gtk#7554 only helps when the toplevel
+*layout* carries maximized=TRUE, i.e. only after the application itself
+called gtk_window_maximize(). A window maximized from the title bar has
+no such flag. And that special case pins the minimum size to the work
+area, which after the frame is added back is taller than the maximized
+window, so app-initiated maximize ends up clipped behind the taskbar; the
+pinned minimum also outlives a title-bar restore, so the user's resizes
+are undone until the next present.
+
+Decide on the surface *state* instead: while Windows says the window is
+maximized (or fullscreen), keep the configured size and never resize it
+from a layout pass. Drop the work-area minimum-size hint, which was only
+ever a proxy for this.
+
+Tested with GTK 4.20.3 on Windows 11: title-bar maximize + context menu
+stays maximized; app maximize no longer overhangs the taskbar; restore
+from the title bar followed by a manual resize sticks.
+
+--- a/gdk/win32/gdksurface-win32.c
++++ b/gdk/win32/gdksurface-win32.c
+@@ -2780,21 +2780,16 @@
+       GdkGeometry geometry;
+       GdkSurfaceHints mask;
+       GdkToplevelLayout *layout = impl->toplevel_layout;
+-      gboolean is_maximized;
+       gboolean is_fullscreened;
+       GdkRectangle monitor_geometry;
+ 
++      /* No special case for a maximized layout here: whether the window
++       * is maximized is decided from the surface state in
++       * gdk_win32_toplevel_compute_size(), and pinning the minimum size to
++       * the work area made app-initiated maximize overhang the taskbar. */
+       if (monitor &&
+-          gdk_toplevel_layout_get_maximized (layout, &is_maximized) &&
+-          is_maximized)
+-        {
+-          geometry.min_width = bounds_width;
+-          geometry.min_height = bounds_height;
+-          mask = GDK_HINT_MIN_SIZE;
+-        }
+-      else if (monitor &&
+-               gdk_toplevel_layout_get_fullscreen (layout, &is_fullscreened) &&
+-               is_fullscreened)
++          gdk_toplevel_layout_get_fullscreen (layout, &is_fullscreened) &&
++          is_fullscreened)
+         {
+           gdk_monitor_get_geometry (monitor, &monitor_geometry);
+           geometry.min_width = monitor_geometry.width;
+@@ -3208,21 +3203,46 @@
+   int width, height;
+   bool size_changed, needs_resize;
+ 
+-  compute_toplevel_size (surface,
+-                         TRUE,
+-                         impl->next_layout.configured_width,
+-                         impl->next_layout.configured_height,
+-                         &width, &height);
+-
+-  needs_resize = impl->force_recompute_size;
+-  if (impl->next_layout.configured_width)
+-    needs_resize |= width != impl->next_layout.configured_width;
+-  else
+-    needs_resize |= width != surface->width;
+-  if (impl->next_layout.configured_height)
+-    needs_resize |= height != impl->next_layout.configured_height;
++  if (surface->state & (GDK_TOPLEVEL_STATE_MAXIMIZED |
++                        GDK_TOPLEVEL_STATE_FULLSCREEN))
++    {
++      /* Windows owns the size of a maximized or fullscreen window. Let
++       * GTK compute its preferred size (that keeps the min-size hints and
++       * the remembered default size current) but keep the size we were
++       * configured with and never SetWindowPos it: an explicit size on a
++       * maximized HWND shrinks it in place or restores it. Any relayout
++       * used to trigger that; opening a popover was the reliable way.
++       * See GNOME/gtk#7554, whose fix only covered layouts that carry the
++       * maximized flag, i.e. app-initiated maximize. */
++      int unused_width, unused_height;
++
++      compute_toplevel_size (surface, TRUE, 0, 0,
++                             &unused_width, &unused_height);
++
++      width = impl->next_layout.configured_width
++              ? impl->next_layout.configured_width : surface->width;
++      height = impl->next_layout.configured_height
++               ? impl->next_layout.configured_height : surface->height;
++      needs_resize = FALSE;
++    }
+   else
+-    needs_resize |= height != surface->height;
++    {
++      compute_toplevel_size (surface,
++                             TRUE,
++                             impl->next_layout.configured_width,
++                             impl->next_layout.configured_height,
++                             &width, &height);
++
++      needs_resize = impl->force_recompute_size;
++      if (impl->next_layout.configured_width)
++        needs_resize |= width != impl->next_layout.configured_width;
++      else
++        needs_resize |= width != surface->width;
++      if (impl->next_layout.configured_height)
++        needs_resize |= height != impl->next_layout.configured_height;
++      else
++        needs_resize |= height != surface->height;
++    }
+ 
+   size_changed = surface->width != width ||
+                  surface->height != height;
