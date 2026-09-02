@@ -9642,9 +9642,40 @@ gtk_xtext_search_virt_scan (xtext_buffer *buf)
 		g_array_free (buf->search_virt_ids, TRUE);
 	buf->search_virt_ids = g_array_new (FALSE, FALSE, sizeof (gint64));
 	buf->search_virt_pos = -1;
+	buf->search_virt_db_total = buf->total_entries;
+
+	/* Indexed path: ask the FTS5 trigram index for candidates and
+	 * re-verify each with the normal matcher (it decides case
+	 * sensitivity and exact bytes; the index is a superset).  Regex
+	 * searches and needles under three characters can't use the
+	 * trigram index and take the scan below. */
+	if (!(buf->search_flags & regexp) && buf->search_text &&
+	    g_utf8_strlen (buf->search_text, -1) >= 3 &&
+	    scrollback_fts_ready (buf->virt_db, buf->virt_channel))
+	{
+		GSList *cands = scrollback_search_fts (buf->virt_db, buf->virt_channel,
+		                                       buf->search_text);
+		GSList *iter;
+
+		for (iter = cands; iter; iter = iter->next)
+		{
+			scrollback_msg *msg = iter->data;
+			GList *gl;
+
+			if (!msg->text)
+				continue;
+			gl = gtk_xtext_search_raw_text (buf, msg->text, strlen (msg->text));
+			if (gl)
+			{
+				g_array_append_val (buf->search_virt_ids, msg->id);
+				g_list_free (gl);
+			}
+		}
+		scrollback_msg_list_free (cands);
+		goto mark_materialized;
+	}
 
 	total = scrollback_count (buf->virt_db, buf->virt_channel);
-	buf->search_virt_db_total = buf->total_entries;
 	offset = 0;
 	batch = 500;
 
@@ -9673,6 +9704,7 @@ gtk_xtext_search_virt_scan (xtext_buffer *buf)
 		scrollback_msg_list_free (msgs);
 	}
 
+mark_materialized:
 	/* A re-scan can run without a full search_fini (DB grew since the
 	 * last scan).  Drop the previous marks first: search_textentry_add
 	 * overwrites ent->marks (leaking the old list) and would append the

@@ -528,6 +528,7 @@ scrollback_load (session *sess)
 		gint64 max_id = scrollback_get_max_rowid (db, sess->channel);
 		fe_scrollback_set_virtual (sess, db, sess->channel, total, max_id);
 		sess->scrollback_virtual_set = TRUE;
+		scrollback_fts_schedule (db, sess->channel);
 	}
 	poxchat_timing_log ("scrollback_load %s: set_virtual %.1f ms; total %.1f ms",
 	                    sess->channel,

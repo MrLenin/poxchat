@@ -279,6 +279,30 @@ GHashTable *scrollback_load_replies_for_msgs (scrollback_db *db, const char *cha
 GHashTable *scrollback_load_reactions_for_msgs (scrollback_db *db, const char *channel,
                                                 GSList *msgs);
 
+/* --- FTS5 search index --- */
+
+/**
+ * Queue a channel for (idle, chunked) indexing if it hasn't been indexed
+ * yet.  No-op when the SQLite build lacks FTS5.
+ */
+void scrollback_fts_schedule (scrollback_db *db, const char *channel);
+
+/**
+ * TRUE once the channel's index is complete and scrollback_search_fts
+ * can be trusted to return every substring match.
+ */
+gboolean scrollback_fts_ready (scrollback_db *db, const char *channel);
+
+/**
+ * Candidate rows whose stripped text contains `needle` (case-insensitive,
+ * needle must be at least three characters), chronological.  Each
+ * scrollback_msg carries only id and text; free with
+ * scrollback_msg_list_free.  Callers re-verify with their own matcher
+ * for case-sensitive searches.
+ */
+GSList *scrollback_search_fts (scrollback_db *db, const char *channel,
+                               const char *needle);
+
 /* --- Virtual scrollback query functions --- */
 
 /**

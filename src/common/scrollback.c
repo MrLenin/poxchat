@@ -31,6 +31,7 @@
 #include "poxchat.h"
 #include "poxchatc.h"
 #include "scrollback.h"
+#include "util.h"
 #include "sqlite-zstd-vfs.h"
 #include "cfgfiles.h"
 #include "text.h"
@@ -67,6 +68,22 @@ struct scrollback_db {
 	sqlite3_stmt *stmt_load_range_bwd;	/* keyset: rows at/before an anchor, descending */
 	GHashTable *chan_cache;			/* channel_id -> sb_chan_cache (counts + ordinal anchors) */
 	sqlite3_stmt *stmt_row_key;		/* (timestamp) of one rowid */
+
+	/* FTS5 trigram index over stripped message text (search bar).
+	 * fts is FALSE when the SQLite build lacks FTS5; every path then
+	 * falls back to the linear scan. */
+	gboolean fts;
+	sqlite3_stmt *stmt_fts_insert;
+	sqlite3_stmt *stmt_fts_delete;
+	sqlite3_stmt *stmt_fts_exists;
+	sqlite3_stmt *stmt_fts_search;
+	sqlite3_stmt *stmt_fts_backfill;
+	GHashTable *fts_state;			/* channel_id -> FTS_* state */
+	GQueue *fts_queue;				/* gint64* channel ids awaiting backfill */
+	guint fts_idle;
+	gint64 fts_cur_channel;			/* channel being backfilled (0 = none) */
+	gint64 fts_cur_next;			/* resume after this rowid */
+	gint64 fts_cur_max;				/* snapshot upper bound */
 	sqlite3_stmt *stmt_count_span;	/* rows in ((ts,id) lo, (ts,id) hi] for a channel */
 	sqlite3_stmt *stmt_max_rowid;
 	sqlite3_stmt *stmt_index_of_rowid;
@@ -318,6 +335,238 @@ chan_cache_note_insert (scrollback_db *db, gint64 channel_id, gint64 ts)
 		chan_cache_invalidate (db, channel_id);
 }
 
+static gint64 scrollback_get_channel_id (scrollback_db *sdb, const char *channel);
+
+/* --- FTS5 index maintenance ----------------------------------------- */
+
+#define FTS_UNINDEXED 0		/* channel never scheduled; live rows are not indexed */
+#define FTS_BUILDING  1		/* queued or in progress; live rows are indexed */
+#define FTS_BUILT     2		/* channels.fts_built = 1 */
+
+#define FTS_BACKFILL_CHUNK 500
+
+static int
+fts_state_get (scrollback_db *db, gint64 channel_id)
+{
+	gpointer v;
+	int st = FTS_UNINDEXED;
+
+	if (!db->fts)
+		return FTS_UNINDEXED;
+	if (!db->fts_state)
+		db->fts_state = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, NULL);
+	if (g_hash_table_lookup_extended (db->fts_state, &channel_id, NULL, &v))
+		return GPOINTER_TO_INT (v);
+
+	{
+		sqlite3_stmt *stmt;
+		if (sqlite3_prepare_v2 (db->db,
+			"SELECT fts_built FROM channels WHERE id = ?1", -1, &stmt, NULL) == SQLITE_OK)
+		{
+			sqlite3_bind_int64 (stmt, 1, channel_id);
+			if (sqlite3_step (stmt) == SQLITE_ROW && sqlite3_column_int (stmt, 0))
+				st = FTS_BUILT;
+			sqlite3_finalize (stmt);
+		}
+	}
+	{
+		gint64 *key = g_new (gint64, 1);
+		*key = channel_id;
+		g_hash_table_insert (db->fts_state, key, GINT_TO_POINTER (st));
+	}
+	return st;
+}
+
+static void
+fts_state_set (scrollback_db *db, gint64 channel_id, int st)
+{
+	gint64 *key;
+
+	if (!db->fts_state)
+		db->fts_state = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, NULL);
+	key = g_new (gint64, 1);
+	*key = channel_id;
+	g_hash_table_insert (db->fts_state, key, GINT_TO_POINTER (st));
+}
+
+static void
+fts_index_row (scrollback_db *db, gint64 rowid, gint64 channel_id, const char *text)
+{
+	char *plain;
+
+	if (!db->fts || !text)
+		return;
+	plain = strip_color (text, -1, STRIP_ALL);
+	sqlite3_reset (db->stmt_fts_insert);
+	sqlite3_bind_int64 (db->stmt_fts_insert, 1, rowid);
+	sqlite3_bind_text (db->stmt_fts_insert, 2, plain, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int64 (db->stmt_fts_insert, 3, channel_id);
+	sqlite3_step (db->stmt_fts_insert);
+	g_free (plain);
+}
+
+static gboolean
+fts_row_indexed (scrollback_db *db, gint64 rowid)
+{
+	gboolean yes;
+	sqlite3_reset (db->stmt_fts_exists);
+	sqlite3_bind_int64 (db->stmt_fts_exists, 1, rowid);
+	yes = sqlite3_step (db->stmt_fts_exists) == SQLITE_ROW;
+	return yes;
+}
+
+static void
+fts_unindex_row (scrollback_db *db, gint64 rowid)
+{
+	if (!db->fts)
+		return;
+	sqlite3_reset (db->stmt_fts_delete);
+	sqlite3_bind_int64 (db->stmt_fts_delete, 1, rowid);
+	sqlite3_step (db->stmt_fts_delete);
+}
+
+/* Idle backfill: one chunk per tick, oldest rowid first, in a
+ * transaction.  Rows the live path already indexed (saved after the
+ * channel was queued) are skipped by rowid lookup, so the order in which
+ * a channel is queued versus written never matters. */
+static gboolean
+fts_backfill_idle (gpointer data)
+{
+	scrollback_db *db = data;
+	int n = 0;
+	gint64 last = 0;
+
+	if (db->fts_cur_channel == 0)
+	{
+		gint64 *next = db->fts_queue ? g_queue_pop_head (db->fts_queue) : NULL;
+		sqlite3_stmt *stmt;
+
+		if (!next)
+		{
+			db->fts_idle = 0;
+			return G_SOURCE_REMOVE;
+		}
+		db->fts_cur_channel = *next;
+		db->fts_cur_next = 0;
+		db->fts_cur_max = 0;
+		g_free (next);
+
+		if (sqlite3_prepare_v2 (db->db,
+			"SELECT IFNULL(MAX(id), 0) FROM messages WHERE channel_id = ?1",
+			-1, &stmt, NULL) == SQLITE_OK)
+		{
+			sqlite3_bind_int64 (stmt, 1, db->fts_cur_channel);
+			if (sqlite3_step (stmt) == SQLITE_ROW)
+				db->fts_cur_max = sqlite3_column_int64 (stmt, 0);
+			sqlite3_finalize (stmt);
+		}
+	}
+
+	scrollback_begin_transaction (db);
+	sqlite3_reset (db->stmt_fts_backfill);
+	sqlite3_bind_int64 (db->stmt_fts_backfill, 1, db->fts_cur_channel);
+	sqlite3_bind_int64 (db->stmt_fts_backfill, 2, db->fts_cur_next);
+	sqlite3_bind_int64 (db->stmt_fts_backfill, 3, db->fts_cur_max);
+	sqlite3_bind_int (db->stmt_fts_backfill, 4, FTS_BACKFILL_CHUNK);
+	while (sqlite3_step (db->stmt_fts_backfill) == SQLITE_ROW)
+	{
+		gint64 id = sqlite3_column_int64 (db->stmt_fts_backfill, 0);
+		const char *text = (const char *) sqlite3_column_text (db->stmt_fts_backfill, 1);
+		if (!fts_row_indexed (db, id))
+			fts_index_row (db, id, db->fts_cur_channel, text);
+		last = id;
+		n++;
+	}
+	sqlite3_reset (db->stmt_fts_backfill);
+
+	if (n < FTS_BACKFILL_CHUNK)
+	{
+		char *sql = sqlite3_mprintf ("UPDATE channels SET fts_built = 1 WHERE id = %lld",
+		                             (long long) db->fts_cur_channel);
+		sqlite3_exec (db->db, sql, NULL, NULL, NULL);
+		sqlite3_free (sql);
+		fts_state_set (db, db->fts_cur_channel, FTS_BUILT);
+		db->fts_cur_channel = 0;
+	}
+	else
+		db->fts_cur_next = last;
+	scrollback_commit_transaction (db);
+
+	return G_SOURCE_CONTINUE;
+}
+
+void
+scrollback_fts_schedule (scrollback_db *db, const char *channel)
+{
+	gint64 channel_id, *item;
+
+	if (!db || !db->fts || !channel)
+		return;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0 || fts_state_get (db, channel_id) != FTS_UNINDEXED)
+		return;
+
+	fts_state_set (db, channel_id, FTS_BUILDING);
+	if (!db->fts_queue)
+		db->fts_queue = g_queue_new ();
+	item = g_new (gint64, 1);
+	*item = channel_id;
+	g_queue_push_tail (db->fts_queue, item);
+	if (!db->fts_idle)
+		db->fts_idle = g_idle_add_full (G_PRIORITY_LOW, fts_backfill_idle, db, NULL);
+}
+
+gboolean
+scrollback_fts_ready (scrollback_db *db, const char *channel)
+{
+	gint64 channel_id;
+
+	if (!db || !db->fts || !channel)
+		return FALSE;
+	channel_id = scrollback_get_channel_id (db, channel);
+	return channel_id > 0 && fts_state_get (db, channel_id) == FTS_BUILT;
+}
+
+GSList *
+scrollback_search_fts (scrollback_db *db, const char *channel, const char *needle)
+{
+	GSList *list = NULL;
+	GString *q;
+	const char *c;
+	gint64 channel_id;
+
+	if (!db || !db->fts || !channel || !needle || !needle[0])
+		return NULL;
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id <= 0)
+		return NULL;
+
+	/* One quoted phrase: trigram MATCH on a phrase is a substring test,
+	 * case-insensitive.  Only '"' needs escaping inside a phrase. */
+	q = g_string_new ("\"");
+	for (c = needle; *c; c++)
+	{
+		if (*c == '"')
+			g_string_append_c (q, '"');
+		g_string_append_c (q, *c);
+	}
+	g_string_append_c (q, '"');
+
+	sqlite3_reset (db->stmt_fts_search);
+	sqlite3_bind_int64 (db->stmt_fts_search, 1, channel_id);
+	sqlite3_bind_text (db->stmt_fts_search, 2, q->str, -1, SQLITE_TRANSIENT);
+	while (sqlite3_step (db->stmt_fts_search) == SQLITE_ROW)
+	{
+		scrollback_msg *m = g_new0 (scrollback_msg, 1);
+		m->id = sqlite3_column_int64 (db->stmt_fts_search, 0);
+		m->text = g_strdup ((const char *) sqlite3_column_text (db->stmt_fts_search, 1));
+		list = g_slist_prepend (list, m);
+	}
+	sqlite3_reset (db->stmt_fts_search);
+	g_string_free (q, TRUE);
+	return g_slist_reverse (list);
+}
+
 static gint64
 scrollback_get_channel_id (scrollback_db *sdb, const char *channel)
 {
@@ -465,6 +714,23 @@ init_database (scrollback_db *sdb)
 	sqlite3_exec (sdb->db,
 		"ALTER TABLE channels ADD COLUMN gap_bootstrap_done INTEGER NOT NULL DEFAULT 0;",
 		NULL, NULL, NULL);
+
+	/* Search index: an FTS5 trigram table gives true substring matching
+	 * straight off the index, so the search bar no longer has to stream
+	 * the whole channel through the decompressing VFS.  Rows are stored
+	 * with IRC colour/attribute codes stripped.  Existing channels are
+	 * indexed lazily (channels.fts_built) by an idle backfill. */
+	sdb->fts = sqlite3_compileoption_used ("ENABLE_FTS5") != 0;
+	if (sdb->fts)
+	{
+		sdb->fts = sqlite3_exec (sdb->db,
+			"CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts "
+			"USING fts5(text, channel_id UNINDEXED, tokenize='trigram');",
+			NULL, NULL, NULL) == SQLITE_OK;
+		sqlite3_exec (sdb->db,
+			"ALTER TABLE channels ADD COLUMN fts_built INTEGER NOT NULL DEFAULT 0;",
+			NULL, NULL, NULL);
+	}
 
 	/* Add channel_id column to messages (NULL = legacy, use channel TEXT) */
 	sqlite3_exec (sdb->db,
@@ -865,6 +1131,33 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_gap_ordinal, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
+	if (sdb->fts)
+	{
+		if (sqlite3_prepare_v2 (sdb->db,
+			"INSERT INTO messages_fts (rowid, text, channel_id) VALUES (?1, ?2, ?3)",
+			-1, &sdb->stmt_fts_insert, NULL) != SQLITE_OK ||
+		    sqlite3_prepare_v2 (sdb->db,
+			"DELETE FROM messages_fts WHERE rowid = ?1",
+			-1, &sdb->stmt_fts_delete, NULL) != SQLITE_OK ||
+		    sqlite3_prepare_v2 (sdb->db,
+			"SELECT 1 FROM messages_fts WHERE rowid = ?1",
+			-1, &sdb->stmt_fts_exists, NULL) != SQLITE_OK ||
+		    sqlite3_prepare_v2 (sdb->db,
+			"SELECT m.id, m.text FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid "
+			"WHERE messages_fts.channel_id = ?1 AND messages_fts MATCH ?2 "
+			"ORDER BY m.timestamp ASC, m.id ASC",
+			-1, &sdb->stmt_fts_search, NULL) != SQLITE_OK ||
+		    sqlite3_prepare_v2 (sdb->db,
+			"SELECT id, text FROM messages WHERE channel_id = ?1 AND id > ?2 AND id <= ?3 "
+			"ORDER BY id ASC LIMIT ?4",
+			-1, &sdb->stmt_fts_backfill, NULL) != SQLITE_OK)
+		{
+			g_warning ("scrollback: FTS5 statements unavailable (%s); search falls back to scanning",
+			           sqlite3_errmsg (sdb->db));
+			sdb->fts = FALSE;
+		}
+	}
+
 	return TRUE;
 
 fail:
@@ -898,6 +1191,14 @@ finalize_statements (scrollback_db *sdb)
 	if (sdb->stmt_load_range_fwd) sqlite3_finalize (sdb->stmt_load_range_fwd);
 	if (sdb->stmt_load_range_bwd) sqlite3_finalize (sdb->stmt_load_range_bwd);
 	if (sdb->stmt_row_key) sqlite3_finalize (sdb->stmt_row_key);
+	if (sdb->stmt_fts_insert) sqlite3_finalize (sdb->stmt_fts_insert);
+	if (sdb->stmt_fts_delete) sqlite3_finalize (sdb->stmt_fts_delete);
+	if (sdb->stmt_fts_exists) sqlite3_finalize (sdb->stmt_fts_exists);
+	if (sdb->stmt_fts_search) sqlite3_finalize (sdb->stmt_fts_search);
+	if (sdb->stmt_fts_backfill) sqlite3_finalize (sdb->stmt_fts_backfill);
+	if (sdb->fts_idle) { g_source_remove (sdb->fts_idle); sdb->fts_idle = 0; }
+	if (sdb->fts_state) g_hash_table_destroy (sdb->fts_state);
+	if (sdb->fts_queue) g_queue_free_full (sdb->fts_queue, g_free);
 	if (sdb->stmt_count_span) sqlite3_finalize (sdb->stmt_count_span);
 	if (sdb->chan_cache) g_hash_table_destroy (sdb->chan_cache);
 	if (sdb->stmt_max_rowid) sqlite3_finalize (sdb->stmt_max_rowid);
@@ -1194,7 +1495,14 @@ scrollback_db_save (scrollback_db *db, const char *channel,
 
 	chan_cache_note_insert (db, channel_id, (gint64) timestamp);
 
-	return (gint64) sqlite3_last_insert_rowid (db->db);
+	{
+		gint64 rowid = (gint64) sqlite3_last_insert_rowid (db->db);
+		/* Channels never scheduled stay unindexed until their backfill
+		 * runs; it will pick this row up then. */
+		if (db->fts && fts_state_get (db, channel_id) != FTS_UNINDEXED)
+			fts_index_row (db, rowid, channel_id, text);
+		return rowid;
+	}
 }
 
 GSList *
@@ -1216,7 +1524,17 @@ scrollback_db_load (scrollback_db *db, const char *channel, int limit)
 	/* Purge unconfirmed echo-message entries from a previous session. */
 	{
 		char *errmsg = NULL;
-		char *sql = sqlite3_mprintf (
+		char *sql;
+		if (db->fts)
+		{
+			sql = sqlite3_mprintf (
+				"DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages "
+				"WHERE channel_id = %lld AND msgid LIKE 'pending:%%')",
+				(long long)channel_id);
+			sqlite3_exec (db->db, sql, NULL, NULL, NULL);
+			sqlite3_free (sql);
+		}
+		sql = sqlite3_mprintf (
 			"DELETE FROM messages WHERE channel_id = %lld AND msgid LIKE 'pending:%%'",
 			(long long)channel_id);
 		sqlite3_exec (db->db, sql, NULL, NULL, &errmsg);
@@ -1391,6 +1709,7 @@ scrollback_delete_by_rowid (scrollback_db *db, gint64 rowid)
 	{
 		/* No channel in hand; ordinals after the row shifted. */
 		chan_cache_invalidate_all (db);
+		fts_unindex_row (db, rowid);
 		return TRUE;
 	}
 	return FALSE;
@@ -1490,6 +1809,13 @@ scrollback_clear (scrollback_db *db, const char *channel)
 	}
 
 	chan_cache_invalidate (db, channel_id);
+	if (db->fts)
+	{
+		char *sql = sqlite3_mprintf ("DELETE FROM messages_fts WHERE channel_id = %lld",
+		                             (long long) channel_id);
+		sqlite3_exec (db->db, sql, NULL, NULL, NULL);
+		sqlite3_free (sql);
+	}
 	sqlite3_reset (db->stmt_clear);
 	sqlite3_bind_int64 (db->stmt_clear, 1, channel_id);
 	sqlite3_step (db->stmt_clear);
