@@ -553,6 +553,7 @@ const struct prefs vars[] =
 	{"irc_hidehost", P_OFFINT (hex_irc_hidehost), TYPE_BOOL},
 	{"irc_id_ntext", P_OFFSET (hex_irc_id_ntext), TYPE_STR},
 	{"irc_id_ytext", P_OFFSET (hex_irc_id_ytext), TYPE_STR},
+	{"irc_oper_text", P_OFFSET (hex_irc_oper_text), TYPE_STR},
 	{"irc_invisible", P_OFFINT (hex_irc_invisible), TYPE_BOOL},
 	{"irc_join_delay", P_OFFINT (hex_irc_join_delay), TYPE_INT},
 	{"irc_logging", P_OFFINT (hex_irc_logging), TYPE_BOOL},
@@ -922,6 +923,7 @@ load_default_config(void)
 	/* STRINGS */
 	strcpy (prefs.hex_away_reason, _("I'm busy"));
 	strcpy (prefs.hex_completion_suffix, ",");
+	strcpy (prefs.hex_irc_oper_text, "*");
 #ifdef WIN32
 	if (portable_mode () || SHGetKnownFolderPath (&FOLDERID_Downloads, 0, NULL, &roaming_path_wide) != S_OK)
 	{

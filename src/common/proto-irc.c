@@ -1369,6 +1369,20 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 				inbound_redact_fail (serv, sess, word[4], text, tags_data);
 				return;
 			}
+			else if (g_ascii_strcasecmp (word[3], "BATCH") == 0)
+			{
+				/* draft/multiline: the server rejected one of our client
+				 * batches.  The limit codes carry the real limit, which
+				 * may be tighter than what CAP LS advertised — adopt it
+				 * so the next paste splits correctly. */
+				int lim = word[5] ? atoi (word[5]) : 0;
+				if (g_ascii_strcasecmp (word[4], "MULTILINE_MAX_BYTES") == 0 && lim > 0)
+					serv->multiline_max_bytes = lim;
+				else if (g_ascii_strcasecmp (word[4], "MULTILINE_MAX_LINES") == 0 && lim > 0)
+					serv->multiline_max_lines = lim;
+				if (g_str_has_prefix (word[4], "MULTILINE_"))
+					PrintTextf (sess, _("Multiline message was rejected by the server (%s). It was not delivered.\n"), word[4]);
+			}
 			if (g_strcmp0(word[3], "*") == 0)
 			{
 				EMIT_SIGNAL_TIMESTAMP (XP_TE_FAIL, sess, word[4], text, NULL, NULL, NULL, tags_data->timestamp);
@@ -2364,7 +2378,12 @@ handle_message_tags (server *serv, const char *tags_str,
 		}
 
 		/* Handle specific tags we care about */
-		if (serv->have_account_tag && !strcmp (key, "account"))
+		if (!strcmp (key, "draft/oper"))
+		{
+			g_free (tags_data->oper);
+			tags_data->oper = g_strdup (unescaped_value);
+		}
+		else if (serv->have_account_tag && !strcmp (key, "account"))
 		{
 			g_free (tags_data->account);
 			tags_data->account = g_strdup (unescaped_value);
@@ -2545,6 +2564,7 @@ message_tags_data_free (message_tags_data *tags_data)
 	g_clear_pointer (&tags_data->msgid, g_free);
 	g_clear_pointer (&tags_data->label, g_free);
 	g_clear_pointer (&tags_data->all_tags, g_hash_table_destroy);
+	g_clear_pointer (&tags_data->oper, g_free);
 }
 
 void

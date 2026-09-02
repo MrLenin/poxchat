@@ -2227,6 +2227,35 @@ is_server (server *serv)
 	return g_slist_find (serv_list, serv) ? 1 : 0;
 }
 
+/* message-tags CLIENTTAGDENY: is the client-only tag `tag` (given without
+ * its '+' prefix) one the server will pass on?  The list is comma
+ * separated; a leading "*" blocks everything, and "-name" entries carve
+ * exemptions out of that.  No list means nothing is blocked. */
+gboolean
+server_client_tag_allowed (server *serv, const char *tag)
+{
+	char **items;
+	gboolean allowed = TRUE;
+	int i;
+
+	if (!serv || !serv->client_tag_deny || !tag)
+		return TRUE;
+
+	items = g_strsplit (serv->client_tag_deny, ",", 0);
+	for (i = 0; items[i]; i++)
+	{
+		const char *it = items[i];
+		if (!strcmp (it, "*"))
+			allowed = FALSE;
+		else if (it[0] == '-' && !g_ascii_strcasecmp (it + 1, tag))
+			allowed = TRUE;
+		else if (!g_ascii_strcasecmp (it, tag))
+			allowed = FALSE;
+	}
+	g_strfreev (items);
+	return allowed;
+}
+
 void
 server_set_defaults (server *serv)
 {
@@ -2234,6 +2263,7 @@ server_set_defaults (server *serv)
 	g_free (serv->chanmodes);
 	g_free (serv->nick_prefixes);
 	g_free (serv->nick_modes);
+	g_clear_pointer (&serv->client_tag_deny, g_free);
 	g_free (serv->network_icon_url);
 	serv->network_icon_url = NULL;
 	network_icon_cancel (serv);
@@ -2428,6 +2458,7 @@ server_free (server *serv)
 	g_free (serv->nick_prefixes);
 	g_free (serv->chanmodes);
 	g_free (serv->chantypes);
+	g_free (serv->client_tag_deny);
 	g_free (serv->bad_nick_prefixes);
 	g_free (serv->last_away_reason);
 	g_free (serv->encoding);

@@ -33,6 +33,7 @@
 		NULL, /* label */				\
 		NULL, /* all_tags hash table */	\
 		FALSE, /* echo_confirmed */		\
+		NULL, /* oper */				\
 	}
 
 #define STRIP_COLON(word, word_eol, idx) (word)[(idx)][0] == ':' ? (word_eol)[(idx)]+1 : (word)[(idx)]
@@ -51,6 +52,7 @@ typedef struct
 	char *label;          /* label tag - for labeled-response correlation */
 	GHashTable *all_tags; /* Full tag storage for plugins and extensions */
 	gboolean echo_confirmed; /* Tier 2: pending entry confirmed, suppress echo display */
+	char *oper;           /* draft/oper tag: sender is an IRC operator ("" when value withheld) */
 } message_tags_data;
 
 void message_tags_data_free (message_tags_data *tags_data);

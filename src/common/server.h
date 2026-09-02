@@ -46,6 +46,7 @@ int is_server (server *serv);
 void server_fill_her_up (server *serv);
 void server_set_encoding (server *serv, char *new_encoding);
 void server_set_defaults (server *serv);
+gboolean server_client_tag_allowed (server *serv, const char *tag);
 char *server_get_network (server *serv, gboolean fallback);
 void server_set_name (server *serv, char *name);
 void server_free (server *serv);

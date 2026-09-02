@@ -322,6 +322,7 @@ struct poxchatprefs
 	char hex_irc_extra_hilight[300];
 	char hex_irc_id_ntext[64];
 	char hex_irc_id_ytext[64];
+	char hex_irc_oper_text[64];		/* draft/oper-tag: marker shown for messages from opers */
 	char hex_irc_logmask[256];
 	char hex_irc_nick1[NICKLEN];
 	char hex_irc_nick2[NICKLEN];
@@ -650,6 +651,7 @@ typedef struct server
 	int loginmethod;					/* see login_types[] */
 
 	char *chantypes;					/* for 005 numeric - free me */
+	char *client_tag_deny;				/* 005 CLIENTTAGDENY value (NULL = nothing blocked) - free me */
 	char *chanmodes;					/* for 005 numeric - free me */
 	char *nick_prefixes;				/* e.g. "*@%+" */
 	char *nick_modes;					/* e.g. "aohv" */
@@ -665,6 +667,8 @@ typedef struct server
 	int chathistory_fail_streak;			/* consecutive CHATHISTORY FAILs */
 	int multiline_max_bytes;		/* max bytes in multiline batch (from ISUPPORT) */
 	int multiline_max_lines;		/* max lines in multiline batch (from ISUPPORT) */
+	int accreg_min_password_len;	/* account-registration min-password-length (0 = none) */
+	int accreg_max_password_len;	/* account-registration max-password-length (0 = none) */
 	int sts_upgrade_port;			/* STS TLS port to upgrade to (0 = no upgrade needed) */
 	char *network_icon_url;			/* Network icon URL from ISUPPORT draft/ICON */
 	void *network_icon;				/* Cached network icon pixbuf (GdkPixbuf *, NULL if not fetched) */
@@ -746,6 +750,7 @@ typedef struct server
 	unsigned int have_metadata:1;	/* IRCv3 draft/metadata-2 capability */
 	unsigned int have_channel_rename:1; /* IRCv3 draft/channel-rename capability */
 	unsigned int have_pre_away:1;	/* IRCv3 draft/pre-away capability */
+	unsigned int have_oper_tag:1;	/* IRCv3 draft/oper-tag capability */
 	unsigned int have_extended_isupport:1; /* IRCv3 draft/extended-isupport capability */
 	unsigned int utf8only:1;		/* Server requires UTF-8 encoding (ISUPPORT UTF8ONLY) */
 	unsigned int account_required:1;	/* ISUPPORT draft/ACCOUNTREQUIRED: must log in to register */

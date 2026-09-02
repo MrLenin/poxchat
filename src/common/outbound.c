@@ -2464,6 +2464,12 @@ cmd_react (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 		return TRUE;
 	}
 
+	if (!server_client_tag_allowed (serv, "draft/react"))
+	{
+		PrintText (sess, _("This server does not relay reactions.\n"));
+		return TRUE;
+	}
+
 	/* /REACT <emoji> [msgid] */
 	if (!word[2][0])
 	{
@@ -4016,6 +4022,22 @@ cmd_register (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 		/* email given but not password - assume email is actually password and use * for email */
 		password = email;
 		email = "*";
+	}
+
+	/* Validate password length against the advertised bounds */
+	if (serv->accreg_min_password_len > 0 &&
+	    strlen (password) < (size_t) serv->accreg_min_password_len)
+	{
+		PrintTextf (sess, _("Error: This server requires passwords of at least %d bytes.\n"),
+		            serv->accreg_min_password_len);
+		return TRUE;
+	}
+	if (serv->accreg_max_password_len > 0 &&
+	    strlen (password) > (size_t) serv->accreg_max_password_len)
+	{
+		PrintTextf (sess, _("Error: This server limits passwords to %d bytes.\n"),
+		            serv->accreg_max_password_len);
+		return TRUE;
 	}
 
 	/* Validate email requirement */
@@ -5816,7 +5838,8 @@ typing_mark_self_echo_window (session *sess)
 static void
 typing_send_active (session *sess)
 {
-	tcp_sendf (sess->server, "@+typing=active TAGMSG %s\r\n", sess->channel);
+	if (server_client_tag_allowed (sess->server, "typing"))
+		tcp_sendf (sess->server, "@+typing=active TAGMSG %s\r\n", sess->channel);
 	sess->typing_last_sent = g_get_monotonic_time ();
 	typing_mark_self_echo_window (sess);
 
@@ -5840,7 +5863,8 @@ typing_send_timer_cb (void *userdata)
 	}
 
 	/* User stopped typing but input still has text — send paused */
-	tcp_sendf (sess->server, "@+typing=paused TAGMSG %s\r\n", sess->channel);
+	if (server_client_tag_allowed (sess->server, "typing"))
+		tcp_sendf (sess->server, "@+typing=paused TAGMSG %s\r\n", sess->channel);
 	typing_mark_self_echo_window (sess);
 	sess->typing_last_sent = 0;
 	sess->typing_send_timer = 0;
@@ -5859,7 +5883,8 @@ typing_indicator_cancel (session *sess)
 	if (sess->typing_last_sent != 0 && sess->server && sess->server->connected
 	    && sess->server->have_message_tags && sess->channel[0])
 	{
-		tcp_sendf (sess->server, "@+typing=done TAGMSG %s\r\n", sess->channel);
+		if (server_client_tag_allowed (sess->server, "typing"))
+			tcp_sendf (sess->server, "@+typing=done TAGMSG %s\r\n", sess->channel);
 		typing_mark_self_echo_window (sess);
 	}
 	sess->typing_last_sent = 0;

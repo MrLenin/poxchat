@@ -191,6 +191,20 @@ inbound_make_idtext (server *serv, char *idtext, int max, int id)
 	}
 }
 
+/* draft/oper-tag: append the oper marker to the identified-text slot when
+ * the message carried a draft/oper tag (value or not). */
+static void
+inbound_oper_mark (char *idtext, int max, const message_tags_data *tags_data)
+{
+	char mark[64];
+
+	if (!tags_data || !tags_data->oper || !prefs.hex_irc_oper_text[0])
+		return;
+	safe_strcpy (mark, prefs.hex_irc_oper_text, sizeof (mark));
+	check_special_chars (mark, TRUE);
+	g_strlcat (idtext, mark, max);
+}
+
 void
 inbound_privmsg (server *serv, char *from, char *ip, char *text, int id,
 					  const message_tags_data *tags_data)
@@ -238,6 +252,7 @@ inbound_privmsg (server *serv, char *from, char *ip, char *text, int id,
 	}
 	
 	inbound_make_idtext (serv, idtext, sizeof (idtext), id);
+	inbound_oper_mark (idtext, sizeof (idtext), tags_data);
 
 	if (sess->type == SESS_DIALOG && !nodiag)
 		EMIT_SIGNAL_TIMESTAMP (XP_TE_DPRIVMSG, sess, from, text, idtext, NULL, 0,
@@ -430,6 +445,7 @@ inbound_action (session *sess, char *chan, char *from, char *ip, char *text,
 	}
 
 	inbound_make_idtext (serv, idtext, sizeof (idtext), id);
+	inbound_oper_mark (idtext, sizeof (idtext), tags_data);
 
 	/* Set current msgid for scrollback_save to capture.
 	 * Only overwrite if tags_data provides a real msgid — outbound Tier 2 code
@@ -569,6 +585,7 @@ inbound_chanmsg (server *serv, session *sess, char *chan, char *from,
 	}
 
 	inbound_make_idtext (serv, idtext, sizeof (idtext), id);
+	inbound_oper_mark (idtext, sizeof (idtext), tags_data);
 
 	if (is_hilight (from, text, sess, serv))
 		hilight = TRUE;
@@ -2893,6 +2910,8 @@ inbound_toggle_caps (server *serv, const char *extensions_str, gboolean enable)
 			serv->have_metadata = enable;
 		else if (!strcmp (extension, "draft/channel-rename"))
 			serv->have_channel_rename = enable;
+		else if (!strcmp (extension, "draft/oper-tag"))
+			serv->have_oper_tag = enable;
 		else if (!strcmp (extension, "draft/pre-away"))
 			serv->have_pre_away = enable;
 		else if (!strcmp (extension, "draft/extended-isupport"))
@@ -2983,6 +3002,7 @@ static const char * const supported_caps[] = {
 	"draft/metadata-2",
 	"draft/channel-rename",
 	"draft/pre-away",
+	"draft/oper-tag",
 
 	/* ZNC */
 	"znc.in/server-time-iso",
@@ -3176,6 +3196,10 @@ inbound_cap_ls (server *serv, char *nick, char *extensions_str,
 					serv->accreg_email_required = TRUE;
 				else if (!strcmp (tokens[j], "custom-account-name"))
 					serv->accreg_custom_account = TRUE;
+				else if (g_str_has_prefix (tokens[j], "max-password-length="))
+					serv->accreg_max_password_len = atoi (tokens[j] + 20);
+				else if (g_str_has_prefix (tokens[j], "min-password-length="))
+					serv->accreg_min_password_len = atoi (tokens[j] + 20);
 			}
 			g_strfreev (tokens);
 			/* Don't continue - still need to request the capability */
