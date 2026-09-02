@@ -53,6 +53,29 @@ batch_msg_is_context (const batch_message *m)
 	return m->tags && g_hash_table_contains (m->tags, "draft/chathistory-context");
 }
 
+/* Format a timestamp message reference the way the spec spells it:
+ * timestamp=YYYY-MM-DDThh:mm:ss.sssZ (UTC).  Servers are not required
+ * to accept a bare epoch and Nefarious does not. */
+static void
+chathistory_ts_ref (char *buf, gsize len, gint64 ts)
+{
+	GDateTime *dt = g_date_time_new_from_unix_utc (ts);
+	char *iso = dt ? g_date_time_format (dt, "%Y-%m-%dT%H:%M:%S") : NULL;
+
+	g_snprintf (buf, (gulong) len, "timestamp=%s.000Z", iso ? iso : "1970-01-01T00:00:00");
+	g_free (iso);
+	if (dt)
+		g_date_time_unref (dt);
+}
+
+static char *
+chathistory_ts_ref_dup (gint64 ts)
+{
+	char buf[64];
+	chathistory_ts_ref (buf, sizeof (buf), ts);
+	return g_strdup (buf);
+}
+
 /* Get effective limit for a CHATHISTORY request.
  * Prefers the server-advertised ISUPPORT CHATHISTORY=N value (the server is
  * telling us the optimal batch size).  Falls back to CHATHISTORY_DEFAULT_LIMIT
@@ -407,7 +430,7 @@ chathistory_request_after_timestamp (session *sess, time_t timestamp, int limit)
 
 	/* Format timestamp reference per IRCv3 spec.
 	 * Use gint64 cast — time_t is 64-bit on Windows x64 but long is 32-bit. */
-	g_snprintf (ref, sizeof (ref), "timestamp=%" G_GINT64_FORMAT, (gint64) timestamp);
+	chathistory_ts_ref (ref, sizeof (ref), (gint64) timestamp);
 	chathistory_request_after (sess, ref, limit);
 }
 
@@ -561,22 +584,22 @@ chathistory_request_gap_fill (session *sess, gint64 gap_id, int approach_dir)
 		near_is_msgid = (gap.end_msgid && gap.end_msgid[0]);
 		near_ref = near_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.end_msgid)
-			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.end_ts);
+			: chathistory_ts_ref_dup (gap.end_ts);
 		far_is_msgid = (gap.start_msgid && gap.start_msgid[0]);
 		far_ref = far_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.start_msgid)
-			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.start_ts);
+			: chathistory_ts_ref_dup (gap.start_ts);
 	}
 	else
 	{
 		near_is_msgid = (gap.start_msgid && gap.start_msgid[0]);
 		near_ref = near_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.start_msgid)
-			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.start_ts);
+			: chathistory_ts_ref_dup (gap.start_ts);
 		far_is_msgid = (gap.end_msgid && gap.end_msgid[0]);
 		far_ref = far_is_msgid
 			? g_strdup_printf ("msgid=%s", gap.end_msgid)
-			: g_strdup_printf ("timestamp=%" G_GINT64_FORMAT, gap.end_ts);
+			: chathistory_ts_ref_dup (gap.end_ts);
 	}
 
 	if (sess->server->chathistory_between_unsupported)
@@ -719,8 +742,7 @@ chathistory_start_catchup (session *sess)
 	else if (sess->scrollback_newest_time > 0)
 	{
 		char ref[64];
-		g_snprintf (ref, sizeof (ref), "timestamp=%" G_GINT64_FORMAT,
-		            (gint64) sess->scrollback_newest_time);
+		chathistory_ts_ref (ref, sizeof (ref), (gint64) sess->scrollback_newest_time);
 		chathistory_request_latest (sess, ref, prefs.hex_irc_chathistory_lines);
 	}
 	else
@@ -1401,8 +1423,7 @@ chathistory_handle_fail (server *serv, const char *code, const char *context)
 			    used_msgid && sess->scrollback_newest_time > 0)
 			{
 				char ref[64];
-				g_snprintf (ref, sizeof (ref), "timestamp=%" G_GINT64_FORMAT,
-				            (gint64) sess->scrollback_newest_time);
+				chathistory_ts_ref (ref, sizeof (ref), (gint64) sess->scrollback_newest_time);
 				chathistory_request_latest (sess, ref,
 				                            prefs.hex_irc_chathistory_lines);
 				return;
@@ -1937,8 +1958,7 @@ chathistory_process_batch (server *serv, batch_info *batch)
 			    used_msgid && sess->scrollback_newest_time > 0)
 			{
 				char ref[64];
-				g_snprintf (ref, sizeof (ref), "timestamp=%" G_GINT64_FORMAT,
-				            (gint64) sess->scrollback_newest_time);
+				chathistory_ts_ref (ref, sizeof (ref), (gint64) sess->scrollback_newest_time);
 				chathistory_request_latest (sess, ref, prefs.hex_irc_chathistory_lines);
 				return;
 			}
@@ -2356,8 +2376,7 @@ send_deferred_latest (session *sess)
 	else if (sess->scrollback_newest_time > 0)
 	{
 		char ref[64];
-		g_snprintf (ref, sizeof (ref), "timestamp=%" G_GINT64_FORMAT,
-		            (gint64) sess->scrollback_newest_time);
+		chathistory_ts_ref (ref, sizeof (ref), (gint64) sess->scrollback_newest_time);
 		chathistory_request_latest (sess, ref, prefs.hex_irc_chathistory_lines);
 	}
 	else
@@ -2598,10 +2617,8 @@ chathistory_request_targets_on_reconnect (server *serv)
 	now_val = (gint64) time (NULL);
 	lower_bound = (gint64) serv->last_disconnect_time - CHATHISTORY_FUZZ_INTERVAL;
 
-	g_snprintf (start_ref, sizeof (start_ref),
-	            "timestamp=%" G_GINT64_FORMAT, now_val + CHATHISTORY_FUZZ_INTERVAL);
-	g_snprintf (end_ref, sizeof (end_ref),
-	            "timestamp=%" G_GINT64_FORMAT, lower_bound);
+	chathistory_ts_ref (start_ref, sizeof (start_ref), now_val + CHATHISTORY_FUZZ_INTERVAL);
+	chathistory_ts_ref (end_ref, sizeof (end_ref), lower_bound);
 
 	chathistory_request_targets (serv, start_ref, end_ref, 0);
 }
