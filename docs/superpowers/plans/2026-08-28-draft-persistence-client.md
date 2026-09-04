@@ -505,7 +505,7 @@ The payoff. On SASL success, before `CAP END`, write `PERSISTENCE ATTACH <profil
 
 **Interfaces:**
 - Produces: `void persistence_send_attach (server *serv);` — no-op unless `have_persistence && persistence_tok_attach && serv->persist_profile[0]` and not already attached. Sets `persistence_attached`; sets `persistence_cursor_sent` when a cursor went out.
-- Produces: `gboolean persistence_server_drives_replay (server *serv);` = `persistence_attached && persistence_cursor_sent`. chathistory consumes it.
+- Produces: `gboolean persistence_server_drives_replay (server *serv);` = `persistence_attached && persistence_cursor_sent && !persistence_replay_seen` (the last bit set by the first bouncer-replay wrapper start — final-review ruling, see the ledger). chathistory consumes it as a *provisional* gate: grace-delayed fan-out and deferred TARGETS rather than suppression.
 - Consumes: `scrollback_get_global_newest_msgid` (Task 3), `serv->persist_profile` (Task 4), `server_get_network`, `scrollback_open`, `tcp_sendf`.
 
 - [ ] **Step 1: Implement the send**
@@ -652,8 +652,13 @@ Append to the existing persistence section of `.claude/skills/ircv3-implementati
   wrapping per-target `chathistory` batches. `chathistory_batch_is_unsolicited` puts those into
   LATEST-phase catch-up without touching the request queue; a replay's `draft/chathistory-end`
   never sets `history_exhausted`; wrapper END → `chathistory_replay_wrapper_end`.
-- While `persistence_server_drives_replay()` is TRUE, `chathistory_schedule_deferred` and
-  `chathistory_request_targets_on_reconnect` no-op. The FAIL answering our ATTACH (tracked by
+- While `persistence_server_drives_replay()` is TRUE (attached, cursor sent, no replay wrapper
+  seen yet) the gate is *provisional*: `chathistory_schedule_deferred` arms its timer with a
+  10× grace delay instead of 2 s and `chathistory_request_targets_on_reconnect` defers TARGETS to
+  that timer; the first `bouncer-replay` wrapper START (`chathistory_replay_wrapper_begin`) sets
+  `persistence_replay_seen`, cancels the timer and drops the deferred TARGETS. A server that
+  replays nothing (REPLAY OFF, policy, fresh session) therefore gets the old fan-out late, not
+  never. The FAIL answering our ATTACH (tracked by
   `persistence_attach_pending`, cleared by the ATTACH ack) is the only one that changes state:
   `CURSOR_UNKNOWN` clears the cursor flag so the regular 366 / login-end call sites re-arm the
   fan-out themselves (the FAIL precedes 001 — never drive catch-up from it); `ACCOUNT_REQUIRED` /
