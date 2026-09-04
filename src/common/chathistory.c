@@ -2602,6 +2602,9 @@ chathistory_deferred_start_cb (gpointer data)
 void
 chathistory_schedule_deferred (server *serv)
 {
+	if (persistence_server_drives_replay (serv))
+		return;		/* server replays every buffer from our ATTACH cursor */
+
 	if (!serv || !serv->have_chathistory || !prefs.hex_irc_chathistory_auto)
 		return;
 
@@ -2782,6 +2785,9 @@ chathistory_request_targets_on_reconnect (server *serv)
 {
 	gint64 now_val, lower_bound;
 	char start_ref[64], end_ref[64];
+
+	if (persistence_server_drives_replay (serv))
+		return;		/* server replays every buffer from our ATTACH cursor */
 
 	if (!serv->have_chathistory || !serv->connected)
 		return;

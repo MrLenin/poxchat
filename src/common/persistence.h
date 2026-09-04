@@ -53,6 +53,17 @@ gboolean persistence_is_bare_name (const char *name);
  * ignored (the spec calls the value a hint, not an inventory). */
 void persistence_parse_cap_value (server *serv, const char *value);
 
+/* Send "PERSISTENCE ATTACH <profile> [<msgid>]" for serv->persist_profile,
+ * with the newest scrollback msgid as the cursor when the server
+ * advertised attach-cursor.  Valid only between SASL completion and
+ * CAP END; a no-op without the cap, the attach token or a profile, and
+ * at most once per connection.  No reply is awaited. */
+void persistence_send_attach (server *serv);
+
+/* TRUE when we handed the server a cursor and it is therefore replaying
+ * every buffer itself: our own catch-up fetches are redundant. */
+gboolean persistence_server_drives_replay (server *serv);
+
 /* ":server PERSISTENCE <args>" — args is everything after the verb, e.g.
  * "STATUS DEFAULT ON" or "PROFILE mobile channels :#a,#b".  Consumes
  * every reply shape in the spec; unknown shapes print the raw args. */

@@ -3,15 +3,19 @@
  * "ok" and exits 0 when every check passes; prints the failing check and
  * exits 1 at the first failure. */
 #include "config.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
 #include "poxchat.h"
 #include "text.h"
+#include "server.h"
+#include "scrollback.h"
+#include "chathistory.h"
 #include "persistence.h"
 
-/* --- app stub (persistence.c's only outside dep) --- */
+/* --- app stubs (persistence.c's outside deps) --- */
 
 static char captured[2048];
 static int captured_count;
@@ -31,6 +35,62 @@ text_emit (int index, session *sess, char *a, char *b, char *c, char *d,
 	captured_count++;
 }
 
+static char sent[512];
+static int sent_count;
+
+void
+tcp_sendf (server *serv, const char *fmt, ...)
+{
+	va_list ap;
+
+	(void) serv;
+	va_start (ap, fmt);
+	g_vsnprintf (sent, sizeof (sent), fmt, ap);
+	va_end (ap);
+	sent_count++;
+}
+
+/* No scrollback in the harness: server_get_network returning NULL is the
+ * "cursor token advertised but we have nothing to anchor on" path. */
+char *
+server_get_network (server *serv, gboolean fallback)
+{
+	(void) serv;
+	(void) fallback;
+	return NULL;
+}
+
+scrollback_db *
+scrollback_open (const char *network)
+{
+	(void) network;
+	return NULL;
+}
+
+char *
+scrollback_get_global_newest_msgid (scrollback_db *db)
+{
+	(void) db;
+	return NULL;
+}
+
+static int rearm_deferred_count;
+static int rearm_targets_count;
+
+void
+chathistory_schedule_deferred (server *serv)
+{
+	(void) serv;
+	rearm_deferred_count++;
+}
+
+void
+chathistory_request_targets_on_reconnect (server *serv)
+{
+	(void) serv;
+	rearm_targets_count++;
+}
+
 /* --- checks --- */
 
 #define CHECK(cond, msg) do { \
@@ -47,6 +107,13 @@ reset_capture (void)
 	captured[0] = '\0';
 	captured_count = 0;
 	captured_event = -1;
+}
+
+static void
+reset_sent (void)
+{
+	sent[0] = '\0';
+	sent_count = 0;
 }
 
 /* Feed one PERSISTENCE reply and return the line it printed. */
@@ -243,6 +310,106 @@ main (void)
 	       !serv->persistence_tok_profile && !serv->persistence_tok_attach &&
 	       !serv->persistence_tok_detach && !serv->persistence_tok_list &&
 	       !serv->persistence_tok_attach_cursor, "reset clears every field");
+
+	/* 8. PERSISTENCE ATTACH in the registration flight.  reset left every
+	 * flag clear and persist_profile was never set, so this starts from
+	 * an unconfigured connection. */
+	serv->have_persistence = TRUE;
+	serv->persistence_tok_attach = TRUE;
+
+	reset_sent ();
+	persistence_send_attach (serv);
+	CHECK (sent_count == 0, "attach: no profile sends nothing");
+	CHECK (!serv->persistence_attached, "attach: no profile leaves us unattached");
+
+	g_strlcpy (serv->persist_profile, "desktop", sizeof (serv->persist_profile));
+
+	serv->have_persistence = FALSE;
+	reset_sent ();
+	persistence_send_attach (serv);
+	CHECK (sent_count == 0, "attach: without the cap sends nothing");
+	serv->have_persistence = TRUE;
+
+	serv->persistence_tok_attach = FALSE;
+	reset_sent ();
+	persistence_send_attach (serv);
+	CHECK (sent_count == 0, "attach: without the attach token sends nothing");
+	serv->persistence_tok_attach = TRUE;
+
+	/* A space in the name would become a second argument the server
+	 * reads as a cursor; CR/LF would inject a line. */
+	g_strlcpy (serv->persist_profile, "my desktop", sizeof (serv->persist_profile));
+	reset_sent ();
+	persistence_send_attach (serv);
+	CHECK (sent_count == 0, "attach: a profile name with a space sends nothing");
+	g_strlcpy (serv->persist_profile, "desktop", sizeof (serv->persist_profile));
+
+	/* No attach-cursor token: the profile alone, no consent to replay. */
+	reset_sent ();
+	persistence_send_attach (serv);
+	CHECK (strcmp (sent, "PERSISTENCE ATTACH desktop\r\n") == 0,
+	       "attach: sends the profile alone");
+	CHECK (serv->persistence_attached, "attach: sets persistence_attached");
+	CHECK (!serv->persistence_cursor_sent, "attach: no cursor token, no cursor");
+	CHECK (!persistence_server_drives_replay (serv),
+	       "attach: without a cursor the server does not drive replay");
+
+	reset_sent ();
+	persistence_send_attach (serv);
+	CHECK (sent_count == 0, "attach: a second call sends nothing");
+
+	/* attach-cursor advertised but nothing to anchor on (the stubbed
+	 * server_get_network returns NULL): same line, still no consent. */
+	serv->persistence_attached = FALSE;
+	serv->persistence_tok_attach_cursor = TRUE;
+	reset_sent ();
+	persistence_send_attach (serv);
+	CHECK (strcmp (sent, "PERSISTENCE ATTACH desktop\r\n") == 0,
+	       "attach: cursor token but no scrollback sends the bare line");
+	CHECK (serv->persistence_attached && !serv->persistence_cursor_sent,
+	       "attach: no cursor available leaves cursor_sent FALSE");
+
+	/* 9. FAIL fallbacks for the attach. */
+	serv->persistence_cursor_sent = TRUE;
+	CHECK (persistence_server_drives_replay (serv),
+	       "replay gate is on once a cursor went out");
+
+	rearm_deferred_count = 0;
+	rearm_targets_count = 0;
+	reset_capture ();
+	persistence_handle_fail (serv, "CURSOR_UNKNOWN", "ATTACH", "No such msgid", 0);
+	CHECK (!serv->persistence_cursor_sent, "CURSOR_UNKNOWN clears cursor_sent");
+	CHECK (serv->persistence_attached, "CURSOR_UNKNOWN leaves us attached");
+	CHECK (rearm_deferred_count == 1 && rearm_targets_count == 1,
+	       "CURSOR_UNKNOWN re-arms the LATEST fan-out and TARGETS");
+	CHECK (!persistence_server_drives_replay (serv),
+	       "replay gate is off after CURSOR_UNKNOWN");
+	CHECK (captured_count == 1, "CURSOR_UNKNOWN still prints the error");
+
+	serv->persistence_attached = TRUE;
+	serv->persistence_cursor_sent = TRUE;
+	rearm_deferred_count = 0;
+	rearm_targets_count = 0;
+	persistence_handle_fail (serv, "ACCOUNT_REQUIRED", "ATTACH",
+	                         "You must be authenticated", 0);
+	CHECK (!serv->persistence_attached && !serv->persistence_cursor_sent,
+	       "ACCOUNT_REQUIRED clears attached and cursor_sent");
+	CHECK (rearm_deferred_count == 0 && rearm_targets_count == 0,
+	       "ACCOUNT_REQUIRED does not re-arm the fan-out");
+
+	serv->persistence_attached = TRUE;
+	serv->persistence_cursor_sent = TRUE;
+	persistence_handle_fail (serv, "draft/INVALID_PARAMETERS", "ATTACH",
+	                         "No such profile", 0);
+	CHECK (!serv->persistence_attached && !serv->persistence_cursor_sent,
+	       "INVALID_PARAMETERS clears attached and cursor_sent (namespaced)");
+
+	/* An unrelated code touches neither flag. */
+	serv->persistence_attached = TRUE;
+	serv->persistence_cursor_sent = TRUE;
+	persistence_handle_fail (serv, "INTERNAL_ERROR", "ATTACH", "Oops", 0);
+	CHECK (serv->persistence_attached && serv->persistence_cursor_sent,
+	       "an unrelated FAIL code leaves the attach state alone");
 
 	g_free (serv);
 	printf ("ok\n");

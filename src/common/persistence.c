@@ -36,6 +36,9 @@
 #include "poxchat.h"
 #include "poxchatc.h"
 #include "text.h"
+#include "server.h"
+#include "scrollback.h"
+#include "chathistory.h"
 #include "persistence.h"
 
 /* Strip IRCv3 name prefixes: "draft/" and vendor scopes, which are DNS
@@ -161,6 +164,59 @@ persistence_parse_cap_value (server *serv, const char *value)
 			serv->persistence_tok_attach_cursor = TRUE;
 	}
 	g_strfreev (tokens);
+}
+
+/* PERSISTENCE ATTACH <profile> [<msgid>] — pick the profile this
+ * connection is a view onto.  The server accepts it only between SASL
+ * completion and CAP END, so this is called from that one window in the
+ * registration flight and no reply is waited for: the flight must not
+ * stall on a server that never answers.
+ *
+ * The optional msgid is our attach cursor.  Supplying it is consent to
+ * an unsolicited chathistory-shaped replay of everything since, which
+ * is why we only offer it when the server advertised attach-cursor —
+ * and why persistence_cursor_sent then suppresses our own catch-up. */
+void
+persistence_send_attach (server *serv)
+{
+	const char *network;
+	scrollback_db *db;
+	char *cursor = NULL;
+
+	if (!serv || !serv->have_persistence || !serv->persistence_tok_attach)
+		return;
+	if (!serv->persist_profile[0])
+		return;			/* not configured — legacy behaviour */
+	if (strpbrk (serv->persist_profile, " \r\n"))
+		return;			/* never let a bad name break the registration flight */
+	if (serv->persistence_attached)
+		return;			/* at most one ATTACH per connection */
+
+	if (serv->persistence_tok_attach_cursor)
+	{
+		network = server_get_network (serv, FALSE);
+		db = network ? scrollback_open (network) : NULL;
+		if (db)
+			cursor = scrollback_get_global_newest_msgid (db);
+	}
+
+	if (cursor)
+		tcp_sendf (serv, "PERSISTENCE ATTACH %s %s\r\n", serv->persist_profile, cursor);
+	else
+		tcp_sendf (serv, "PERSISTENCE ATTACH %s\r\n", serv->persist_profile);
+
+	serv->persistence_attached = TRUE;
+	serv->persistence_cursor_sent = (cursor != NULL);
+	g_free (cursor);
+}
+
+/* TRUE while the server is replaying every buffer from the cursor we
+ * gave it: our own per-channel catch-up would fetch the same lines
+ * again, so chathistory holds off until this goes false. */
+gboolean
+persistence_server_drives_replay (server *serv)
+{
+	return serv && serv->persistence_attached && serv->persistence_cursor_sent;
 }
 
 #define PERSISTENCE_MAX_WORDS 8
@@ -312,8 +368,22 @@ persistence_handle_fail (server *serv, const char *code, const char *context,
 	 * vendor-scoped code reads the same as the spec's bare one. */
 	bare = code ? persistence_strip_namespace (code) : "";
 
-	/* Task 5: CURSOR_UNKNOWN re-arms the deferred LATEST fan-out;
-	 * ACCOUNT_REQUIRED / INVALID_PARAMETERS clear persistence_attached. */
+	if (g_ascii_strcasecmp (bare, "CURSOR_UNKNOWN") == 0)
+	{
+		/* Server evicted our anchor: it falls back to last-activity
+		 * replay, which may be short.  Re-arm our own per-channel LATEST
+		 * fan-out + TARGETS so nothing is missed. */
+		serv->persistence_cursor_sent = FALSE;
+		chathistory_schedule_deferred (serv);
+		chathistory_request_targets_on_reconnect (serv);
+	}
+	else if (g_ascii_strcasecmp (bare, "ACCOUNT_REQUIRED") == 0 ||
+	         g_ascii_strcasecmp (bare, "INVALID_PARAMETERS") == 0)
+	{
+		/* ATTACH was rejected outright — a plain client this session. */
+		serv->persistence_attached = FALSE;
+		serv->persistence_cursor_sent = FALSE;
+	}
 
 	if (context && context[0])
 		persistence_print (serv, stamp, _("Persistence error %s (%s): %s"),

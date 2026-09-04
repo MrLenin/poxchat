@@ -1114,6 +1114,10 @@ process_numeric (session * sess, int n,
 		serv->waiting_on_sasl = FALSE;
 		if (!serv->sent_capend)
 		{
+			/* draft/persistence ATTACH is accepted only between SASL
+			 * completion and CAP END, and needs an account. */
+			if (n == 903)
+				persistence_send_attach (serv);
 			serv->sent_capend = TRUE;
 			tcp_send_len (serv, "CAP END\r\n", 9);
 		}
