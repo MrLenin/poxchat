@@ -1516,21 +1516,31 @@ check_autojoin_channels (server *serv)
 	 * known to keep our channel state across the disconnect — either set
 	 * explicitly via the network's "persistent server" toggle, or
 	 * inferred at runtime when the server already replayed a self-JOIN
-	 * with an @time predating our last disconnect, or negotiated as the
+	 * with an @time predating our last disconnect, or told to us by the
 	 * draft/persistence capability.  In all three cases the server will
 	 * (re-)issue JOIN events for every channel we belong to; sending our
 	 * own duplicates them, undoes the user's intervening PARTs from
 	 * other clients, and races with the server-replayed JOIN's NAMES
-	 * burst.  For the capability this is not merely prudent: the spec's
-	 * Client behaviour section says a client that negotiated it MUST NOT
-	 * send JOIN for channels it remembers from a previous connection,
-	 * and says so regardless of what the effective STATUS value turned
-	 * out to be — the server delivers the restoration burst, and after
-	 * its boundary the client MAY join what the server did not restore
-	 * (not done here; see the roadmap).  The favlist path below is
-	 * intentionally not gated — a configured favourite is the user's
+	 * burst.
+	 *
+	 * The capability arm needs both flags.  The spec says a client that
+	 * negotiated the cap MUST NOT send JOIN for channels it remembers
+	 * from a previous connection — because the server delivers them in
+	 * the restoration burst.  It only does that when it holds a session,
+	 * which it reports through the unsolicited PERSISTENCE STATUS: sent
+	 * after the last 005 and before 376, so it is known by the time this
+	 * gate runs, and its effective-setting is ON exactly when a session
+	 * exists.  An unauthenticated connection gets no STATUS and no
+	 * session, and an account with persistence OFF has no session
+	 * either; in both cases nothing is restored, so respecting what the
+	 * server delivers means rejoining the remembered channels ourselves,
+	 * exactly as before.  Channels the restoration burst leaves out are
+	 * never rejoined: they were parted from another client, or filtered
+	 * out by the active profile's channel list.  The favlist path below
+	 * is intentionally not gated — a configured favourite is the user's
 	 * explicit ask. */
-	if (serv->persistent_server || serv->bouncer_inferred || serv->have_persistence)
+	if (serv->persistent_server || serv->bouncer_inferred ||
+	    (serv->have_persistence && serv->persistence_effective))
 		list = NULL;
 
 	/* If there's a session (i.e. this is a reconnect), autojoin to everything that was open previously. */

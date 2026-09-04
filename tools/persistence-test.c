@@ -111,6 +111,22 @@ main (void)
 	CHECK (!serv->persistence_tok_detach, "token detach not set");
 	CHECK (!serv->persistence_tok_list, "token list not set");
 
+	/* A narrower re-advertisement (CAP NEW) retracts the dropped tokens. */
+	persistence_parse_cap_value (serv, "attach,list");
+	CHECK (serv->persistence_tok_attach && serv->persistence_tok_list,
+	       "narrower value keeps its own tokens");
+	CHECK (!serv->persistence_tok_replay_control && !serv->persistence_tok_profile &&
+	       !serv->persistence_tok_attach_cursor && !serv->persistence_tok_detach,
+	       "narrower value retracts the dropped tokens");
+
+	/* Empty tokens are skipped, not treated as a name. */
+	persistence_parse_cap_value (serv, "attach,,list");
+	CHECK (serv->persistence_tok_attach && serv->persistence_tok_list,
+	       "empty token skipped");
+	CHECK (!serv->persistence_tok_replay_control && !serv->persistence_tok_profile &&
+	       !serv->persistence_tok_attach_cursor && !serv->persistence_tok_detach,
+	       "empty token sets nothing else");
+
 	/* 4. Every reply shape the spec defines. */
 	CHECK_REPLY (serv, "STATUS DEFAULT ON", "Persistence: preference DEFAULT, effective ON");
 	CHECK (captured_event == XP_TE_SERVTEXT, "STATUS prints a server-tab line");
@@ -134,7 +150,8 @@ main (void)
 	CHECK_REPLY (serv, "PROFILE ENDOFLIST", "Persistence: end of profile list");
 	CHECK_REPLY (serv, "PROFILE CREATED mobile parent=default",
 	             "Persistence: profile mobile created (parent=default)");
-	CHECK_REPLY (serv, "PROFILE CREATED mobile", "Persistence: profile mobile created (default)");
+	CHECK_REPLY (serv, "PROFILE CREATED mobile",
+	             "Persistence: profile mobile created (parent=default)");
 	CHECK_REPLY (serv, "PROFILE DELETED mobile", "Persistence: profile mobile deleted");
 	CHECK_REPLY (serv, "PROFILE RENAMED mobile phone",
 	             "Persistence: profile mobile renamed to phone");
@@ -154,10 +171,23 @@ main (void)
 	CHECK_REPLY (serv, "LIST", "Persistence: LIST");
 	CHECK_REPLY (serv, "SESSION 2 mobile :idle 5m", "Persistence: SESSION 2 mobile :idle 5m");
 
+	/* Tokenizer edges: leading and repeated spaces are not words. */
+	CHECK_REPLY (serv, "  STATUS   DEFAULT   ON",
+	             "Persistence: preference DEFAULT, effective ON");
+
+	/* More words than the split holds: the attribute tail is taken from
+	 * the original line, so nothing is truncated. */
+	CHECK_REPLY (serv, "PROFILE mobile a=1 b=2 c=3 d=4 e=5 f=6 g=7 h=8",
+	             "Persistence: profile mobile (a=1 b=2 c=3 d=4 e=5 f=6 g=7 h=8)");
+	CHECK_REPLY (serv, "SESSION 1 2 3 4 5 6 7 8 9", "Persistence: SESSION 1 2 3 4 5 6 7 8 9");
+
 	/* Empty arguments must not print or crash. */
 	reset_capture ();
 	persistence_handle_reply (serv, "", 0);
 	CHECK (captured_count == 0, "empty reply prints nothing");
+	reset_capture ();
+	persistence_handle_reply (serv, "   ", 0);
+	CHECK (captured_count == 0, "all-space reply prints nothing");
 
 	/* 5. Server-managed metadata. */
 	reset_capture ();

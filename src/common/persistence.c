@@ -119,7 +119,11 @@ value_is_on (const char *value)
  * Each token may itself be namespaced.  The spec is explicit that the
  * value is a hint and not an inventory: unknown tokens are ignored, and
  * an absent token does not mean the verb is unsupported — so nothing
- * here gates a command, it only informs what we volunteer to try. */
+ * here gates a command, it only informs what we volunteer to try.
+ *
+ * The value is the whole truth of the advertisement it came in, so the
+ * bits are cleared first: a CAP NEW that re-advertises the cap with a
+ * narrower value retracts the tokens it dropped. */
 void
 persistence_parse_cap_value (server *serv, const char *value)
 {
@@ -128,6 +132,13 @@ persistence_parse_cap_value (server *serv, const char *value)
 
 	if (!serv || !value)
 		return;
+
+	serv->persistence_tok_replay_control = FALSE;
+	serv->persistence_tok_profile = FALSE;
+	serv->persistence_tok_attach = FALSE;
+	serv->persistence_tok_detach = FALSE;
+	serv->persistence_tok_list = FALSE;
+	serv->persistence_tok_attach_cursor = FALSE;
 
 	tokens = g_strsplit (value, ",", 0);
 	for (i = 0; tokens[i]; i++)
@@ -242,8 +253,11 @@ persistence_handle_reply (server *serv, const char *args, time_t stamp)
 	else if (profile && n >= 2 && g_ascii_strcasecmp (w[1], "ENDOFLIST") == 0)
 		persistence_print (serv, stamp, _("Persistence: end of profile list"));
 	else if (profile && n >= 3 && g_ascii_strcasecmp (w[1], "CREATED") == 0)
+		/* The spec's acknowledgement always carries parent=<parent>; a
+		 * server that omits it created the profile under the implicit
+		 * default, so the fallback reads like the real attribute. */
 		persistence_print (serv, stamp, _("Persistence: profile %s created (%s)"),
-		                   w[2], n >= 4 ? REST (3) : "default");
+		                   w[2], n >= 4 ? REST (3) : "parent=default");
 	else if (profile && n >= 3 && g_ascii_strcasecmp (w[1], "DELETED") == 0)
 		persistence_print (serv, stamp, _("Persistence: profile %s deleted"), w[2]);
 	else if (profile && n >= 4 && g_ascii_strcasecmp (w[1], "RENAMED") == 0)
