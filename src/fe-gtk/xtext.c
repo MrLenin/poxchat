@@ -7638,6 +7638,11 @@ gtk_xtext_calc_lines_virtual_ex (xtext_buffer *buf,
 				XT_PERF ("mat_first resync: incr=%d derived=%d%s",
 				         buf->mat_first_index, derived,
 				         buf->mat_first_index != derived ? " DRIFT" : "");
+				if (buf->mat_first_index != derived)
+					poxchat_timing_log ("mat_first resync %s: incr=%d derived=%d total=%d mat=%d eph=%d first_row=%" G_GUINT64_FORMAT,
+					                    buf->virt_channel, buf->mat_first_index, derived,
+					                    buf->total_entries, BUF_MAT_COUNT (buf), buf->ephemeral_count,
+					                    (guint64) first_db->entry_id);
 				buf->mat_first_index = derived;
 			}
 		}
@@ -12503,6 +12508,10 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 
 	mat_start = buf->mat_first_index;
 	mat_end = buf->mat_first_index + (BUF_MAT_COUNT (buf) - buf->ephemeral_count) - 1;
+
+	poxchat_timing_log ("ensure_range %s want=[%d,%d] mat=[%d,%d] total=%d eph=%d",
+	                    buf->virt_channel, want_start, want_end, mat_start, mat_end,
+	                    buf->total_entries, buf->ephemeral_count);
 
 	/* Far target: the wanted range is disjoint from the current window by
 	 * more than an eviction buffer.  Rebuild the window around the target

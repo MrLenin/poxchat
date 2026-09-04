@@ -157,6 +157,17 @@ get_db_path (const char *network)
 
 #define SB_ANCHOR_MAX 128
 
+/* POXCHAT_NO_ANCHORS=1 disables keyset seeking (plain OFFSET paging and
+ * prefix counts only) so the anchor cache can be ruled in or out. */
+static gboolean
+sb_anchors_disabled (void)
+{
+	static int state = -1;
+	if (state < 0)
+		state = g_getenv ("POXCHAT_NO_ANCHORS") ? 1 : 0;
+	return state == 1;
+}
+
 typedef struct {
 	int ordinal;
 	gint64 ts;
@@ -332,7 +343,12 @@ chan_cache_note_insert (scrollback_db *db, gint64 channel_id, gint64 ts)
 		c->max_ts = ts;
 	}
 	else
+	{
+		poxchat_timing_log ("sbcache ch=%" G_GINT64_FORMAT " INVALIDATE backdated ts=%" G_GINT64_FORMAT
+		                    " max_ts=%" G_GINT64_FORMAT " count=%d anchors=%u",
+		                    channel_id, ts, c->max_ts, c->count, c->anchors->len);
 		chan_cache_invalidate (db, channel_id);
+	}
 }
 
 static gint64 scrollback_get_channel_id (scrollback_db *sdb, const char *channel);
@@ -2515,7 +2531,8 @@ scrollback_load_range (scrollback_db *db, const char *channel, int offset, int l
 			end = c->count - 1;
 		limit = end - offset + 1;
 
-		chan_cache_find_anchors (c, offset, end, &before, &after);
+		if (!sb_anchors_disabled ())
+			chan_cache_find_anchors (c, offset, end, &before, &after);
 		if (before)
 			cost_fwd = offset - before->ordinal;
 		if (after)
@@ -2584,6 +2601,16 @@ scrollback_load_range (scrollback_db *db, const char *channel, int offset, int l
 		if (!backward)
 			list = g_slist_reverse (list);
 
+		poxchat_timing_log ("load_range %s off=%d lim=%d count=%d path=%s anchor=%d n=%d first=(%" G_GINT64_FORMAT
+		                    ",%" G_GINT64_FORMAT ") last=(%" G_GINT64_FORMAT ",%" G_GINT64_FORMAT ")",
+		                    channel, offset, limit, c->count,
+		                    stmt == db->stmt_load_range_fwd ? "fwd" : backward ? "bwd" : "plain",
+		                    stmt == db->stmt_load_range_fwd ? before->ordinal : backward ? after->ordinal : -1,
+		                    n, n ? (gint64) ((scrollback_msg *) list->data)->timestamp : 0,
+		                    n ? ((scrollback_msg *) list->data)->id : 0,
+		                    n ? (gint64) ((scrollback_msg *) g_slist_last (list)->data)->timestamp : 0,
+		                    n ? ((scrollback_msg *) g_slist_last (list)->data)->id : 0);
+
 		/* Remember both edges of what we just walked: the next scroll step
 		 * will ask for a range adjacent to this one. */
 		if (n > 0)
@@ -2650,7 +2677,7 @@ scrollback_get_index_of_rowid (scrollback_db *db, const char *channel, gint64 ro
 			have_ts = TRUE;
 		}
 
-		if (have_ts && c && c->count > 0 && c->anchors->len > 0)
+		if (have_ts && c && c->count > 0 && c->anchors->len > 0 && !sb_anchors_disabled ())
 		{
 			sb_anchor *before = NULL, *after = NULL;
 			guint i;
@@ -2688,6 +2715,9 @@ scrollback_get_index_of_rowid (scrollback_db *db, const char *channel, gint64 ro
 				{
 					span = sqlite3_column_int (db->stmt_count_span, 0);
 					index = before->ordinal + span;
+					poxchat_timing_log ("index_of_rowid %s row=%" G_GINT64_FORMAT " ts=%" G_GINT64_FORMAT
+					                    " via before(ord=%d) span=%d -> %d count=%d",
+					                    channel, rowid, ts, before->ordinal, span, index, c->count);
 					chan_cache_add_anchor (c, index, ts, rowid);
 					return index;
 				}
@@ -2705,6 +2735,9 @@ scrollback_get_index_of_rowid (scrollback_db *db, const char *channel, gint64 ro
 				{
 					span = sqlite3_column_int (db->stmt_count_span, 0);
 					index = after->ordinal - span;
+					poxchat_timing_log ("index_of_rowid %s row=%" G_GINT64_FORMAT " ts=%" G_GINT64_FORMAT
+					                    " via after(ord=%d) span=%d -> %d count=%d",
+					                    channel, rowid, ts, after->ordinal, span, index, c->count);
 					chan_cache_add_anchor (c, index, ts, rowid);
 					return index;
 				}
@@ -2719,6 +2752,8 @@ scrollback_get_index_of_rowid (scrollback_db *db, const char *channel, gint64 ro
 	if (sqlite3_step (db->stmt_index_of_rowid) == SQLITE_ROW)
 		index = sqlite3_column_int (db->stmt_index_of_rowid, 0);
 
+	poxchat_timing_log ("index_of_rowid %s row=%" G_GINT64_FORMAT " via prefix-count -> %d",
+	                    channel, rowid, index);
 	return index;
 }
 
