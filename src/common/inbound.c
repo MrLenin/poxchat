@@ -805,32 +805,49 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 		restored = tags_data->timestamp > 0 && disconnect_ref > 0 &&
 		           tags_data->timestamp <= disconnect_ref;
 
-		/* Show the join banner at the JOIN's own time and keep it: it is
-		 * this client's record of its own join.  Saved with the JOIN's
-		 * msgid, it has a DB row and an ordinal like any other event, so
-		 * it survives eviction and is found where it belongs when history
-		 * is scrolled to, and a later chathistory replay of the same JOIN
-		 * dedupes against it (process_batch_message also skips the
-		 * session's join_msgid).  Ephemeral it only existed inside the
-		 * current materialized window, which after a bounded replay is
-		 * days away from a restored membership's time.
+		/* The JOIN is recorded in history as a plain JOIN event (what any
+		 * other client's join looks like), keyed by the JOIN's msgid and
+		 * stamped at the JOIN's own time, so it survives eviction, is found
+		 * where it belongs when history is scrolled to, and dedupes against
+		 * a chathistory replay of the same JOIN.  On screen the row is drawn
+		 * as the self-join banner for as long as it is the session's
+		 * current join (fe_set_join_banner); earlier joins of ours keep the
+		 * plain wording so the current one stands out at a glance.
 		 * A restoration whose JOIN is already recorded (a reconnect to a
-		 * membership we banner'd before) adds nothing but the
-		 * "Reconnected" marker below. */
+		 * membership we joined before) adds only the "Reconnected" marker. */
 		if (restored && tags_data->msgid &&
 		    chathistory_is_duplicate_msgid (sess, tags_data->msgid, tags_data->timestamp))
 			already_recorded = TRUE;
 
-		if (!already_recorded)
 		{
-			g_free (sess->current_msgid);
-			sess->current_msgid = tags_data->msgid ? g_strdup (tags_data->msgid) : NULL;
-			sess->current_msgid_is_user_msg = FALSE;
-			sess->history_insert_sorted_mode = TRUE;
-			EMIT_SIGNAL_TIMESTAMP (XP_TE_UJOIN, sess, nick, chan, ip, NULL, 0,
-										  tags_data->timestamp);
-			sess->history_insert_sorted_mode = FALSE;
-			g_clear_pointer (&sess->current_msgid, g_free);
+			char join_text[4096], banner_text[4096];
+			char *word[PDIWORDS];
+			int i;
+
+			word[0] = "JOIN";
+			word[1] = nick;
+			word[2] = chan;
+			word[3] = ip ? ip : "";
+			word[4] = tags_data->account ? tags_data->account : "";
+			for (i = 5; i < PDIWORDS; i++)
+				word[i] = "";
+			format_event (sess, XP_TE_UJOIN, word, banner_text, sizeof (banner_text), 0);
+			fe_set_join_banner (sess, tags_data->msgid, banner_text);
+
+			if (!already_recorded)
+			{
+				format_event (sess, XP_TE_JOIN, word, join_text, sizeof (join_text), 0);
+				text_record_event (sess, join_text, tags_data->timestamp, tags_data->msgid);
+
+				/* Display-only: the row is already stored above, and the
+				 * pending rowid it set attaches this banner entry to it. */
+				sess->display_only = TRUE;
+				sess->history_insert_sorted_mode = TRUE;
+				EMIT_SIGNAL_TIMESTAMP (XP_TE_UJOIN, sess, nick, chan, ip, NULL, 0,
+											  tags_data->timestamp);
+				sess->history_insert_sorted_mode = FALSE;
+				sess->display_only = FALSE;  /* safety: clear if not consumed */
+			}
 		}
 
 		/* Emit a "Reconnected" marker at current time to pair with

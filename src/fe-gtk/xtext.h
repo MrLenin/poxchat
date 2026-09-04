@@ -251,6 +251,8 @@ typedef struct {
 	int insert_hint_lines;			/* cumulative display lines up to insert_hint */
 	void *virt_db;					/* scrollback_db* (void* to avoid header dependency) */
 	char *virt_channel;				/* channel name for DB queries */
+	char *join_msgid;				/* session's current join: its stored row is drawn as join_banner_text */
+	char *join_banner_text;			/* formatted self-join event text (owned) */
 	GHashTable *virt_prefetch_replies;	/* msgid -> scrollback_reply*, live only while a range loads */
 	GHashTable *virt_prefetch_reactions;	/* msgid -> GSList<scrollback_reaction*>, same lifetime */
 

@@ -136,6 +136,22 @@ scrollback_save_msg (session *sess, char *text, time_t stamp, const char *msgid,
 
 }
 
+static void log_write (session *sess, char *text, time_t ts);
+
+/* Record an event line in the log and scrollback without displaying it.
+ * Used when what is shown differs from what is kept: the join banner is
+ * drawn for the current join, but history keeps the plain JOIN event.
+ * Sets the pending DB rowid so the entry displayed next attaches to the
+ * stored row. */
+void
+text_record_event (session *sess, char *text, time_t stamp, const char *msgid)
+{
+	if (!stamp)
+		stamp = time (NULL);
+	log_write (sess, text, stamp);
+	scrollback_save_msg (sess, text, stamp, msgid, FALSE);
+}
+
 /* Update a pending scrollback entry's placeholder msgid to the real server msgid.
  * Called from the echo_confirmed path — the entry was saved with "pending:<label>"
  * and now we know the real msgid from the server echo. */

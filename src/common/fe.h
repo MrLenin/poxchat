@@ -240,6 +240,11 @@ void fe_scrollback_extras_done (struct session *sess);
 void fe_scrollback_set_virtual (struct session *sess, void *db, const char *channel,
                                 int total_entries, gint64 max_rowid);
 void fe_set_pending_db_rowid (struct session *sess, gint64 rowid);
+/* The session's current join: the stored row with this msgid is drawn as
+ * banner_text (the self-join event) instead of its stored JOIN text, so the
+ * current join stands out at a glance while earlier joins of ours read like
+ * anyone else's.  NULL msgid clears. */
+void fe_set_join_banner (struct session *sess, const char *msgid, const char *banner_text);
 /* Echo-vs-chathistory race resolution: the pending row old_rowid was
  * deleted from the DB; new_rowid is the surviving replayed row for the
  * same message.  Re-key (or drop) the FE entry accordingly. */

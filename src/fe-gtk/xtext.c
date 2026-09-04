@@ -11959,6 +11959,8 @@ gtk_xtext_buffer_free (xtext_buffer *buf)
 
 	/* Virtual scrollback (Phase 2) */
 	g_free (buf->virt_channel);
+	g_free (buf->join_msgid);
+	g_free (buf->join_banner_text);
 	buf->virt_channel = NULL;
 	buf->virt_db = NULL;	/* borrowed pointer, don't free */
 
@@ -12051,9 +12053,11 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	int text_len, left_len;
 	const char *tab;
 	int left_width;
+	const char *mtext;
 
 	if (!msg->text || !msg->text[0] || !buf->xtext)
 		return NULL;
+	mtext = msg->text;
 
 	/* Skip if this DB entry is already materialized — prevents duplicates
 	 * when ensure_range is called with overlapping ranges during rapid
@@ -12062,19 +12066,26 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	    g_hash_table_lookup (buf->entries_by_id, GSIZE_TO_POINTER ((guint64)msg->id)))
 		return NULL;
 
-	text_len = (int)strlen (msg->text);
+	/* The session's current join is drawn as the self-join banner; the
+	 * row itself holds the plain JOIN event so history reads normally
+	 * once this is no longer the current join. */
+	if (buf->join_msgid && buf->join_banner_text && msg->msgid &&
+	    strcmp (msg->msgid, buf->join_msgid) == 0)
+		mtext = buf->join_banner_text;
+
+	text_len = (int)strlen (mtext);
 
 	/* Drop the format_event '\n' terminator that is persisted with every
 	 * row, so a re-materialized entry matches the live one (PrintTextRaw
 	 * splits it off before the entry is built).  Left in, it defeats
 	 * lines_taken's single-line fast path and forces a Pango pass. */
-	if (text_len > 0 && msg->text[text_len - 1] == '\n')
+	if (text_len > 0 && mtext[text_len - 1] == '\n')
 		text_len--;
 
 	/* Find the \t separator between nick and message text */
-	tab = strchr (msg->text, '\t');
+	tab = strchr (mtext, '\t');
 	if (tab)
-		left_len = (int)(tab - msg->text);
+		left_len = (int)(tab - mtext);
 	else
 		left_len = -1;
 
@@ -12089,10 +12100,10 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 		str = (unsigned char *) ent + sizeof (textentry);
 
 		if (left_len > 0)
-			memcpy (str, msg->text, left_len);
+			memcpy (str, mtext, left_len);
 		str[left_len] = ' ';
 		if (right_len > 0)
-			memcpy (str + left_len + 1, msg->text + left_len + 1, right_len);
+			memcpy (str + left_len + 1, mtext + left_len + 1, right_len);
 		str[left_len + 1 + right_len] = 0;
 
 		ent->str = str;
@@ -12104,7 +12115,7 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 		/* no indent (no \t found) */
 		ent = g_malloc0 (text_len + 1 + sizeof (textentry));
 		str = (unsigned char *) ent + sizeof (textentry);
-		memcpy (str, msg->text, text_len);
+		memcpy (str, mtext, text_len);
 		str[text_len] = 0;
 
 		ent->str = str;
@@ -12115,7 +12126,7 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	/* Compute indent before init (mirror append_indent, skip auto-adjust) */
 	if (left_len >= 0 && buf->xtext->auto_indent)
 	{
-		left_width = gtk_xtext_text_width (buf->xtext, (unsigned char *)msg->text, left_len);
+		left_width = gtk_xtext_text_width (buf->xtext, (unsigned char *)mtext, left_len);
 		ent->indent = (buf->indent - left_width) - buf->xtext->space_width * 2;
 	}
 	else if (left_len >= 0)
@@ -12148,7 +12159,7 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	 * newline only: every stored row ends with the format_event '\n'
 	 * terminator, and treating that as multiline made every ordinary
 	 * message auto-collapse-eligible. */
-	if (text_has_interior_newline (msg->text))
+	if (text_has_interior_newline (mtext))
 		ent->group_id = ent->entry_id;
 
 	/* Compute sublines */

@@ -80,6 +80,7 @@ gchar *text_convert_invalid (const gchar* text, gssize len, GIConv converter, co
 gchar *text_fixup_invalid_utf8 (const gchar* text, gssize len, gsize *len_out);
 int get_stamp_str (char *fmt, time_t tim, char **ret);
 void format_event (session *sess, int index, char **args, char *o, gsize sizeofo, unsigned int stripcolor_args);
+void text_record_event (session *sess, char *text, time_t stamp, const char *msgid);
 char *text_find_format_string (char *name);
 
 extern const gchar* unicode_fallback_string;

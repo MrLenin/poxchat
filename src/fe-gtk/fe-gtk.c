@@ -2687,6 +2687,20 @@ fe_set_pending_db_rowid (session *sess, gint64 rowid)
 }
 
 void
+fe_set_join_banner (session *sess, const char *msgid, const char *banner_text)
+{
+	xtext_buffer *buf;
+
+	if (!sess || !sess->res || !sess->res->buffer)
+		return;
+	buf = (xtext_buffer *) sess->res->buffer;
+	g_free (buf->join_msgid);
+	g_free (buf->join_banner_text);
+	buf->join_msgid = (msgid && msgid[0]) ? g_strdup (msgid) : NULL;
+	buf->join_banner_text = (buf->join_msgid && banner_text) ? g_strdup (banner_text) : NULL;
+}
+
+void
 fe_resolve_pending_dup (session *sess, gint64 old_rowid, gint64 new_rowid)
 {
 	if (sess && sess->res && sess->res->buffer)
