@@ -201,11 +201,15 @@ gboolean chathistory_batch_is_unsolicited (server *serv, batch_info *batch,
 
 /**
  * Put sess into LATEST-phase catch-up state without sending anything.
- * No-op if a catch-up loop of our own is already running.
  *
  * @param sess Session to adopt the server-driven replay for
+ * @return TRUE only if the session entered the phase and took a
+ *         chathistory_latest_pending slot, which the caller must hand back
+ *         when the batch finishes.  FALSE when a catch-up loop of our own is
+ *         already running, or the session's history is exhausted — the batch
+ *         is then plain history and must leave catch-up state alone.
  */
-void chathistory_begin_unsolicited_catchup (session *sess);
+gboolean chathistory_begin_unsolicited_catchup (session *sess);
 
 /**
  * Called at the END of an evilnet.github.io/bouncer-replay wrapper: the

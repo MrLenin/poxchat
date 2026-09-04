@@ -686,6 +686,26 @@ find_session_for_target (server *serv, const char *target)
 	return sess;
 }
 
+/* TRUE when this batch is nested inside an evilnet.github.io/bouncer-replay
+ * wrapper, i.e. it is one leg of the server's draft/persistence catch-up
+ * replay.  Distinct from "unsolicited" below because a wrapper child answers
+ * no request of ours even when one is in flight, so it must not be attributed
+ * to that request's gap fill. */
+static gboolean
+batch_in_replay_wrapper (server *serv, batch_info *batch)
+{
+	batch_info *outer;
+
+	if (!serv || !batch || !batch->outer_batch || !serv->active_batches)
+		return FALSE;
+
+	outer = g_hash_table_lookup (serv->active_batches, batch->outer_batch);
+
+	return outer && outer->type &&
+	       g_ascii_strcasecmp (persistence_strip_namespace (outer->type),
+	                           "bouncer-replay") == 0;
+}
+
 /* TRUE when this chathistory batch is server-driven rather than a reply to
  * a request of ours: either it is nested inside an
  * evilnet.github.io/bouncer-replay wrapper (draft/persistence catch-up
@@ -696,29 +716,39 @@ find_session_for_target (server *serv, const char *target)
 gboolean
 chathistory_batch_is_unsolicited (server *serv, batch_info *batch, session *sess)
 {
-	if (batch->outer_batch && serv->active_batches)
-	{
-		batch_info *outer = g_hash_table_lookup (serv->active_batches, batch->outer_batch);
-		if (outer && outer->type &&
-		    g_ascii_strcasecmp (persistence_strip_namespace (outer->type), "bouncer-replay") == 0)
-			return TRUE;
-	}
+	if (!serv || !batch || !sess)
+		return FALSE;
+
+	if (batch_in_replay_wrapper (serv, batch))
+		return TRUE;
+
 	return sess->ch_active == NULL && !sess->history_loading;
 }
 
 /* Adopt an unsolicited batch as this session's LATEST phase: the witness
  * and gap-bridging logic in finish_batch_processing only runs for a
  * catch-up batch, and the BEFORE pass that follows needs the same anchors
- * our own LATEST would have set. */
-void
+ * our own LATEST would have set.
+ *
+ * Returns TRUE only when the session actually entered the phase and took a
+ * chathistory_latest_pending slot.  The caller must treat the batch as
+ * catch-up — and hand the slot back when it finishes — if and only if this
+ * returned TRUE; otherwise the batch is plain history rows and must leave
+ * every catch-up phase field alone, because the loop it would be stepping
+ * belongs to a request the batch does not answer. */
+gboolean
 chathistory_begin_unsolicited_catchup (session *sess)
 {
 	if (!sess || !sess->server)
-		return;
+		return FALSE;
 	if (sess->catchup_in_progress)
-		return;			/* already in our own LATEST/BEFORE loop — leave it */
+		return FALSE;		/* already in our own LATEST/BEFORE loop — leave it */
+	if (sess->history_exhausted)
+		return FALSE;		/* nothing left to page — send_deferred_latest
+					 * declines the same session for the same reason */
 	catchup_enter_latest_phase (sess);
 	sess->server->chathistory_latest_pending++;
+	return TRUE;
 }
 
 void
@@ -1505,6 +1535,7 @@ typedef struct {
 	gboolean is_catchup;
 	gboolean chathistory_end;	/* server signalled no more history (draft/chathistory-end) */
 	unsigned int unsolicited:1;	/* server-driven replay, not a reply to a request of ours */
+	unsigned int latest_owned:1;	/* this batch holds a chathistory_latest_pending slot */
 	guint idle_tag;
 	scrollback_db *db;			/* for transaction begin/commit between chunks */
 	gint64 gap_id;				/* gap-fill request this batch answers (0 = none) */
@@ -1704,8 +1735,11 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 		/* Gap-ledger witness: the LATEST batch landed but did not reach
 		 * back to our newest stored row — the span between them is a
 		 * real hole.  Record it before the BEFORE loop starts shrinking
-		 * it, so an interrupted catchup leaves the truth in the ledger. */
-		if (prefs.hex_irc_gapfill && chunk->raw_count > 0 &&
+		 * it, so an interrupted catchup leaves the truth in the ledger.
+		 * Only the batch that opened this LATEST phase may write the
+		 * witness: catchup_gap_id holds one row, so a second writer
+		 * would orphan the first row's id. */
+		if (chunk->latest_owned && prefs.hex_irc_gapfill && chunk->raw_count > 0 &&
 		    sess->catchup_prev_newest_time > 0 &&
 		    chunk->oldest_timestamp > 0 &&
 		    sess->catchup_lower_bound > 0 &&
@@ -1727,7 +1761,10 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 			}
 		}
 
-		if (serv->chathistory_latest_pending > 0)
+		/* Give back only a slot this batch actually took.  TRUE for every
+		 * requested catch-up batch; for an unsolicited one it tracks
+		 * whether chathistory_begin_unsolicited_catchup adopted it. */
+		if (chunk->latest_owned && serv->chathistory_latest_pending > 0)
 			serv->chathistory_latest_pending--;
 
 		/* All LATEST batches done → start BEFORE catch-up on active tab */
@@ -1942,6 +1979,8 @@ chathistory_process_batch (server *serv, batch_info *batch)
 	session *sess = NULL;
 	gboolean is_catchup;
 	gboolean unsolicited;
+	gboolean nested;
+	gboolean latest_owned = TRUE;
 	gint64 active_gap_id;
 	int active_gap_dir;
 	char *batch_oldest_msgid = NULL;
@@ -1953,10 +1992,22 @@ chathistory_process_batch (server *serv, batch_info *batch)
 	if (!batch || !batch->type)
 		return;
 
+	nested = batch_in_replay_wrapper (serv, batch);
+
 	/* batch->params[0] should be the target */
 	if (batch->param_count >= 1 && batch->params[0])
 	{
 		sess = find_session_for_target (serv, batch->params[0]);
+
+		/* The replay covers PM correspondents after channels, and we may
+		 * have no window open for the ones that spoke while we were away.
+		 * Open the dialog the way the CHATHISTORY TARGETS path does for a
+		 * missed correspondent — new_ircwindow loads the scrollback, which
+		 * the catch-up anchors below read.  Only for wrapper children: a
+		 * stray unnested batch for an unknown target is still dropped. */
+		if (!sess && nested && batch->params[0][0] &&
+		    !is_channel (serv, batch->params[0]))
+			sess = new_ircwindow (serv, batch->params[0], SESS_DIALOG, 0);
 	}
 
 	if (!sess)
@@ -1969,17 +2020,36 @@ chathistory_process_batch (server *serv, batch_info *batch)
 	 * catchup pagination off a gap-fill response. */
 	active_gap_id = sess->ch_active ? sess->ch_active->gap_id : 0;
 	active_gap_dir = sess->ch_active ? sess->ch_active->gap_dir : 0;
+
+	/* A wrapper child answers no request of ours, so it must not be
+	 * attributed to an in-flight gap fill: with the gap forgotten here the
+	 * empty branch can neither retry nor dead-mark it, and the non-empty
+	 * path carries gap_id 0 into the chunk instead of clamping the ledger
+	 * row to a span this batch never covered.  ch_active itself is left
+	 * alone (see the request_complete skip below), so the real gap-fill
+	 * reply is still attributed normally when it arrives. */
+	if (nested)
+	{
+		active_gap_id = 0;
+		active_gap_dir = 0;
+	}
+
 	is_catchup = sess->catchup_in_progress && active_gap_id == 0;
 
 	/* A batch the server sent on its own (draft/persistence replay, or a
-	 * hand-typed /quote CHATHISTORY) is treated as this session's LATEST
-	 * phase: the witness/bridge bookkeeping runs, but the request queue
-	 * and history_exhausted are left alone. */
+	 * hand-typed /quote CHATHISTORY) may be treated as this session's
+	 * LATEST phase: the witness/bridge bookkeeping runs, but the request
+	 * queue and history_exhausted are left alone.  Only if the adoption
+	 * succeeds, though — a session already running a catch-up loop of its
+	 * own keeps it, and this batch is then plain history rows that must
+	 * not step, witness or complete somebody else's phase.  (active_gap_id
+	 * is necessarily 0 here: the wrapper arm cleared it just above, and
+	 * the other arm requires ch_active == NULL.) */
 	unsolicited = chathistory_batch_is_unsolicited (serv, batch, sess);
-	if (unsolicited && active_gap_id == 0)
+	if (unsolicited)
 	{
-		chathistory_begin_unsolicited_catchup (sess);
-		is_catchup = sess->catchup_in_progress;
+		latest_owned = chathistory_begin_unsolicited_catchup (sess);
+		is_catchup = latest_owned;
 	}
 
 	/* Empty batch handling */
@@ -2040,14 +2110,22 @@ chathistory_process_batch (server *serv, batch_info *batch)
 			 * Don't set history_exhausted unless chathistory-end was sent:
 			 * older history may still exist for scroll-to-top requests. */
 			finish_catchup (sess);
-			if (serv->chathistory_latest_pending > 0)
+			/* Give back only a slot this batch actually took (see the
+			 * matching decrement in finish_batch_processing). */
+			if (latest_owned && serv->chathistory_latest_pending > 0)
 				serv->chathistory_latest_pending--;
 			if (serv->chathistory_latest_pending == 0)
 				chathistory_check_before_catchup (serv);
 			return;
 		}
-		/* Non-catch-up empty batch: server has no more history in this direction */
-		sess->history_exhausted = TRUE;
+		/* Non-catch-up empty batch: server has no more history in this
+		 * direction.  Never conclude that from an unsolicited batch — an
+		 * empty replay leg says the server had nothing to replay for this
+		 * target, not that the target's older history is gone.  (Reachable
+		 * for a replay child only when the session was already running a
+		 * catch-up loop, so the batch was not adopted.) */
+		if (!unsolicited)
+			sess->history_exhausted = TRUE;
 		return;
 	}
 
@@ -2096,6 +2174,7 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		sync_state.raw_count = raw_count;
 		sync_state.is_catchup = is_catchup;
 		sync_state.unsolicited = unsolicited;
+		sync_state.latest_owned = latest_owned;
 		sync_state.chathistory_end = batch->chathistory_end;
 		sync_state.batch_oldest_msgid = (char *)batch_oldest_msgid; /* borrowed, not freed */
 		sync_state.gap_id = active_gap_id;
@@ -2126,6 +2205,7 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		chunk->raw_count = raw_count;
 		chunk->is_catchup = is_catchup;
 		chunk->unsolicited = unsolicited;
+		chunk->latest_owned = latest_owned;
 		chunk->chathistory_end = batch->chathistory_end;
 		chunk->db = db;
 		chunk->batch_oldest_msgid = g_strdup (batch_oldest_msgid);
