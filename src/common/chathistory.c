@@ -1587,8 +1587,17 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 	 * (msg_count == 0).  The batch's oldest msgid is a valid pagination
 	 * cursor regardless of whether the messages were already known from
 	 * scrollback DB.  Without this, BEFORE requests loop with the same
-	 * reference when the overlap region is entirely in the local DB. */
-	if (chunk->batch_oldest_msgid && chunk->raw_count > 0)
+	 * reference when the overlap region is entirely in the local DB.
+	 *
+	 * One exception: an unadopted replay child (unsolicited, and the
+	 * session was already paginating a catch-up loop of its own, so no
+	 * LATEST phase was taken for it).  That batch is plain history, and its
+	 * oldest msgid is newer than the cursor the BEFORE loop is walking
+	 * backwards from — writing it here would rewind that walk onto a page
+	 * already fetched.  An adopted replay child (latest_owned) opened the
+	 * phase itself and updates the cursor exactly like our own LATEST. */
+	if (chunk->batch_oldest_msgid && chunk->raw_count > 0 &&
+	    !(chunk->unsolicited && !chunk->latest_owned))
 	{
 		g_free (sess->oldest_msgid);
 		sess->oldest_msgid = g_strdup (chunk->batch_oldest_msgid);
