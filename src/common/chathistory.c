@@ -2030,13 +2030,24 @@ chunk_idle_cb (gpointer data)
 		return G_SOURCE_REMOVE;
 	}
 
-	if (chunk->db)
-		scrollback_begin_transaction (chunk->db);
+	{
+		gint64 t_chunk = g_get_monotonic_time ();
+		int before = g_slist_length (chunk->remaining);
 
-	process_chunk_messages (chunk);
+		if (chunk->db)
+			scrollback_begin_transaction (chunk->db);
 
-	if (chunk->db)
-		scrollback_commit_transaction (chunk->db);
+		process_chunk_messages (chunk);
+
+		if (chunk->db)
+			scrollback_commit_transaction (chunk->db);
+
+		poxchat_timing_log ("chathistory %s: chunk %d msgs %.1f ms (%d left)",
+		                    chunk->sess->channel,
+		                    before - g_slist_length (chunk->remaining),
+		                    (g_get_monotonic_time () - t_chunk) / 1000.0,
+		                    g_slist_length (chunk->remaining));
+	}
 
 	if (chunk->remaining == NULL)
 	{
@@ -2331,6 +2342,8 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		sync_state.gap_dir = active_gap_dir;
 		sync_state.batch_newest_msgid = (char *) batch_newest_msgid; /* borrowed, not freed */
 
+		gint64 t_sync = g_get_monotonic_time ();
+
 		if (db)
 			scrollback_begin_transaction (db);
 
@@ -2342,6 +2355,8 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		/* finish_batch_processing reads from the chunk state but doesn't
 		 * free it — safe to use a stack-allocated struct here. */
 		finish_batch_processing (&sync_state);
+		poxchat_timing_log ("chathistory %s: %d msgs sync %.1f ms", sess->channel,
+		                    raw_count, (g_get_monotonic_time () - t_sync) / 1000.0);
 	}
 	else
 	{
@@ -2645,6 +2660,8 @@ chathistory_stop_background_fetch (session *sess)
 static void
 catchup_enter_latest_phase (session *sess)
 {
+	gint64 t_enter = g_get_monotonic_time ();
+
 	/* Refresh the newest-stored snapshot from the DB.  The session's
 	 * scrollback_newest_* fields are loaded once at scrollback-load time
 	 * and go stale as soon as catchup or live traffic writes newer rows —
@@ -2675,6 +2692,8 @@ catchup_enter_latest_phase (session *sess)
 		sess->catchup_lower_bound = time (NULL) - (prefs.hex_irc_chathistory_background_max_age * 3600);
 	else
 		sess->catchup_lower_bound = 0;
+	poxchat_timing_log ("catchup_enter %s: snapshot %.1f ms", sess->channel,
+	                    (g_get_monotonic_time () - t_enter) / 1000.0);
 }
 
 /* Send LATEST for a single session as part of deferred catch-up */

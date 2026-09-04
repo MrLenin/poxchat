@@ -936,6 +936,7 @@ inbound_nameslist (server *serv, char *chan, char *names,
 	char name[NICKLEN];
 	int i;
 	size_t offset;
+	gint64 t_names = g_get_monotonic_time ();
 
 	sess = find_channel (serv, chan);
 	if (!sess)
@@ -984,6 +985,8 @@ inbound_nameslist (server *serv, char *chan, char *names,
 
 		userlist_add (sess, name, host, NULL, NULL, tags_data);
 	}
+	poxchat_timing_log ("names %s: %d nicks %.1f ms", chan, i,
+	                    (g_get_monotonic_time () - t_names) / 1000.0);
 	g_strfreev (name_list);
 }
 

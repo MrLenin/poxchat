@@ -500,6 +500,12 @@ trailing_index(char *word_eol[])
 	return param_index;
 }
 
+/* POXCHAT_TIMING: WHOX (354) rows are individually cheap but a join burst
+ * brings sixty per channel; accumulate and report at the 315 that ends
+ * each WHO. */
+static double who_reply_ms;
+static int who_reply_rows;
+
 static void
 process_numeric (session * sess, int n,
 					  char *word[], char *word_eol[], char *text,
@@ -785,9 +791,14 @@ process_numeric (session * sess, int n,
 					away = 1;
 
 				/* :server 354 yournick 152 #channel ~ident host servname nick H account :realname */
-				inbound_user_info (sess, word[5], word[6], word[7], word[8],
-										 word[9], word_eol[12]+1, word[11], away,
-										 tags_data);
+				{
+					gint64 t_row = g_get_monotonic_time ();
+					inbound_user_info (sess, word[5], word[6], word[7], word[8],
+											 word[9], word_eol[12]+1, word[11], away,
+											 tags_data);
+					who_reply_ms += (g_get_monotonic_time () - t_row) / 1000.0;
+					who_reply_rows++;
+				}
 
 				/* try to show only user initiated whos */
 				if (!who_sess || !who_sess->doing_who)
@@ -810,6 +821,10 @@ process_numeric (session * sess, int n,
 												  word[1], word[2], NULL, 0,
 												  tags_data->timestamp);
 				who_sess->doing_who = FALSE;
+				poxchat_timing_log ("who %s: %d rows %.1f ms", word[4],
+				                    who_reply_rows, who_reply_ms);
+				who_reply_ms = 0;
+				who_reply_rows = 0;
 			} else
 			{
 				if (!serv->doing_dns)
@@ -1259,7 +1274,12 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 				if (*chan == ':')
 					chan++;
 				if (!serv->p_cmp (nick, serv->nick))
-					inbound_ujoin (serv, chan, nick, ip, tags_data);
+					{
+						gint64 t_join = g_get_monotonic_time ();
+						inbound_ujoin (serv, chan, nick, ip, tags_data);
+						poxchat_timing_log ("ujoin %s: %.1f ms", chan,
+						                    (g_get_monotonic_time () - t_join) / 1000.0);
+					}
 				else
 					inbound_join (serv, chan, nick, ip, account, realname,
 									  tags_data);

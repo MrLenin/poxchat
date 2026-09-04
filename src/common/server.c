@@ -166,8 +166,8 @@ tcp_send_queue (server *serv)
 	if (!is_server (serv))
 		return 0;
 
-	/* try priority 2,1,0 */
-	pri = 2;
+	/* try priority 3,2,1,0 */
+	pri = 3;
 	while (pri >= 0)
 	{
 		list = serv->outbound_queue;
@@ -227,7 +227,7 @@ tcp_send_len (server *serv, char *buf, int len)
 	}
 
 	dbuf = g_malloc (len + 2);	/* first byte is the priority */
-	dbuf[0] = 2;	/* pri 2 for most things */
+	dbuf[0] = 3;	/* pri 3 for most things: the user's own commands go first */
 	memcpy (dbuf + 1, buf, len);
 	dbuf[len + 1] = 0;
 
@@ -235,15 +235,24 @@ tcp_send_len (server *serv, char *buf, int len)
 	if (g_ascii_strncasecmp (dbuf + 1, "PRIVMSG", 7) == 0 ||
 		 g_ascii_strncasecmp (dbuf + 1, "NOTICE", 6) == 0)
 	{
-		dbuf[0] = 1;
+		dbuf[0] = 2;
 	}
 	else
 	{
-		/* WHO and CHATHISTORY get the lowest priority.
-		 * CHATHISTORY may be prefixed with @label=hcN from labeled-response. */
-		if (g_ascii_strncasecmp (dbuf + 1, "WHO ", 4) == 0 ||
-			 g_ascii_strncasecmp (dbuf + 1, "CHATHISTORY ", 12) == 0 ||
+		/* CHATHISTORY (possibly prefixed with @label=hcN from
+		 * labeled-response) sits between the user's own traffic and the
+		 * per-join queries: a join burst queues MODE, MARKREAD and WHO for
+		 * every channel at the throttle's 2 s cadence, and the history
+		 * bridge used to wait behind all of them — 52 s for nine channels
+		 * while the truncated replay sat there with a gap marker. */
+		if (g_ascii_strncasecmp (dbuf + 1, "CHATHISTORY ", 12) == 0 ||
 			 (dbuf[1] == '@' && strstr (dbuf + 1, " CHATHISTORY ") != NULL))
+			dbuf[0] = 1;
+		/* WHO and MARKREAD get the lowest priority: the WHOX seeds away
+		 * and account state that away-notify keeps current afterwards,
+		 * and a read marker sent late is still the newest one. */
+		else if (g_ascii_strncasecmp (dbuf + 1, "WHO ", 4) == 0 ||
+			 g_ascii_strncasecmp (dbuf + 1, "MARKREAD ", 9) == 0)
 			dbuf[0] = 0;
 		/* as do MODE queries (but not changes) */
 		else if (g_ascii_strncasecmp (dbuf + 1, "MODE ", 5) == 0)
