@@ -665,6 +665,7 @@ typedef struct server
 	struct session *chathistory_before_sess;	/* session doing active BEFORE catch-up (NULL = none) */
 	unsigned int chathistory_between_unsupported:1;	/* server FAILed BETWEEN; use BEFORE/AFTER fallback */
 	unsigned int chathistory_suppressed:1;	/* repeated FAILs — stop asking until reconnect */
+	unsigned int chathistory_targets_deferred:1;	/* TARGETS held back for a server-driven replay; the deferred-start timer sends it if none arrives */
 	int chathistory_fail_streak;			/* consecutive CHATHISTORY FAILs */
 	int multiline_max_bytes;		/* max bytes in multiline batch (from ISUPPORT) */
 	int multiline_max_lines;		/* max lines in multiline batch (from ISUPPORT) */
@@ -779,6 +780,7 @@ typedef struct server
 	unsigned int persistence_attached:1;		/* sent PERSISTENCE ATTACH this connection */
 	unsigned int persistence_cursor_sent:1;		/* that ATTACH carried a msgid cursor */
 	unsigned int persistence_attach_pending:1;	/* ...and it is still unanswered: only that FAIL may drop the flags above */
+	unsigned int persistence_replay_seen:1;		/* a bouncer-replay wrapper actually opened: the server really is replaying */
 #ifdef USE_OPENSSL
 	unsigned int use_ssl:1;				  /* is server SSL capable? */
 	unsigned int accept_invalid_cert:1;/* ignore result of server's cert. verify */

@@ -517,6 +517,9 @@ process_numeric (session * sess, int n,
 	{
 	case 1:
 		inbound_login_start (sess, word[3], word[1], tags_data);
+		/* Registration is over, so the window in which a FAIL could be
+		 * the answer to our pre-CAP-END PERSISTENCE ATTACH has closed. */
+		persistence_registration_complete (serv);
 		/* if network is PTnet then you must get your IP address
 			from "001" server message */
 		if ((strncmp(word[7], "PTnet", 5) == 0) &&

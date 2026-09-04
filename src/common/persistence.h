@@ -62,9 +62,18 @@ void persistence_parse_cap_value (server *serv, const char *value);
  * answers FAIL, which restores legacy behaviour.  No reply is awaited. */
 void persistence_send_attach (server *serv);
 
-/* TRUE when we handed the server a cursor and it is therefore replaying
- * every buffer itself: our own catch-up fetches are redundant. */
+/* TRUE when we handed the server a cursor and it is therefore expected
+ * to replay every buffer itself: our own catch-up fetches would be
+ * redundant.  Provisional — it goes FALSE once a bouncer-replay wrapper
+ * actually opens (the replay is real and needs no help) and stays TRUE
+ * while nothing has arrived, because a server may silently replay
+ * nothing (REPLAY OFF, policy, no gap).  Callers must therefore treat it
+ * as "hold off for now", not "never". */
 gboolean persistence_server_drives_replay (server *serv);
+
+/* Registration completed (001): close the ATTACH reply window, so a
+ * later FAIL is not mistaken for the answer to our ATTACH. */
+void persistence_registration_complete (server *serv);
 
 /* ":server PERSISTENCE <args>" — args is everything after the verb, e.g.
  * "STATUS DEFAULT ON" or "PROFILE mobile channels :#a,#b".  Consumes

@@ -225,13 +225,38 @@ persistence_send_attach (server *serv)
 	g_free (cursor);
 }
 
-/* TRUE while the server is replaying every buffer from the cursor we
- * gave it: our own per-channel catch-up would fetch the same lines
- * again, so chathistory holds off until this goes false. */
+/* TRUE while the server is *expected* to replay every buffer from the
+ * cursor we gave it: our own per-channel catch-up would fetch the same
+ * lines again, so chathistory holds off while this holds.
+ *
+ * Expected, not promised.  The two flags below are our side of the
+ * bargain — we asked, and nothing has said no — but the server may still
+ * replay nothing at all: the user's PERSISTENCE REPLAY is OFF, server
+ * policy declines, or the session is fresh enough that the cursor is
+ * still known and there is simply no gap.  None of those produce a FAIL.
+ * So the gate closes again the moment the replay is real
+ * (chathistory_replay_wrapper_begin sets persistence_replay_seen at the
+ * first bouncer-replay wrapper START), and the callers treat it as a
+ * delay rather than a cancellation. */
 gboolean
 persistence_server_drives_replay (server *serv)
 {
-	return serv && serv->persistence_attached && serv->persistence_cursor_sent;
+	return serv && serv->persistence_attached && serv->persistence_cursor_sent &&
+	       !serv->persistence_replay_seen;
+}
+
+/* Registration finished (001).  The server accepts ATTACH only between
+ * SASL completion and CAP END, so the window in which a FAIL could be
+ * the answer to ours has closed: whatever arrives from here on is about
+ * something else.  A server that neither acked nor failed our ATTACH
+ * would otherwise leave attach_pending set for the whole connection,
+ * handing the next unrelated FAIL the power to drop the replay gate. */
+void
+persistence_registration_complete (server *serv)
+{
+	if (!serv)
+		return;
+	serv->persistence_attach_pending = FALSE;
 }
 
 #define PERSISTENCE_MAX_WORDS 8
@@ -503,4 +528,5 @@ persistence_reset (server *serv)
 	serv->persistence_attached = FALSE;
 	serv->persistence_cursor_sent = FALSE;
 	serv->persistence_attach_pending = FALSE;
+	serv->persistence_replay_seen = FALSE;
 }

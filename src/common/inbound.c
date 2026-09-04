@@ -2190,6 +2190,15 @@ inbound_batch_start (server *serv, const char *batch_id, const char *batch_type,
 	batch = batch_info_new (batch_id, batch_type, word, tags_data);
 	g_hash_table_insert (serv->active_batches, g_strdup (batch_id), batch);
 	server_ensure_stale_sweep_timer (serv);
+
+	/* The server opened the missed-message replay wrapper: the catch-up
+	 * we deferred at ATTACH time on the expectation of this is now the
+	 * server's job for real.  Told at START, not END, so the provisional
+	 * timer is cancelled before it can fire in the middle of the replay. */
+	if (batch->type &&
+	    g_ascii_strcasecmp (persistence_strip_namespace (batch->type),
+	                        "bouncer-replay") == 0)
+		chathistory_replay_wrapper_begin (serv);
 }
 
 /* Process a multiline batch: concatenate messages and display as single message */

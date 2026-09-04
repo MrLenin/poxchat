@@ -1417,6 +1417,7 @@ server_cleanup (server * serv)
 		}
 		serv->chathistory_latest_pending = 0;
 		serv->chathistory_before_sess = NULL;
+		serv->chathistory_targets_deferred = FALSE;
 
 		/* Stop stale sweep timer */
 		if (serv->stale_sweep_timer)

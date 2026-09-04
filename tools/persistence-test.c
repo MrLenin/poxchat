@@ -308,13 +308,14 @@ main (void)
 	serv->persistence_attached = TRUE;
 	serv->persistence_cursor_sent = TRUE;
 	serv->persistence_attach_pending = TRUE;
+	serv->persistence_replay_seen = TRUE;
 	persistence_handle_reply (serv, "STATUS ON ON", 0);
 	persistence_handle_metadata (serv, "me", "hold", "1", 0);
 	persistence_reset (serv);
 	CHECK (!serv->have_persistence && !serv->persistence_status_known &&
 	       !serv->persistence_effective && !serv->persistence_attached &&
 	       !serv->persistence_cursor_sent && !serv->persistence_attach_pending &&
-	       !serv->persistence_hold &&
+	       !serv->persistence_replay_seen && !serv->persistence_hold &&
 	       !serv->persistence_hold_known && !serv->persistence_tok_replay_control &&
 	       !serv->persistence_tok_profile && !serv->persistence_tok_attach &&
 	       !serv->persistence_tok_detach && !serv->persistence_tok_list &&
@@ -468,6 +469,47 @@ main (void)
 	       "a FAIL that is not our attach's answer keeps the replay gate closed");
 	CHECK (rearm_deferred_count == 0 && rearm_targets_count == 0,
 	       "a FAIL that is not our attach's answer drives no catch-up");
+
+	/* 11. The replay gate is provisional.  Sending the cursor is only our
+	 * consent; the server may replay nothing and say nothing about it, so
+	 * the gate holds until a bouncer-replay wrapper actually opens and
+	 * chathistory_replay_wrapper_begin sets replay_seen.  Callers treat
+	 * the closed gate as "hold off for now", never as "never". */
+	CHECK (serv->persistence_attached && serv->persistence_cursor_sent &&
+	       !serv->persistence_replay_seen,
+	       "gate: attached with a cursor and no replay seen yet");
+	CHECK (persistence_server_drives_replay (serv),
+	       "gate: closed while the replay is still only expected");
+
+	serv->persistence_replay_seen = TRUE;
+	CHECK (!persistence_server_drives_replay (serv),
+	       "gate: a wrapper that really opened re-opens the gate");
+	CHECK (serv->persistence_attached && serv->persistence_cursor_sent,
+	       "gate: replay_seen does not rewrite what we sent");
+	serv->persistence_replay_seen = FALSE;
+
+	/* 12. 001 closes the window in which a FAIL could be the answer to our
+	 * ATTACH, so a server that neither acked nor failed it cannot leave
+	 * attach_pending set for a later, unrelated FAIL to act on. */
+	serv->persistence_attached = TRUE;
+	serv->persistence_cursor_sent = TRUE;
+	serv->persistence_attach_pending = TRUE;
+	persistence_registration_complete (serv);
+	CHECK (!serv->persistence_attach_pending,
+	       "registration_complete clears attach_pending");
+
+	rearm_deferred_count = 0;
+	rearm_targets_count = 0;
+	persistence_handle_fail (serv, "INVALID_PARAMETERS", "ATTACH",
+	                         "No such profile", 0);
+	CHECK (serv->persistence_attached && serv->persistence_cursor_sent,
+	       "a FAIL after 001 no longer answers our ATTACH");
+	CHECK (persistence_server_drives_replay (serv),
+	       "...so it leaves the replay gate closed");
+	CHECK (rearm_deferred_count == 0 && rearm_targets_count == 0,
+	       "...and drives no catch-up");
+
+	persistence_registration_complete (NULL);	/* must not crash */
 
 	g_free (serv);
 	printf ("ok\n");

@@ -205,11 +205,25 @@ gboolean chathistory_batch_is_unsolicited (server *serv, batch_info *batch,
  * @param sess Session to adopt the server-driven replay for
  * @return TRUE only if the session entered the phase and took a
  *         chathistory_latest_pending slot, which the caller must hand back
- *         when the batch finishes.  FALSE when a catch-up loop of our own is
- *         already running, or the session's history is exhausted — the batch
- *         is then plain history and must leave catch-up state alone.
+ *         when the batch finishes.  FALSE when this client does no
+ *         chathistory of its own (no server support, auto catch-up off, or
+ *         suppressed after repeated FAILs — the same guard as
+ *         chathistory_start_catchup), when a catch-up loop of our own is
+ *         already running, or when the session's history is exhausted — the
+ *         batch is then plain history and must leave catch-up state alone.
  */
 gboolean chathistory_begin_unsolicited_catchup (session *sess);
+
+/**
+ * Called at the START of an evilnet.github.io/bouncer-replay wrapper: the
+ * point at which the server-driven replay stops being an expectation and
+ * becomes a fact.  Sets persistence_replay_seen (so
+ * persistence_server_drives_replay goes FALSE), cancels the provisional
+ * deferred-catch-up timer, and drops the deferred CHATHISTORY TARGETS.
+ *
+ * @param serv Server the wrapper came from
+ */
+void chathistory_replay_wrapper_begin (server *serv);
 
 /**
  * Called at the END of an evilnet.github.io/bouncer-replay wrapper: the

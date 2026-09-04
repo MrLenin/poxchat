@@ -42,6 +42,7 @@
 static void schedule_background_fetch (session *sess);
 static void schedule_before_catchup (server *serv);
 static void catchup_enter_latest_phase (session *sess);
+static void send_reconnect_targets_request (server *serv);
 static void chathistory_replay_mode (session *sess, char *nick,
                                      char *mode_str, char **params,
                                      int param_count,
@@ -739,7 +740,22 @@ chathistory_batch_is_unsolicited (server *serv, batch_info *batch, session *sess
 gboolean
 chathistory_begin_unsolicited_catchup (session *sess)
 {
+	server *serv;
+
 	if (!sess || !sess->server)
+		return FALSE;
+	serv = sess->server;
+	/* Adoption is not free: it opens the very catch-up loop our own
+	 * LATEST would have opened, and that loop's BEFORE phase goes on to
+	 * send CHATHISTORY of its own.  A client that does no chathistory —
+	 * server without the cap, auto-catch-up turned off, or the server
+	 * having FAILed us into suppression — must not enter it, or the
+	 * pending slot it takes gates a BEFORE pass that can never run.
+	 * Same guard as chathistory_start_catchup (whose requests
+	 * chathistory_dispatch_now drops while suppressed anyway); the
+	 * batch's rows still land, just as plain history. */
+	if (!serv->have_chathistory || !prefs.hex_irc_chathistory_auto ||
+	    serv->chathistory_suppressed)
 		return FALSE;
 	if (sess->catchup_in_progress)
 		return FALSE;		/* already in our own LATEST/BEFORE loop — leave it */
@@ -747,8 +763,43 @@ chathistory_begin_unsolicited_catchup (session *sess)
 		return FALSE;		/* nothing left to page — send_deferred_latest
 					 * declines the same session for the same reason */
 	catchup_enter_latest_phase (sess);
-	sess->server->chathistory_latest_pending++;
+	serv->chathistory_latest_pending++;
 	return TRUE;
+}
+
+void
+chathistory_replay_wrapper_begin (server *serv)
+{
+	gboolean was_provisional;
+
+	if (!serv)
+		return;
+
+	/* The replay we consented to at ATTACH time is real.  Until this
+	 * point persistence_server_drives_replay was only our expectation:
+	 * the server may have replayed nothing at all and said nothing about
+	 * it (REPLAY OFF, policy, no gap since the cursor).  Everything that
+	 * held off on that expectation now stands down for good — the gate
+	 * drops, the provisional grace timer goes away, and the TARGETS
+	 * request we deferred is dropped because the replay covers PM
+	 * correspondents itself. */
+	was_provisional = persistence_server_drives_replay (serv);
+	serv->persistence_replay_seen = TRUE;
+
+	/* Only the timer this gate armed.  A wrapper on a connection that
+	 * deferred nothing — no profile, so no cursor, so no gate — must not
+	 * silently swallow an ordinary post-JOIN fan-out that happens to be
+	 * pending; the same holds for any later wrapper, whose grace timer
+	 * was cancelled by the first. */
+	if (!was_provisional)
+		return;
+
+	if (serv->chathistory_start_timer > 0)
+	{
+		g_source_remove (serv->chathistory_start_timer);
+		serv->chathistory_start_timer = 0;
+	}
+	serv->chathistory_targets_deferred = FALSE;
 }
 
 void
@@ -1536,6 +1587,10 @@ typedef struct {
 	gboolean chathistory_end;	/* server signalled no more history (draft/chathistory-end) */
 	unsigned int unsolicited:1;	/* server-driven replay, not a reply to a request of ours */
 	unsigned int latest_owned:1;	/* this batch holds a chathistory_latest_pending slot */
+	unsigned int latest_slot_owed:1;	/* ...and finish_batch_processing has not handed it back yet:
+										 * snapshot of is_catchup && latest_owned && !catchup_is_before
+										 * at creation, cleared on entry to finish_batch_processing, so
+										 * a chunk abandoned before then can return the slot exactly once */
 	guint idle_tag;
 	scrollback_db *db;			/* for transaction begin/commit between chunks */
 	gint64 gap_id;				/* gap-fill request this batch answers (0 = none) */
@@ -1561,6 +1616,31 @@ chunk_state_free (chathistory_chunk_state *chunk)
 	g_free (chunk);
 }
 
+/* Give back the chathistory_latest_pending slot a chunk took, for the
+ * paths that abandon it before finish_batch_processing runs: session
+ * destroyed under us, or the whole batch cancelled.  latest_slot_owed is
+ * the exact condition under which finish_batch_processing would have
+ * decremented, and it clears it on entry, so the slot comes back once
+ * whichever way the chunk ends.  Reads nothing from chunk->sess — it may
+ * already be freed at the abandon sites. */
+static void
+release_latest_slot (chathistory_chunk_state *chunk)
+{
+	if (!chunk || !chunk->latest_slot_owed)
+		return;
+
+	chunk->latest_slot_owed = FALSE;
+	if (chunk->serv && chunk->serv->chathistory_latest_pending > 0)
+		chunk->serv->chathistory_latest_pending--;
+
+	/* Deliberately no chathistory_check_before_catchup() here, unlike
+	 * finish_batch_processing: the cancel path runs from session_free,
+	 * which has not yet cleared current_sess, so kicking the BEFORE
+	 * phase could pick the very session being destroyed and dispatch a
+	 * request against it.  Reaching zero is picked up by the next batch
+	 * completion, BEFORE timer hop or tab switch instead. */
+}
+
 /* Post-processing after all messages in a batch have been processed.
  * Handles mode flag cleanup, pagination, and background fetch scheduling. */
 static void
@@ -1568,6 +1648,13 @@ finish_batch_processing (chathistory_chunk_state *chunk)
 {
 	session *sess = chunk->sess;
 	server *serv = chunk->serv;
+
+	/* From here the slot is this function's business: every return path
+	 * below either gives it back (the LATEST arm) or established at
+	 * creation time that there was none to give.  Clearing it up front
+	 * means an abandon path that somehow runs afterwards cannot return
+	 * the same slot twice. */
+	chunk->latest_slot_owed = FALSE;
 
 	serv->chathistory_fail_streak = 0;
 
@@ -1935,6 +2022,10 @@ chunk_idle_cb (gpointer data)
 	{
 		chunk->idle_tag = 0;
 		chunk->sess = NULL;  /* prevent chunk_state_free from clearing sess->chunk_state */
+		/* finish_batch_processing will never run for this batch, so the
+		 * LATEST slot it took has to come back here or the server's
+		 * BEFORE phase waits on a session that no longer exists. */
+		release_latest_slot (chunk);
 		chunk_state_free (chunk);
 		return G_SOURCE_REMOVE;
 	}
@@ -1979,9 +2070,57 @@ chathistory_cancel_chunk_processing (session *sess)
 	fe_set_batch_mode (sess, FALSE);
 	chathistory_queue_free (sess);
 
+	/* The batch is abandoned mid-flight, so finish_batch_processing will
+	 * never return the LATEST slot it took.  Hand it back here — an
+	 * orphaned slot never reaches zero, and chathistory_check_before_catchup
+	 * refuses to start the BEFORE phase for every other session on the
+	 * server until it does. */
+	release_latest_slot (chunk);
+
 	chunk_state_free (chunk);
 }
 
+/* Catch-up state machine — every shape of chathistory batch we can see,
+ * and what each one is allowed to touch.  "nested" is
+ * batch_in_replay_wrapper (a leg of the draft/persistence catch-up
+ * replay); "unsolicited" is chathistory_batch_is_unsolicited (nested, or
+ * nothing of ours in flight for the session); "latest_owned" is whether
+ * chathistory_begin_unsolicited_catchup adopted the batch and so took a
+ * chathistory_latest_pending slot (always TRUE for a batch that answers
+ * a request of ours, which took its slot when it was sent).  "session
+ * idle" below means no catch-up loop of its own is running and its
+ * history is not exhausted; "chathistory enabled" means have_chathistory
+ * && hex_irc_chathistory_auto && !chathistory_suppressed.
+ *
+ * | Batch                                                                     | nested | unsolicited | latest_owned | is_catchup          | gap ids        | request_complete | witness     | pending--   | oldest_msgid update | history_exhausted from end-tag |
+ * |---------------------------------------------------------------------------|--------|-------------|--------------|---------------------|----------------|------------------|-------------|-------------|---------------------|--------------------------------|
+ * | our LATEST/BEFORE                                                         | F      | F           | T            | catchup_in_progress | 0              | yes              | LATEST only | LATEST only | yes                 | yes                            |
+ * | our gap fill                                                              | F      | F           | T            | F                   | from ch_active | yes              | no          | no          | yes                 | no                             |
+ * | top-level, no request, session idle, chathistory enabled                  | F      | T           | T            | T                   | 0              | no               | yes         | yes         | yes                 | no                             |
+ * | top-level, no request, session already catching up / exhausted / disabled | F      | T           | F            | F                   | 0              | no               | no          | no          | no                  | no                             |
+ * | wrapper child, session idle, chathistory enabled (any ch_active)          | T      | T           | T            | T                   | forced 0       | no               | yes         | yes         | yes                 | no                             |
+ * | wrapper child, session already catching up / exhausted / disabled         | T      | T           | F            | F                   | forced 0       | no               | no          | no          | no                  | no                             |
+ *
+ * Where each column is enforced:
+ *   is_catchup            — below: catchup_in_progress && no gap id, then
+ *                           overridden by the adoption result when unsolicited.
+ *   gap ids               — active_gap_id/dir come from ch_active, and the
+ *                           nested arm forces them to 0: a wrapper child
+ *                           answers no gap fill of ours even while one is in
+ *                           flight.
+ *   request_complete      — finish_batch_processing and the empty-batch arm,
+ *                           both under !unsolicited.
+ *   witness / pending--   — finish_batch_processing's LATEST arm, both under
+ *                           chunk->latest_owned; the empty-batch arm mirrors
+ *                           the decrement, and release_latest_slot returns it
+ *                           for a chunk abandoned before either runs.
+ *   oldest_msgid update   — finish_batch_processing, skipped for an unadopted
+ *                           replay child (unsolicited && !latest_owned) whose
+ *                           oldest msgid would rewind somebody else's walk.
+ *   history_exhausted     — finish_batch_processing and the empty-batch arm,
+ *                           both under gap_id == 0 && !unsolicited: a replay's
+ *                           chathistory-end means "this target's replay is
+ *                           done", not "no older history exists". */
 void
 chathistory_process_batch (server *serv, batch_info *batch)
 {
@@ -2184,6 +2323,8 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		sync_state.is_catchup = is_catchup;
 		sync_state.unsolicited = unsolicited;
 		sync_state.latest_owned = latest_owned;
+		sync_state.latest_slot_owed = is_catchup && latest_owned &&
+		                              !sess->catchup_is_before;
 		sync_state.chathistory_end = batch->chathistory_end;
 		sync_state.batch_oldest_msgid = (char *)batch_oldest_msgid; /* borrowed, not freed */
 		sync_state.gap_id = active_gap_id;
@@ -2215,6 +2356,13 @@ chathistory_process_batch (server *serv, batch_info *batch)
 		chunk->is_catchup = is_catchup;
 		chunk->unsolicited = unsolicited;
 		chunk->latest_owned = latest_owned;
+		/* Snapshot, not a live read: the abandon paths cannot touch the
+		 * session (it may be freed).  catchup_is_before is stable for the
+		 * chunk's lifetime — history_loading stays TRUE until
+		 * finish_batch_processing, and check_before_catchup skips a
+		 * session that is loading. */
+		chunk->latest_slot_owed = is_catchup && latest_owned &&
+		                          !sess->catchup_is_before;
 		chunk->chathistory_end = batch->chathistory_end;
 		chunk->db = db;
 		chunk->batch_oldest_msgid = g_strdup (batch_oldest_msgid);
@@ -2578,6 +2726,16 @@ chathistory_deferred_start_cb (gpointer data)
 	if (!prefs.hex_irc_chathistory_auto)
 		return G_SOURCE_REMOVE;
 
+	/* We held TARGETS back for a server-driven replay that never opened
+	 * a wrapper (chathistory_replay_wrapper_begin would have cancelled
+	 * this timer and cleared the flag), so discover the missed DMs the
+	 * usual way after all. */
+	if (serv->chathistory_targets_deferred)
+	{
+		serv->chathistory_targets_deferred = FALSE;
+		send_reconnect_targets_request (serv);
+	}
+
 	serv->chathistory_latest_pending = 0;
 
 	/* Send LATEST for current_sess first (active tab gets priority) */
@@ -2602,17 +2760,37 @@ chathistory_deferred_start_cb (gpointer data)
 void
 chathistory_schedule_deferred (server *serv)
 {
-	if (persistence_server_drives_replay (serv))
-		return;		/* server replays every buffer from our ATTACH cursor */
+	guint delay;
 
 	if (!serv || !serv->have_chathistory || !prefs.hex_irc_chathistory_auto)
 		return;
 
-	/* Reset the timer — each new 366 pushes the start out by DEFERRED_DELAY */
+	/* While the server is expected to replay every buffer from the
+	 * cursor our ATTACH carried, our fan-out would fetch the same lines
+	 * over again — but that expectation is only our own consent, never
+	 * the server's promise.  PERSISTENCE REPLAY OFF, server policy, or a
+	 * fresh session whose cursor is still known all end in nothing being
+	 * replayed and no FAIL to say so, and dropping the fan-out on that
+	 * would leave the hole between our newest stored row and live
+	 * traffic silent until the user happened to scroll.
+	 *
+	 * So the gate only buys time.  The first bouncer-replay wrapper
+	 * START normally arrives within a second of the MOTD end and cancels
+	 * this timer outright (chathistory_replay_wrapper_begin); when it
+	 * never comes, the old fan-out runs late instead of never.  A replay
+	 * that turns up after the fan-out already started is absorbed by
+	 * msgid dedup and by the adoption rules above
+	 * chathistory_process_batch — the cost of guessing wrong is one
+	 * redundant round of LATEST requests. */
+	delay = persistence_server_drives_replay (serv)
+		? CHATHISTORY_DEFERRED_DELAY * 10
+		: CHATHISTORY_DEFERRED_DELAY;
+
+	/* Reset the timer — each new 366 pushes the start out by that delay */
 	if (serv->chathistory_start_timer > 0)
 		g_source_remove (serv->chathistory_start_timer);
 
-	serv->chathistory_start_timer = g_timeout_add (CHATHISTORY_DEFERRED_DELAY,
+	serv->chathistory_start_timer = g_timeout_add (delay,
 	                                                chathistory_deferred_start_cb,
 	                                                serv);
 }
@@ -2780,14 +2958,15 @@ chathistory_process_targets_batch (server *serv, batch_info *batch)
 	}
 }
 
-void
-chathistory_request_targets_on_reconnect (server *serv)
+/* The actual CHATHISTORY TARGETS send: window the query from now back to
+ * just before the last disconnect.  Shared by the immediate path and by
+ * the deferred-start timer, which runs it when the server-driven replay
+ * we held it for never materialised. */
+static void
+send_reconnect_targets_request (server *serv)
 {
 	gint64 now_val, lower_bound;
 	char start_ref[64], end_ref[64];
-
-	if (persistence_server_drives_replay (serv))
-		return;		/* server replays every buffer from our ATTACH cursor */
 
 	if (!serv->have_chathistory || !serv->connected)
 		return;
@@ -2803,4 +2982,25 @@ chathistory_request_targets_on_reconnect (server *serv)
 	chathistory_ts_ref (end_ref, sizeof (end_ref), lower_bound);
 
 	chathistory_request_targets (serv, start_ref, end_ref, 0);
+}
+
+void
+chathistory_request_targets_on_reconnect (server *serv)
+{
+	if (!serv)
+		return;
+
+	if (persistence_server_drives_replay (serv))
+	{
+		/* The replay we consented to covers PM correspondents after the
+		 * channels, so TARGETS would ask for a list already on its way.
+		 * Defer rather than drop — that expectation is not a promise
+		 * (see chathistory_schedule_deferred): if no wrapper opens, the
+		 * deferred-start timer sends this after the grace delay, and if
+		 * one does, chathistory_replay_wrapper_begin clears the flag. */
+		serv->chathistory_targets_deferred = TRUE;
+		return;
+	}
+
+	send_reconnect_targets_request (serv);
 }
