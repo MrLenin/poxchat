@@ -2392,94 +2392,6 @@ collapse_multiline_to_parent (batch_info *batch, batch_info *parent)
 	g_string_free (combined_text, TRUE);
 }
 
-/* draft/persistence restoration batch.  On every revive and every alias
- * attach the server re-sends this connection its own JOIN for each channel
- * the presence is in, carrying the membership's original time and msgid,
- * wrapped in a batch of this type.  Handled as live traffic those JOINs
- * re-ran the whole fresh-join flow each time: userlist wiped, MODE
- * re-sent, names state reset, catch-up re-armed and a "Now talking on"
- * banner stamped with a days-old time.  A JOIN for a channel this
- * connection is already in is an attach echo and needs nothing beyond
- * remembering its msgid; a channel we are not in yet (a revive after a
- * reconnect, where the disconnect cleared the tab) takes the normal join
- * path, which is what the JOIN is for. */
-static void
-process_persistence_batch (server *serv, batch_info *batch)
-{
-	GSList *iter;
-
-	for (iter = batch->messages; iter; iter = iter->next)
-	{
-		batch_message *msg = iter->data;
-		message_tags_data tags_data = MESSAGE_TAGS_DATA_INIT;
-		char *nick = NULL, *host = NULL;
-
-		if (!msg || !msg->command || !msg->prefix)
-			continue;
-
-		tags_data.timestamp = msg->timestamp;
-		tags_data.msgid = msg->msgid;
-		tags_data.all_tags = msg->tags;
-		if (msg->tags)
-		{
-			const char *acct = g_hash_table_lookup (msg->tags, "account");
-			if (acct && acct[0])
-				tags_data.account = (char *) acct;
-		}
-
-		{
-			char *bang = strchr (msg->prefix, '!');
-			if (bang)
-			{
-				nick = g_strndup (msg->prefix, bang - msg->prefix);
-				host = g_strdup (bang + 1);
-			}
-			else
-				nick = g_strdup (msg->prefix);
-		}
-
-		if (g_ascii_strcasecmp (msg->command, "JOIN") == 0 && msg->param_count >= 1)
-		{
-			char *chan = msg->params[0];
-			char *account = msg->param_count >= 2 ? msg->params[1] : NULL;
-			char *realname = msg->param_count >= 3 ? msg->params[2] : NULL;
-			session *sess;
-
-			if (*chan == ':')
-				chan++;
-			if (account && strcmp (account, "*") == 0)
-				account = NULL;
-			if (realname && *realname == ':')
-				realname++;
-
-			sess = find_channel (serv, chan);
-			if (!serv->p_cmp (nick, serv->nick))
-			{
-				if (sess && sess->channel[0])
-				{
-					/* Already in it on this connection: attach echo. */
-					if (msg->msgid)
-						chathistory_track_msgid_ts (sess, msg->msgid, msg->timestamp, FALSE);
-				}
-				else
-					inbound_ujoin (serv, chan, nick, host ? host : "", &tags_data);
-			}
-			else if (!sess || !userlist_find (sess, nick))
-				inbound_join (serv, chan, nick, host ? host : "", account, realname,
-				              &tags_data);
-		}
-		else
-		{
-			/* Nothing else is defined for this batch today; note it rather
-			 * than silently eating a restoration line. */
-			g_debug ("draft/persistence batch: unhandled %s from %s", msg->command, msg->prefix);
-		}
-
-		g_free (nick);
-		g_free (host);
-	}
-}
-
 void
 inbound_batch_end (server *serv, const char *batch_id,
                    const message_tags_data *tags_data)
@@ -2539,10 +2451,6 @@ inbound_batch_end (server *serv, const char *batch_id,
 				if (!echo_suppressed)
 					process_multiline_batch (serv, batch);
 			}
-		}
-		else if (g_ascii_strcasecmp (batch->type, "draft/persistence") == 0)
-		{
-			process_persistence_batch (serv, batch);
 		}
 		/* TODO: Handle other batch types:
 		 * - "netjoin"/"netsplit": Collapse join/quit messages
@@ -2612,12 +2520,51 @@ inbound_batch_add_message (server *serv, const char *prefix, const char *command
 	/* Only collect messages for batch types that need deferred processing.
 	 * Unknown types (including labeled-response) should let messages pass
 	 * through for immediate processing — otherwise they'd be silently dropped. */
+	/* draft/persistence restoration batch.  On every revive and every
+	 * alias attach the server re-sends this connection its own JOIN for
+	 * each channel the presence is in — the membership's original time and
+	 * msgid — followed, still inside the batch, by that channel's 332/333,
+	 * 353 and 366.  Numerics never come through this collector, so the
+	 * JOIN must be handled in wire order too, or the NAMES that follow it
+	 * arrive before the tab exists and are dropped (empty userlists).
+	 * So nothing here is deferred: a JOIN for a channel this connection
+	 * is already in is an attach echo and is consumed on the spot (msgid
+	 * remembered, the following NAMES allowed to refresh the userlist
+	 * silently); everything else falls through to the live handlers. */
+	if (batch->type && g_ascii_strcasecmp (batch->type, "draft/persistence") == 0)
+	{
+		if (g_ascii_strcasecmp (command, "JOIN") == 0 && prefix && word[3])
+		{
+			char *chan = word[3];
+			char *bang = strchr (prefix, '!');
+			gsize nicklen = bang ? (gsize) (bang - prefix) : strlen (prefix);
+
+			if (*chan == ':')
+				chan++;
+			if (strlen (serv->nick) == nicklen &&
+			    g_ascii_strncasecmp (prefix, serv->nick, nicklen) == 0)
+			{
+				session *sess = find_channel (serv, chan);
+				if (sess && sess->channel[0])
+				{
+					if (tags_data->msgid)
+						chathistory_track_msgid_ts (sess, tags_data->msgid,
+						                            tags_data->timestamp, FALSE);
+					/* Let the NAMES burst that follows rebuild the userlist
+					 * without printing it; 366 clears the flag again. */
+					sess->ignore_names = TRUE;
+					return TRUE;
+				}
+			}
+		}
+		return FALSE;
+	}
+
 	if (!batch->type ||
 	    (g_ascii_strcasecmp (batch->type, "chathistory") != 0 &&
 	     g_ascii_strcasecmp (batch->type, "draft/chathistory-targets") != 0 &&
 	     g_ascii_strcasecmp (batch->type, "draft/multiline") != 0 &&
-	     g_ascii_strcasecmp (batch->type, "multiline") != 0 &&
-	     g_ascii_strcasecmp (batch->type, "draft/persistence") != 0))
+	     g_ascii_strcasecmp (batch->type, "multiline") != 0))
 		return FALSE;
 
 	/* Create batch_message struct */
