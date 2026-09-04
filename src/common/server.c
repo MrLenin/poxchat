@@ -108,10 +108,43 @@ tcp_send_real (void *ssl, int sok, GIConv write_converter, char *buf, int len)
 	return ret;
 }
 
+/* POXCHAT_RAWLOG=<file>: append every line on the wire, both directions,
+ * with a wall-clock stamp.  Diagnostic only; the raw log window is not
+ * persistent and a symptom that appears hours in is otherwise lost. */
+static void
+server_rawlog_file (server *serv, const char *text, int len, gboolean outbound)
+{
+	static int state = -1;
+	static FILE *f;
+
+	if (state < 0)
+	{
+		const char *path = g_getenv ("POXCHAT_RAWLOG");
+		f = path ? fopen (path, "a") : NULL;
+		state = f ? 1 : 0;
+	}
+	if (state == 1)
+	{
+		GDateTime *now = g_date_time_new_now_local ();
+		char *stamp = g_date_time_format (now, "%H:%M:%S");
+		int n = len;
+		while (n > 0 && (text[n - 1] == '' || text[n - 1] == '
+'))
+			n--;
+		fprintf (f, "%s %s %s %.*s
+", stamp, serv->servername ? serv->servername : "?",
+		         outbound ? "<<" : ">>", n, text);
+		fflush (f);
+		g_free (stamp);
+		g_date_time_unref (now);
+	}
+}
+
 static int
 server_send_real (server *serv, char *buf, int len)
 {
 	fe_add_rawlog (serv, buf, len, TRUE);
+	server_rawlog_file (serv, buf, len, TRUE);
 
 	url_check_line (buf);
 
@@ -683,6 +716,7 @@ server_inline (server *serv, char *line, gssize len)
 		line = text_convert_invalid (line, len, serv->read_converter, unicode_fallback_string, &len_utf8);
 
 	fe_add_rawlog (serv, line, (int) len_utf8, FALSE);
+	server_rawlog_file (serv, line, (int) len_utf8, FALSE);
 
 	/* let proto-irc.c handle it */
 	serv->p_inline (serv, line, (int) len_utf8);
