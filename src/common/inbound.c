@@ -787,36 +787,58 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 		sess->join_msgid = g_strdup (tags_data->msgid);
 	}
 
-	/* Show join banner.  Don't save to scrollback — chathistory provides the
-	 * canonical JOIN record, and "Now talking on" looks inconsistent when
-	 * replayed alongside chathistory's JOIN format.
-	 * Use sorted insertion so it lands at the correct chronological position
-	 * relative to chathistory messages that may arrive afterwards. */
-	sess->display_only = TRUE;
-	sess->history_insert_sorted_mode = TRUE;
-	EMIT_SIGNAL_TIMESTAMP (XP_TE_UJOIN, sess, nick, chan, ip, NULL, 0,
-								  tags_data->timestamp);
-	sess->history_insert_sorted_mode = FALSE;
-	sess->display_only = FALSE;  /* safety: clear if not consumed */
-
-	/* Bouncer reconnect detection: if the JOIN timestamp predates our last
-	 * disconnect, this is a replayed JOIN from the bouncer, not a fresh one.
-	 * Emit a "Reconnected" marker at current time to pair with "Disconnected"
-	 * and give the user a visual anchor for where live messages begin.
-	 * Persisted to scrollback — the server has no knowledge of client
-	 * disconnects, so only the client can maintain these markers.
+	/* Bouncer / persistence reconnect detection: a JOIN whose timestamp
+	 * predates our last disconnect is the server restoring a membership
+	 * that already existed (its @time is when that JOIN really happened),
+	 * not a fresh join by this connection.
 	 *
 	 * last_disconnect_time is ephemeral (in-memory), so after a client restart
 	 * we fall back to scrollback_newest_time which reflects the "Disconnected"
 	 * entry saved on exit. */
 	{
 		time_t disconnect_ref = serv->last_disconnect_time;
+		gboolean restored;
+		gboolean already_recorded = FALSE;
+
 		if (disconnect_ref == 0)
 			disconnect_ref = sess->scrollback_newest_time;
+		restored = tags_data->timestamp > 0 && disconnect_ref > 0 &&
+		           tags_data->timestamp <= disconnect_ref;
 
-		if (tags_data->timestamp > 0 &&
-		    disconnect_ref > 0 &&
-		    tags_data->timestamp <= disconnect_ref)
+		/* Show the join banner at the JOIN's own time and keep it: it is
+		 * this client's record of its own join.  Saved with the JOIN's
+		 * msgid, it has a DB row and an ordinal like any other event, so
+		 * it survives eviction and is found where it belongs when history
+		 * is scrolled to, and a later chathistory replay of the same JOIN
+		 * dedupes against it (process_batch_message also skips the
+		 * session's join_msgid).  Ephemeral it only existed inside the
+		 * current materialized window, which after a bounded replay is
+		 * days away from a restored membership's time.
+		 * A restoration whose JOIN is already recorded (a reconnect to a
+		 * membership we banner'd before) adds nothing but the
+		 * "Reconnected" marker below. */
+		if (restored && tags_data->msgid &&
+		    chathistory_is_duplicate_msgid (sess, tags_data->msgid, tags_data->timestamp))
+			already_recorded = TRUE;
+
+		if (!already_recorded)
+		{
+			g_free (sess->current_msgid);
+			sess->current_msgid = tags_data->msgid ? g_strdup (tags_data->msgid) : NULL;
+			sess->current_msgid_is_user_msg = FALSE;
+			sess->history_insert_sorted_mode = TRUE;
+			EMIT_SIGNAL_TIMESTAMP (XP_TE_UJOIN, sess, nick, chan, ip, NULL, 0,
+										  tags_data->timestamp);
+			sess->history_insert_sorted_mode = FALSE;
+			g_clear_pointer (&sess->current_msgid, g_free);
+		}
+
+		/* Emit a "Reconnected" marker at current time to pair with
+		 * "Disconnected" and give the user a visual anchor for where live
+		 * messages begin.  Persisted to scrollback — the server has no
+		 * knowledge of client disconnects, so only the client can maintain
+		 * these markers. */
+		if (restored)
 		{
 			EMIT_SIGNAL_TIMESTAMP (XP_TE_RECONNECT, sess, NULL, NULL, NULL, NULL, 0,
 			                       time (NULL));

@@ -12872,47 +12872,52 @@ gtk_xtext_virt_should_materialize (xtext_buffer *buf, time_t stamp,
 	if (!HAS_VIRT_DB (buf))
 		return TRUE;
 
-	/* Mat window not full — always materialize so content is visible
-	 * as it arrives (e.g., fresh channel during catch-up).
-	 * Use DB-backed count only; ephemerals don't consume DB capacity. */
-	if (BUF_MAT_COUNT (buf) - buf->ephemeral_count < VIRT_MAT_WINDOW)
-		return TRUE;
-
 	/* Contiguity invariant: the materialized window is one contiguous DB
 	 * index range.  A new entry may only be linked at the list tail when
 	 * no unloaded DB entries exist between the window end and it —
 	 * otherwise the linked list jumps the gap (newer entry at the tail,
 	 * the gap's older rows loaded after it) while the B-tree sorts by
-	 * (stamp, id), and the two orders diverge permanently. */
+	 * (stamp, id), and the two orders diverge permanently.  The same
+	 * applies at the head: a window that is not full is not necessarily
+	 * the whole channel — after a bounded replay of a large one it is a
+	 * short tail sitting on thousands of unloaded rows, and an entry far
+	 * older than it (a restored membership's join banner) must not be
+	 * linked at its head as if adjacent. */
 	db_mat = BUF_MAT_COUNT (buf) - buf->ephemeral_count;
 	entries_after = buf->total_entries - buf->mat_first_index - db_mat;
 
 	if (dir == LINK_TAIL)
 	{
-		/* Live message at tail: materialize if user is following
-		 * (scrollbar at bottom) AND the window actually extends to the
-		 * DB tail.  entries_after > 0 with anchor_to_bottom should not
-		 * happen (the below-window click handling re-centers first),
-		 * but if it does, keeping the message DB-only is safe — the gap
-		 * corruption is not. */
-		if (!buf->text_last ||
+		/* Live message at tail: always while the window is still
+		 * filling (fresh channel during catch-up); otherwise only if
+		 * the user is following (scrollbar at bottom) AND the window
+		 * actually extends to the DB tail.  entries_after > 0 with
+		 * anchor_to_bottom should not happen (the below-window click
+		 * handling re-centers first), but if it does, keeping the
+		 * message DB-only is safe — the gap corruption is not. */
+		if (db_mat < VIRT_MAT_WINDOW || !buf->text_last ||
 		    (buf->scroll_anchor.anchor_to_bottom && entries_after <= 0))
 			return TRUE;
 	}
 	else
 	{
 		/* HEAD or SORTED: materialize if the entry falls within the
-		 * materialized time range.  Skip if strictly older than the
-		 * entire mat window — or newer than the window tail while
+		 * materialized time range.  Newer than the window tail while
 		 * unloaded entries exist below it (chathistory-AFTER gap fill
-		 * targeting the unmaterialized region), which would link at the
-		 * list tail across the gap. */
+		 * targeting the unmaterialized region) is bookkept as a
+		 * below-window entry.  Older than the window head is materialized
+		 * only when nothing unloaded lies above the head (window starts at
+		 * the channel's first row), or for HEAD prepends into a window
+		 * that is still filling — those are adjacent by construction. */
 		if (!buf->text_first || stamp <= 0)
 			return TRUE;
 		if (entries_after > 0 && buf->text_last &&
 		    stamp > buf->text_last->stamp)
 			skip_below = TRUE;	/* bookkeep like a below-window entry */
 		else if (stamp >= buf->text_first->stamp)
+			return TRUE;
+		else if (buf->mat_first_index <= 0 ||
+		         (dir == LINK_HEAD && db_mat < VIRT_MAT_WINDOW))
 			return TRUE;
 	}
 
