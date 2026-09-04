@@ -644,14 +644,20 @@ Append to the existing persistence section of `.claude/skills/ircv3-implementati
   (the server holds a session and restores it); no STATUS (unauthenticated) or effective OFF rejoins as before.
   Channels the restoration burst omitted are never rejoined. Favourites are never gated.
 - `PERSISTENCE ATTACH <profile> [<msgid>]` is pre-CAP-END only and needs an account:
-  sent from the 903 handler right before `CAP END` (`persistence_send_attach`).
+  sent from the 903 handler right before `CAP END` (`persistence_send_attach`) whenever the cap is
+  ACKed and a profile is configured — regardless of the `attach` token (absence proves nothing);
+  the cursor goes only when `attach-cursor` is advertised and is dropped if longer than 256 bytes.
   Cursor = `scrollback_get_global_newest_msgid` (one global anchor; msgids are HLC-ordered).
 - Revive sends `BATCH draft/persistence` (wire order) then `BATCH evilnet.github.io/bouncer-replay`
   wrapping per-target `chathistory` batches. `chathistory_batch_is_unsolicited` puts those into
   LATEST-phase catch-up without touching the request queue; a replay's `draft/chathistory-end`
   never sets `history_exhausted`; wrapper END → `chathistory_replay_wrapper_end`.
 - While `persistence_server_drives_replay()` is TRUE, `chathistory_schedule_deferred` and
-  `chathistory_request_targets_on_reconnect` no-op. `FAIL PERSISTENCE CURSOR_UNKNOWN` re-arms them.
+  `chathistory_request_targets_on_reconnect` no-op. The FAIL answering our ATTACH (tracked by
+  `persistence_attach_pending`, cleared by the ATTACH ack) is the only one that changes state:
+  `CURSOR_UNKNOWN` clears the cursor flag so the regular 366 / login-end call sites re-arm the
+  fan-out themselves (the FAIL precedes 001 — never drive catch-up from it); `ACCOUNT_REQUIRED` /
+  `INVALID_PARAMETERS` clear `persistence_attached`. Any other `FAIL PERSISTENCE` only prints.
 - Profile name lives in servlist (`PP=`), empty = legacy behaviour (no ATTACH).
 ```
 
