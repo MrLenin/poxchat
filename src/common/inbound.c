@@ -787,49 +787,36 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 		sess->join_msgid = g_strdup (tags_data->msgid);
 	}
 
-	/* Bouncer / persistence reconnect detection: a JOIN whose timestamp
-	 * predates our last disconnect is the server restoring a membership
-	 * that already existed (its @time is the membership's creation), not
-	 * a fresh join by this connection.
+	/* Show join banner.  Don't save to scrollback — chathistory provides the
+	 * canonical JOIN record, and "Now talking on" looks inconsistent when
+	 * replayed alongside chathistory's JOIN format.
+	 * Use sorted insertion so it lands at the correct chronological position
+	 * relative to chathistory messages that may arrive afterwards. */
+	sess->display_only = TRUE;
+	sess->history_insert_sorted_mode = TRUE;
+	EMIT_SIGNAL_TIMESTAMP (XP_TE_UJOIN, sess, nick, chan, ip, NULL, 0,
+								  tags_data->timestamp);
+	sess->history_insert_sorted_mode = FALSE;
+	sess->display_only = FALSE;  /* safety: clear if not consumed */
+
+	/* Bouncer reconnect detection: if the JOIN timestamp predates our last
+	 * disconnect, this is a replayed JOIN from the bouncer, not a fresh one.
+	 * Emit a "Reconnected" marker at current time to pair with "Disconnected"
+	 * and give the user a visual anchor for where live messages begin.
+	 * Persisted to scrollback — the server has no knowledge of client
+	 * disconnects, so only the client can maintain these markers.
 	 *
 	 * last_disconnect_time is ephemeral (in-memory), so after a client restart
 	 * we fall back to scrollback_newest_time which reflects the "Disconnected"
 	 * entry saved on exit. */
 	{
 		time_t disconnect_ref = serv->last_disconnect_time;
-		time_t banner_time = tags_data->timestamp;
-		gboolean restored;
-
 		if (disconnect_ref == 0)
 			disconnect_ref = sess->scrollback_newest_time;
-		restored = tags_data->timestamp > 0 && disconnect_ref > 0 &&
-		           tags_data->timestamp <= disconnect_ref;
 
-		/* The banner marks where this connection's live view begins, so a
-		 * restored membership's days-old time must not leak into it — with
-		 * sorted insertion that parked "Now talking on" in the middle of
-		 * history, wherever the replayed window happened to end. */
-		if (restored)
-			banner_time = time (NULL);
-
-		/* Show join banner.  Don't save to scrollback — chathistory provides the
-		 * canonical JOIN record, and "Now talking on" looks inconsistent when
-		 * replayed alongside chathistory's JOIN format.
-		 * Use sorted insertion so it lands at the correct chronological position
-		 * relative to chathistory messages that may arrive afterwards. */
-		sess->display_only = TRUE;
-		sess->history_insert_sorted_mode = TRUE;
-		EMIT_SIGNAL_TIMESTAMP (XP_TE_UJOIN, sess, nick, chan, ip, NULL, 0,
-									  banner_time);
-		sess->history_insert_sorted_mode = FALSE;
-		sess->display_only = FALSE;  /* safety: clear if not consumed */
-
-		/* Emit a "Reconnected" marker at current time to pair with
-		 * "Disconnected" and give the user a visual anchor for where live
-		 * messages begin.  Persisted to scrollback — the server has no
-		 * knowledge of client disconnects, so only the client can maintain
-		 * these markers. */
-		if (restored)
+		if (tags_data->timestamp > 0 &&
+		    disconnect_ref > 0 &&
+		    tags_data->timestamp <= disconnect_ref)
 		{
 			EMIT_SIGNAL_TIMESTAMP (XP_TE_RECONNECT, sess, NULL, NULL, NULL, NULL, 0,
 			                       time (NULL));
