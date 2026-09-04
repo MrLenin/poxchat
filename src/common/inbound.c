@@ -1516,13 +1516,21 @@ check_autojoin_channels (server *serv)
 	 * known to keep our channel state across the disconnect — either set
 	 * explicitly via the network's "persistent server" toggle, or
 	 * inferred at runtime when the server already replayed a self-JOIN
-	 * with an @time predating our last disconnect.  In both cases the
-	 * server will (re-)issue JOIN events for every channel we belong to;
-	 * sending our own duplicates them, undoes the user's intervening
-	 * PARTs from other clients, and races with the server-replayed
-	 * JOIN's NAMES burst.  The favlist path below is intentionally not
-	 * gated — a configured favourite is the user's explicit ask. */
-	if (serv->persistent_server || serv->bouncer_inferred)
+	 * with an @time predating our last disconnect, or negotiated as the
+	 * draft/persistence capability.  In all three cases the server will
+	 * (re-)issue JOIN events for every channel we belong to; sending our
+	 * own duplicates them, undoes the user's intervening PARTs from
+	 * other clients, and races with the server-replayed JOIN's NAMES
+	 * burst.  For the capability this is not merely prudent: the spec's
+	 * Client behaviour section says a client that negotiated it MUST NOT
+	 * send JOIN for channels it remembers from a previous connection,
+	 * and says so regardless of what the effective STATUS value turned
+	 * out to be — the server delivers the restoration burst, and after
+	 * its boundary the client MAY join what the server did not restore
+	 * (not done here; see the roadmap).  The favlist path below is
+	 * intentionally not gated — a configured favourite is the user's
+	 * explicit ask. */
+	if (serv->persistent_server || serv->bouncer_inferred || serv->have_persistence)
 		list = NULL;
 
 	/* If there's a session (i.e. this is a reconnect), autojoin to everything that was open previously. */
@@ -2532,7 +2540,7 @@ inbound_batch_add_message (server *serv, const char *prefix, const char *command
 	 * is already in is an attach echo and is consumed on the spot (msgid
 	 * remembered, the following NAMES allowed to refresh the userlist
 	 * silently); everything else falls through to the live handlers. */
-	if (persistence_is_batch_type (batch->type))
+	if (persistence_is_bare_name (batch->type))
 	{
 		if (g_ascii_strcasecmp (command, "JOIN") == 0 && prefix && word[3])
 		{
@@ -3038,6 +3046,8 @@ inbound_toggle_caps (server *serv, const char *extensions_str, gboolean enable)
 			serv->have_oper_tag = enable;
 		else if (!strcmp (extension, "draft/pre-away"))
 			serv->have_pre_away = enable;
+		else if (persistence_is_bare_name (extension))
+			serv->have_persistence = enable;
 		else if (!strcmp (extension, "draft/extended-isupport"))
 		{
 			serv->have_extended_isupport = enable;
@@ -3127,6 +3137,7 @@ static const char * const supported_caps[] = {
 	"draft/channel-rename",
 	"draft/pre-away",
 	"draft/oper-tag",
+	"draft/persistence",
 
 	/* ZNC */
 	"znc.in/server-time-iso",
@@ -3328,6 +3339,11 @@ inbound_cap_ls (server *serv, char *nick, char *extensions_str,
 			g_strfreev (tokens);
 			/* Don't continue - still need to request the capability */
 		}
+
+		/* IRCv3 draft/persistence — the value advertises optional verbs.
+		 * Format: draft/persistence=replay-control,profile,attach,attach-cursor */
+		if (persistence_is_bare_name (extension) && value)
+			persistence_parse_cap_value (serv, value);
 
 		/* IRCv3 draft/multiline - parse capability tokens
 		 * Format: draft/multiline=max-bytes=16384,max-lines=100

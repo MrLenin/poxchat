@@ -37,8 +37,30 @@
  * "hold" for ".../persistence/hold"; NULL when the name is unrelated. */
 const char *persistence_match (const char *name);
 
-/* TRUE for the channel-state restoration batch type. */
-gboolean persistence_is_batch_type (const char *type);
+/* Strip "draft/" and vendor ("host.tld/") prefixes from an IRCv3 name;
+ * loops so "vendor.tld/draft/x" resolves to "x".  Returns a pointer into
+ * name. */
+const char *persistence_strip_namespace (const char *name);
+
+/* TRUE when name is the bare persistence name in any namespace
+ * ("draft/persistence", "persistence", "evilnet.github.io/persistence").
+ * Used for the cap name and for the channel-state restoration batch
+ * type, which the spec gives the same name. */
+gboolean persistence_is_bare_name (const char *name);
+
+/* CAP LS value of the cap: comma-separated optional-verb tokens, each
+ * possibly namespaced.  Sets serv->persistence_tok_*; unknown tokens are
+ * ignored (the spec calls the value a hint, not an inventory). */
+void persistence_parse_cap_value (server *serv, const char *value);
+
+/* ":server PERSISTENCE <args>" — args is everything after the verb, e.g.
+ * "STATUS DEFAULT ON" or "PROFILE mobile channels :#a,#b".  Consumes
+ * every reply shape in the spec; unknown shapes print the raw args. */
+void persistence_handle_reply (server *serv, const char *args, time_t stamp);
+
+/* ":server FAIL PERSISTENCE <code> [<context>] :<text>" */
+void persistence_handle_fail (server *serv, const char *code, const char *context,
+                              const char *text, time_t stamp);
 
 /* draft/metadata-2 notification for a server-managed persistence key.
  * key is the sub-path from persistence_match(); value NULL = key unset.

@@ -766,6 +766,17 @@ typedef struct server
 	unsigned int bouncer_inferred:1;	/* heuristic — saw a server-replayed self-JOIN whose @time predates our last_disconnect_time */
 	unsigned int persistence_hold_known:1;	/* draft/persistence: the server told us the account's hold setting (metadata .../persistence/hold) */
 	unsigned int persistence_hold:1;	/* ...and it is on: the server holds this session across disconnects */
+	unsigned int have_persistence:1;			/* draft/persistence ACKed */
+	unsigned int persistence_tok_replay_control:1;	/* CAP value tokens (spec: hints, not an inventory) */
+	unsigned int persistence_tok_profile:1;
+	unsigned int persistence_tok_attach:1;
+	unsigned int persistence_tok_detach:1;
+	unsigned int persistence_tok_list:1;
+	unsigned int persistence_tok_attach_cursor:1;
+	unsigned int persistence_status_known:1;	/* saw PERSISTENCE STATUS this connection */
+	unsigned int persistence_effective:1;		/* ...and effective-setting was ON */
+	unsigned int persistence_attached:1;		/* sent PERSISTENCE ATTACH this connection (Task 5 sets it) */
+	unsigned int persistence_cursor_sent:1;		/* that ATTACH carried a msgid cursor (Task 5 sets it) */
 #ifdef USE_OPENSSL
 	unsigned int use_ssl:1;				  /* is server SSL capable? */
 	unsigned int accept_invalid_cert:1;/* ignore result of server's cert. verify */

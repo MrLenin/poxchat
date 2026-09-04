@@ -41,8 +41,8 @@
 /* Strip IRCv3 name prefixes: "draft/" and vendor scopes, which are DNS
  * names ("evilnet.github.io/").  Loops so a vendor-scoped draft name
  * ("vendor.tld/draft/x") resolves too. */
-static const char *
-strip_namespace (const char *name)
+const char *
+persistence_strip_namespace (const char *name)
 {
 	for (;;)
 	{
@@ -69,7 +69,7 @@ persistence_match (const char *name)
 	if (!name || !name[0])
 		return NULL;
 
-	base = strip_namespace (name);
+	base = persistence_strip_namespace (name);
 	if (g_ascii_strncasecmp (base, "persistence", 11) != 0)
 		return NULL;
 	if (base[11] == '\0')
@@ -80,9 +80,9 @@ persistence_match (const char *name)
 }
 
 gboolean
-persistence_is_batch_type (const char *type)
+persistence_is_bare_name (const char *name)
 {
-	const char *sub = persistence_match (type);
+	const char *sub = persistence_match (name);
 
 	return sub != NULL && sub[0] == '\0';
 }
@@ -111,6 +111,202 @@ value_is_on (const char *value)
 	       (strcmp (value, "1") == 0 ||
 	        g_ascii_strcasecmp (value, "on") == 0 ||
 	        g_ascii_strcasecmp (value, "true") == 0);
+}
+
+/* CAP LS may carry the optional verbs the server implements as a
+ * comma-separated value:
+ *   draft/persistence=replay-control,profile,attach,attach-cursor
+ * Each token may itself be namespaced.  The spec is explicit that the
+ * value is a hint and not an inventory: unknown tokens are ignored, and
+ * an absent token does not mean the verb is unsupported — so nothing
+ * here gates a command, it only informs what we volunteer to try. */
+void
+persistence_parse_cap_value (server *serv, const char *value)
+{
+	char **tokens;
+	int i;
+
+	if (!serv || !value)
+		return;
+
+	tokens = g_strsplit (value, ",", 0);
+	for (i = 0; tokens[i]; i++)
+	{
+		const char *tok = persistence_strip_namespace (tokens[i]);
+
+		if (!tok[0])
+			continue;
+		if (g_ascii_strcasecmp (tok, "replay-control") == 0)
+			serv->persistence_tok_replay_control = TRUE;
+		else if (g_ascii_strcasecmp (tok, "profile") == 0)
+			serv->persistence_tok_profile = TRUE;
+		else if (g_ascii_strcasecmp (tok, "attach") == 0)
+			serv->persistence_tok_attach = TRUE;
+		else if (g_ascii_strcasecmp (tok, "detach") == 0)
+			serv->persistence_tok_detach = TRUE;
+		else if (g_ascii_strcasecmp (tok, "list") == 0)
+			serv->persistence_tok_list = TRUE;
+		else if (g_ascii_strcasecmp (tok, "attach-cursor") == 0)
+			serv->persistence_tok_attach_cursor = TRUE;
+	}
+	g_strfreev (tokens);
+}
+
+#define PERSISTENCE_MAX_WORDS 8
+
+/* Split a PERSISTENCE reply's arguments in place.  Runs of spaces are
+ * skipped; a word starting with ':' is the trailing parameter, so the
+ * rest of the line — spaces included, colon removed — becomes one word.
+ * Returns the word count. */
+static int
+persistence_split (char *buf, char **words)
+{
+	int n = 0;
+	char *p = buf;
+
+	while (*p && n < PERSISTENCE_MAX_WORDS)
+	{
+		while (*p == ' ')
+			p++;
+		if (!*p)
+			break;
+		if (*p == ':')
+		{
+			words[n++] = p + 1;
+			break;
+		}
+		words[n++] = p;
+		while (*p && *p != ' ')
+			p++;
+		if (*p)
+			*p++ = '\0';
+	}
+	return n;
+}
+
+void
+persistence_handle_reply (server *serv, const char *args, time_t stamp)
+{
+	char *w[PERSISTENCE_MAX_WORDS];
+	gboolean profile;
+	char *buf;
+	int n;
+
+	if (!serv || !args)
+		return;
+
+	while (*args == ' ')
+		args++;
+
+	buf = g_strdup (args);
+	n = persistence_split (buf, w);
+	if (n == 0)					/* ":server PERSISTENCE" with no arguments */
+	{
+		g_free (buf);
+		return;
+	}
+	profile = g_ascii_strcasecmp (w[0], "PROFILE") == 0;
+
+/* buf is byte-identical to args apart from the terminators we wrote, so
+ * w[i] - buf is also the offset in args: REST(i) is word i onward with
+ * its spaces intact. */
+#define REST(i) (args + (w[(i)] - buf))
+
+	if (g_ascii_strcasecmp (w[0], "STATUS") == 0 && n >= 2)
+	{
+		/* STATUS <client-setting> <effective-setting>; the one-argument
+		 * form is an earlier revision of the spec that deployed servers
+		 * may still send.  Either way this is the authoritative "the
+		 * server holds my session" signal, sent unsolicited between the
+		 * last 005 and the end of the MOTD. */
+		serv->persistence_status_known = TRUE;
+		serv->persistence_effective = value_is_on (n >= 3 ? w[2] : w[1]);
+		if (n >= 3)
+			persistence_print (serv, stamp,
+				_("Persistence: preference %s, effective %s"), w[1], w[2]);
+		else
+			persistence_print (serv, stamp,
+				_("Persistence: effective %s"), w[1]);
+	}
+	else if (g_ascii_strcasecmp (w[0], "SET") == 0 && n >= 2)
+		persistence_print (serv, stamp,
+			_("Persistence: preference set to %s"), w[1]);
+	else if (g_ascii_strcasecmp (w[0], "REPLAY") == 0 && n >= 4 &&
+	         g_ascii_strcasecmp (w[1], "STATUS") == 0)
+		persistence_print (serv, stamp,
+			_("Persistence replay: preference %s, effective %s"), w[2], w[3]);
+	else if (g_ascii_strcasecmp (w[0], "REPLAY") == 0 && n >= 3 &&
+	         g_ascii_strcasecmp (w[1], "SET") == 0)
+		persistence_print (serv, stamp,
+			_("Persistence replay: preference set to %s"), w[2]);
+	else if (profile && n >= 2 && g_ascii_strcasecmp (w[1], "ENDOFLIST") == 0)
+		persistence_print (serv, stamp, _("Persistence: end of profile list"));
+	else if (profile && n >= 3 && g_ascii_strcasecmp (w[1], "CREATED") == 0)
+		persistence_print (serv, stamp, _("Persistence: profile %s created (%s)"),
+		                   w[2], n >= 4 ? REST (3) : "default");
+	else if (profile && n >= 3 && g_ascii_strcasecmp (w[1], "DELETED") == 0)
+		persistence_print (serv, stamp, _("Persistence: profile %s deleted"), w[2]);
+	else if (profile && n >= 4 && g_ascii_strcasecmp (w[1], "RENAMED") == 0)
+		persistence_print (serv, stamp, _("Persistence: profile %s renamed to %s"),
+		                   w[2], w[3]);
+	else if (profile && n == 2)
+		/* LIST line for a profile with no reported attributes. */
+		persistence_print (serv, stamp, _("Persistence: profile %s"), w[1]);
+	else if (profile && n >= 3 && strchr (w[2], '='))
+		/* LIST line: the attributes are key=value pairs, and the spec
+		 * says to tolerate ones we do not know, so show them verbatim. */
+		persistence_print (serv, stamp, _("Persistence: profile %s (%s)"),
+		                   w[1], REST (2));
+	else if (profile && n >= 4)
+		/* GET reply / SET acknowledgement with an effective value. */
+		persistence_print (serv, stamp, _("Persistence: profile %s: %s = %s"),
+		                   w[1], w[2], w[3]);
+	else if (profile && n == 3)
+		/* Same, without the trailing parameter: the key is unset. */
+		persistence_print (serv, stamp, _("Persistence: profile %s: %s unset"),
+		                   w[1], w[2]);
+	else if (g_ascii_strcasecmp (w[0], "ATTACH") == 0 && n >= 2)
+		persistence_print (serv, stamp,
+			_("Persistence: attached to profile %s"), w[1]);
+	else if (g_ascii_strcasecmp (w[0], "DETACH") == 0 && n >= 2 &&
+	         g_ascii_strcasecmp (w[1], "OK") == 0)
+		persistence_print (serv, stamp,
+			_("Persistence: detached, the session was released"));
+	else if (g_ascii_strcasecmp (w[0], "DETACH") == 0 && n >= 2 &&
+	         g_ascii_strcasecmp (w[1], "NOSESSION") == 0)
+		persistence_print (serv, stamp, _("Persistence: no session to detach"));
+	else
+		/* LIST, SESSION and whatever a newer server adds: show it rather
+		 * than swallow it. */
+		persistence_print (serv, stamp, _("Persistence: %s"), args);
+
+#undef REST
+
+	g_free (buf);
+}
+
+void
+persistence_handle_fail (server *serv, const char *code, const char *context,
+                         const char *text, time_t stamp)
+{
+	const char *bare;
+
+	if (!serv)
+		return;
+
+	/* Codes are matched — and shown — with the namespace stripped, so a
+	 * vendor-scoped code reads the same as the spec's bare one. */
+	bare = code ? persistence_strip_namespace (code) : "";
+
+	/* Task 5: CURSOR_UNKNOWN re-arms the deferred LATEST fan-out;
+	 * ACCOUNT_REQUIRED / INVALID_PARAMETERS clear persistence_attached. */
+
+	if (context && context[0])
+		persistence_print (serv, stamp, _("Persistence error %s (%s): %s"),
+		                   bare, context, text ? text : "");
+	else
+		persistence_print (serv, stamp, _("Persistence error %s: %s"),
+		                   bare, text ? text : "");
 }
 
 gboolean
@@ -178,4 +374,15 @@ persistence_reset (server *serv)
 		return;
 	serv->persistence_hold_known = FALSE;
 	serv->persistence_hold = FALSE;
+	serv->have_persistence = FALSE;
+	serv->persistence_tok_replay_control = FALSE;
+	serv->persistence_tok_profile = FALSE;
+	serv->persistence_tok_attach = FALSE;
+	serv->persistence_tok_detach = FALSE;
+	serv->persistence_tok_list = FALSE;
+	serv->persistence_tok_attach_cursor = FALSE;
+	serv->persistence_status_known = FALSE;
+	serv->persistence_effective = FALSE;
+	serv->persistence_attached = FALSE;
+	serv->persistence_cursor_sent = FALSE;
 }

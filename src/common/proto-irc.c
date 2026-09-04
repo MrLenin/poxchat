@@ -31,6 +31,7 @@
 #include "poxchat.h"
 #include "proto-irc.h"
 #include "chathistory.h"
+#include "persistence.h"
 #include "ctcp.h"
 #include "fe.h"
 #include "ignore.h"
@@ -1369,6 +1370,15 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 				inbound_redact_fail (serv, sess, word[4], text, tags_data);
 				return;
 			}
+			else if (g_ascii_strcasecmp (word[3], "PERSISTENCE") == 0)
+			{
+				/* :server FAIL PERSISTENCE <code> [<context>] :<text> — the
+				 * context is present when the trailing parameter is not
+				 * word[5]. */
+				const char *ctx = (trailing_index (word_eol) > 5 && word[5][0]) ? word[5] : NULL;
+				persistence_handle_fail (serv, word[4], ctx, text, tags_data->timestamp);
+				return;
+			}
 			else if (g_ascii_strcasecmp (word[3], "BATCH") == 0)
 			{
 				/* draft/multiline: the server rejected one of our client
@@ -1858,6 +1868,17 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 			}
 			goto garbage;
 
+		case WORDL('P','E','R','S'):
+			/* PERSISTENCE - draft/persistence reply (STATUS is also sent
+			 * unsolicited between 005 and 376).  Everything after the verb
+			 * goes to one parser so the bare form can share it. */
+			if (len == 11 && g_ascii_strcasecmp (type, "PERSISTENCE") == 0)
+			{
+				persistence_handle_reply (serv, word_eol[3], tags_data->timestamp);
+				return;
+			}
+			goto garbage;
+
 		case WORDL('R','E','D','A'):
 			/* REDACT - message redaction (Phase 4: visual redaction)
 			 * Format: :nick!user@host REDACT <target> <msgid> [:<reason>]
@@ -2103,6 +2124,12 @@ process_named_servermsg (session *sess, char *buf, char *rawname, char *word_eol
 				ts_param++;
 		}
 		handle_markread_response (sess->server, target, ts_param, tags_data);
+		return;
+	}
+	/* PERSISTENCE reply from servers that omit the source prefix. */
+	if (!strncasecmp (buf, "PERSISTENCE ", 12))
+	{
+		persistence_handle_reply (sess->server, buf + 12, tags_data->timestamp);
 		return;
 	}
 

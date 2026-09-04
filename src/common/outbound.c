@@ -3389,6 +3389,33 @@ cmd_metadata (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 }
 
 static int
+cmd_persistence (struct session *sess, char *tbuf, char *word[], char *word_eol[])
+{
+	server *serv = sess->server;
+
+	if (!*word[2])
+	{
+		PrintText (sess, _("Usage: /PERSISTENCE STATUS | GET                 - show the held-session state\n"));
+		PrintText (sess, _("       /PERSISTENCE SET <ON|OFF|DEFAULT>          - account persistence preference\n"));
+		PrintText (sess, _("       /PERSISTENCE REPLAY GET | SET <ON|OFF|DEFAULT>\n"));
+		PrintText (sess, _("       /PERSISTENCE PROFILE LIST | CREATE <name> [FROM <parent>] | DELETE <name> | RENAME <old> <new> | GET <name> <key> | SET <name> <key> <value|DEFAULT>\n"));
+		PrintText (sess, _("       /PERSISTENCE ATTACH <profile>              - only valid before registration completes\n"));
+		PrintText (sess, _("       /PERSISTENCE DETACH [<session-id>]\n"));
+		PrintText (sess, _("       /PERSISTENCE LIST\n"));
+		return TRUE;
+	}
+
+	/* Sent verbatim and never gated on the capability: the spec says
+	 * servers MUST NOT refuse PERSISTENCE from clients that did not
+	 * negotiate it, so a warning here would be wrong more often than
+	 * right.  Unknown subcommands come back as FAIL PERSISTENCE
+	 * INVALID_PARAMETERS, which we show. */
+	tcp_sendf (serv, "PERSISTENCE %s\r\n", word_eol[2]);
+
+	return TRUE;
+}
+
+static int
 cmd_mode (struct session *sess, char *tbuf, char *word[], char *word_eol[])
 {
 	/* We allow omitting the target, so we have to figure it out:
@@ -5022,6 +5049,7 @@ const struct commands xc_cmds[] = {
 	 N_("OP <nick>, gives chanop status to the nick (needs chanop)")},
 	{"PART", cmd_part, 1, 1, 0,
 	 N_("PART [<channel>] [<reason>], leaves the channel, by default the current one")},
+	{"PERSISTENCE", cmd_persistence, 1, 0, 1, N_("PERSISTENCE <STATUS|GET|SET|REPLAY|PROFILE|ATTACH|DETACH|LIST> [...], manage the server-held session (draft/persistence)")},
 	{"PING", cmd_ping, 1, 0, 1,
 	 N_("PING <nick | channel>, CTCP pings nick or channel")},
 	{"QUERY", cmd_query, 0, 0, 1,
