@@ -63,6 +63,7 @@ meson compile -C builddir
 - server-time, userhost-in-names, cap-notify
 - chghost, setname, invite-notify, account-tag
 - SASL: PLAIN, EXTERNAL, SCRAM-SHA-1/256/512, OAUTHBEARER
+- draft/persistence (status, profiles, attach, attach-cursor)
 
 ### In Progress (this branch)
 - batch capability - foundation for chathistory, multiline

@@ -394,7 +394,8 @@ Source: https://gist.github.com/MrLenin/8d644eb37878d7bcaa91d1a68ae23d94 (fork
    `CHATHISTORY AFTER` fallback is our eager-close/lazy-fill. No new mechanism, but
    the gap's `start_msgid` is the correct AFTER anchor if we ever add AFTER as a
    third request shape (BETWEEN/BEFORE remain sufficient).
-3. **Future (not this design): adopt `draft/persistence` + `attach-cursor`.** Add the
+3. **Implemented (2026-09-04) by `docs/superpowers/plans/2026-08-28-draft-persistence-client.md`:
+   adopt `draft/persistence` + `attach-cursor`.** Add the
    cap; on reconnect send `PERSISTENCE ATTACH <profile> <global newest stored msgid>`
    (global across buffers — `history_msgid_to_timestamp` is target-independent) and
    **suppress** `chathistory_schedule_deferred` + `chathistory_request_targets_on_reconnect`
@@ -403,6 +404,9 @@ Source: https://gist.github.com/MrLenin/8d644eb37878d7bcaa91d1a68ae23d94 (fork
    current deferred-LATEST path. The gap ledger's per-channel newest msgid is the
    right source for the anchor (min over channels is *not* wanted — the anchor must
    be the globally newest; per-channel holes are then found by discontinuity → gaps).
+   The truncation gap between stored history and the attach-cursor replay is bridged
+   by the existing BEFORE/BETWEEN gap-fill machinery (§6), not by a new
+   `CHATHISTORY AFTER` request path.
 4. Already aligned, no action: `draft/event-playback`, `batch`, `labeled-response`,
    `server-time`, msgid dedup. `draft/read-marker` stays out of scope (§12);
    `draft/webpush` is mobile-only.
