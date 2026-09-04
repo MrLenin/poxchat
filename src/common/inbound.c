@@ -815,8 +815,11 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 		 * plain wording so the current one stands out at a glance.
 		 * A restoration whose JOIN is already recorded (a reconnect to a
 		 * membership we joined before) adds only the "Reconnected" marker. */
+		/* Ask the store, not the in-memory tracker: this handler already
+		 * tracked the JOIN's msgid a few lines up, so the tracker always
+		 * says "known" here. */
 		if (restored && tags_data->msgid &&
-		    chathistory_is_duplicate_msgid (sess, tags_data->msgid, tags_data->timestamp))
+		    scrollback_session_has_msgid (sess, tags_data->msgid, tags_data->timestamp))
 			already_recorded = TRUE;
 
 		{
