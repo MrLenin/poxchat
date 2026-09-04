@@ -12282,6 +12282,31 @@ gtk_xtext_virt_evict_tail (xtext_buffer *buf)
 	gtk_xtext_kill_ent (buf, ent);
 }
 
+/* Link a freshly materialized DB entry at the tail, but behind any
+ * trailing ephemeral entries (join banner, reconnect marker, separators —
+ * anything with no DB row) that sort after it.  The list must agree with
+ * the B-tree's (stamp, id) order; an ephemeral stamped "now" at the tail
+ * must stay after older rows appended beneath the window. */
+static void
+gtk_xtext_virt_link_tail_sorted (xtext_buffer *buf, textentry *ent)
+{
+	textentry *at = buf->text_last;
+
+	while (at && !at->has_db_row && entry_stamp_cmp (at, ent) > 0)
+		at = at->prev;
+
+	ent->prev = at;
+	ent->next = at ? at->next : buf->text_first;
+	if (ent->next)
+		ent->next->prev = ent;
+	else
+		buf->text_last = ent;
+	if (at)
+		at->next = ent;
+	else
+		buf->text_first = ent;
+}
+
 /* Batch the reply/reaction lookups for a freshly loaded range so
  * gtk_xtext_virt_materialize_msg does hash lookups instead of two DB
  * probes per entry.  Bracket every load-then-materialize loop with
@@ -12563,19 +12588,45 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			loaded++;
 		}
 
-		/* Splice chain at head of buffer's linked list */
+		/* Splice chain at head of buffer's linked list — behind any
+		 * leading ephemeral entries (join banner, markers) that sort
+		 * before the chain.  A banner stamped with a restored
+		 * membership's original time sits at the window head as its
+		 * oldest entry; splicing newer rows in front of it put the list
+		 * out of step with the (stamp, id) tree order, and the banner
+		 * then showed up mid-history behind whatever was loaded. */
 		if (chain_first)
 		{
-			if (buf->text_first)
+			textentry *after = NULL;
+			textentry *e = buf->text_first;
+
+			while (e && !e->has_db_row && entry_stamp_cmp (e, chain_first) < 0)
+			{
+				after = e;
+				e = e->next;
+			}
+
+			if (after)
+			{
+				chain_last->next = after->next;
+				if (after->next)
+					after->next->prev = chain_last;
+				else
+					buf->text_last = chain_last;
+				after->next = chain_first;
+				chain_first->prev = after;
+			}
+			else if (buf->text_first)
 			{
 				chain_last->next = buf->text_first;
 				buf->text_first->prev = chain_last;
+				buf->text_first = chain_first;
 			}
 			else
 			{
+				buf->text_first = chain_first;
 				buf->text_last = chain_last;
 			}
-			buf->text_first = chain_first;
 		}
 
 		buf->mat_first_index = want_start;
@@ -12586,7 +12637,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 		 * at the join with the old head (which, as the previous window
 		 * head, never had one). */
 		{
-			textentry *e = buf->text_first;
+			textentry *e = chain_first ? chain_first : buf->text_first;
 			int checked = 0;
 			while (e && checked < loaded + 1)
 			{
@@ -12637,14 +12688,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			if (!ent)
 				continue;
 
-			/* Link at tail */
-			ent->prev = buf->text_last;
-			ent->next = NULL;
-			if (buf->text_last)
-				buf->text_last->next = ent;
-			else
-				buf->text_first = ent;
-			buf->text_last = ent;
+			gtk_xtext_virt_link_tail_sorted (buf, ent);
 
 			gtk_xtext_maybe_insert_day_sep (buf, ent);
 			gtk_xtext_maybe_insert_gap_marker (buf, ent);
@@ -12671,14 +12715,7 @@ gtk_xtext_virt_ensure_range (xtext_buffer *buf, int center_index, int radius)
 			if (!ent)
 				continue;
 
-			/* Link at tail */
-			ent->prev = buf->text_last;
-			ent->next = NULL;
-			if (buf->text_last)
-				buf->text_last->next = ent;
-			else
-				buf->text_first = ent;
-			buf->text_last = ent;
+			gtk_xtext_virt_link_tail_sorted (buf, ent);
 
 			gtk_xtext_maybe_insert_day_sep (buf, ent);
 			gtk_xtext_maybe_insert_gap_marker (buf, ent);
