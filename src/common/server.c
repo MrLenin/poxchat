@@ -128,11 +128,9 @@ server_rawlog_file (server *serv, const char *text, int len, gboolean outbound)
 		GDateTime *now = g_date_time_new_now_local ();
 		char *stamp = g_date_time_format (now, "%H:%M:%S");
 		int n = len;
-		while (n > 0 && (text[n - 1] == '' || text[n - 1] == '
-'))
+		while (n > 0 && (text[n - 1] == '\r' || text[n - 1] == '\n'))
 			n--;
-		fprintf (f, "%s %s %s %.*s
-", stamp, serv->servername ? serv->servername : "?",
+		fprintf (f, "%s %s %s %.*s\n", stamp, serv->servername ? serv->servername : "?",
 		         outbound ? "<<" : ">>", n, text);
 		fflush (f);
 		g_free (stamp);
