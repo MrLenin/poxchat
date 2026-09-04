@@ -476,6 +476,9 @@ servlist_connect (session *sess, ircnet *net, gboolean join)
 
 	serv->dont_use_proxy = (net->flags & FLAG_USE_PROXY) ? FALSE : TRUE;
 	serv->persistent_server = (net->flags & FLAG_PERSISTENT) ? TRUE : FALSE;
+	safe_strcpy (serv->persist_profile,
+	             net->persist_profile ? net->persist_profile : "",
+	             sizeof (serv->persist_profile));
 
 #ifdef USE_OPENSSL
 	serv->use_ssl = (net->flags & FLAG_USE_SSL) ? TRUE : FALSE;
@@ -972,6 +975,7 @@ servlist_net_remove (ircnet *net)
 		g_slist_free_full (net->commandlist, (GDestroyNotify) servlist_command_free);
 	g_free (net->encoding);
 	g_free (net->name);
+	g_free (net->persist_profile);
 	/* OAuth2/OIDC configuration */
 	g_free (net->oauth_authorization_url);
 	g_free (net->oauth_token_url);
@@ -1105,6 +1109,14 @@ servlist_load (void)
 		buf[len-1] = 0;	/* remove the trailing \n */
 		if (net)
 		{
+			/* PP= is a two-letter key; must be matched before the switch (buf[0])
+			 * below, since 'P' alone is the server password. */
+			if (buf[0] == 'P' && buf[1] == 'P' && buf[2] == '=')
+			{
+				g_free (net->persist_profile);
+				net->persist_profile = g_strdup (buf + 3);
+				continue;
+			}
 			switch (buf[0])
 			{
 			case 'I':
@@ -1312,6 +1324,9 @@ servlist_save (void)
 		}
 
 		fprintf (fp, "F=%d\nD=%d\n", net->flags, net->selected);
+
+		if (net->persist_profile)
+			fprintf (fp, "PP=%s\n", net->persist_profile);
 
 		/* OAuth2/OIDC configuration */
 		if (net->oauth_authorization_url)

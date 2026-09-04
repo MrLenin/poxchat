@@ -643,6 +643,7 @@ typedef struct server
 	char hostname[128];				/* real ip number */
 	char servername[128];			/* what the server says is its name */
 	char password[1024];
+	char persist_profile[64];		/* draft/persistence profile to ATTACH; empty = don't attach */
 	char nick[NICKLEN];
 	char linebuf[8704];				/* RFC says 512 chars including \r\n, IRCv3 message tags add 8191, plus the NUL byte */
 	char *last_away_reason;

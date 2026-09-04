@@ -51,6 +51,7 @@ typedef struct ircnet
 	GSList *favchanlist;
 	int selected;
 	guint32 flags;
+	char *persist_profile;			/* draft/persistence profile to ATTACH; empty = don't attach */
 	/* OAuth2/OIDC configuration */
 	char *oauth_authorization_url;
 	char *oauth_token_url;
