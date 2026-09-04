@@ -188,6 +188,34 @@ void chathistory_request_targets (server *serv, const char *start_ref,
 void chathistory_process_batch (server *serv, batch_info *batch);
 
 /**
+ * TRUE if this chathistory batch was not requested by us (server-driven
+ * replay: nested in a bouncer-replay wrapper, or no request in flight for
+ * the session).
+ *
+ * @param serv Server the batch came from
+ * @param batch The completed batch info
+ * @param sess Session the batch's target resolved to
+ */
+gboolean chathistory_batch_is_unsolicited (server *serv, batch_info *batch,
+                                           session *sess);
+
+/**
+ * Put sess into LATEST-phase catch-up state without sending anything.
+ * No-op if a catch-up loop of our own is already running.
+ *
+ * @param sess Session to adopt the server-driven replay for
+ */
+void chathistory_begin_unsolicited_catchup (session *sess);
+
+/**
+ * Called at the END of an evilnet.github.io/bouncer-replay wrapper: the
+ * single "replay complete" point for the whole missed-message block.
+ *
+ * @param serv Server the wrapper came from
+ */
+void chathistory_replay_wrapper_end (server *serv);
+
+/**
  * Handle a FAIL CHATHISTORY response from the server.
  * Clears loading state and attempts fallback (msgid → timestamp → LATEST).
  *

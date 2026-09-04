@@ -2471,9 +2471,20 @@ inbound_batch_end (server *serv, const char *batch_id,
 					process_multiline_batch (serv, batch);
 			}
 		}
-		/* TODO: Handle other batch types:
-		 * - "netjoin"/"netsplit": Collapse join/quit messages
-		 */
+		else if (persistence_is_bare_name (batch->type))
+		{
+			/* draft/persistence channel-state burst.  Handled in wire order
+			 * by inbound_batch_add_message (numerics never come through the
+			 * collector); nothing to flush here. */
+		}
+		else if (g_ascii_strcasecmp (persistence_strip_namespace (batch->type), "bouncer-replay") == 0)
+		{
+			/* Outer wrapper around per-target chathistory batches.  Each
+			 * child already ran at its own BATCH -ref; the wrapper END is
+			 * the single "replay complete" point. */
+			chathistory_replay_wrapper_end (serv);
+		}
+		/* TODO: "netjoin"/"netsplit": collapse join/quit messages */
 	}
 
 	/* Clean up pending label for any labeled batch response.
