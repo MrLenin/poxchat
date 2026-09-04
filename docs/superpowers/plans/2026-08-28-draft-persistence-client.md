@@ -149,7 +149,7 @@ Add the bitfields above to poxchat.h. Add the declarations above to persistence.
 			persistence_parse_cap_value (serv, value);
 ```
 
-Reconnect auto-join gate (the `if (serv->persistent_server || serv->bouncer_inferred)` line): add `|| serv->have_persistence` and extend the comment: the spec's Client behaviour section says a client that negotiated the cap MUST NOT send JOIN for channels it remembers from a previous connection, regardless of the effective STATUS value — the server delivers the restoration burst, and after its boundary the client MAY join channels the server did not restore (not done here; see the roadmap). The favlist path below stays ungated.
+Reconnect auto-join gate (the `if (serv->persistent_server || serv->bouncer_inferred)` line): add `|| (serv->have_persistence && serv->persistence_effective)` and extend the comment: the spec's Client behaviour section says a client that negotiated the cap MUST NOT send JOIN for channels it remembers from a previous connection, because the server delivers them in the restoration burst. The server only restores when it holds a session, and it reports that through the unsolicited `PERSISTENCE STATUS` (after 005, before 376 — so known by the time this gate runs) with effective-setting ON; an unauthenticated connection gets no STATUS and no session, and an account with persistence OFF has no session either, so in both cases the remembered channels are rejoined exactly as before this extension (the "respect what the server delivers" half of the rule is satisfied: the server delivers nothing). Channels a restoration burst did *not* include are never rejoined — they were parted from another client or filtered by the profile's channel list. The favlist path below stays ungated.
 
 - [ ] **Step 4: proto-irc.c — route replies (prefixed and bare) and FAIL**
 
@@ -640,7 +640,9 @@ Append to the existing persistence section of `.claude/skills/ircv3-implementati
   Parsed by `persistence_parse_cap_value` into `serv->persistence_tok_*`; never assume from cap presence.
 - Every `:server PERSISTENCE ...` reply (prefixed or bare) goes to `persistence_handle_reply`;
   `FAIL PERSISTENCE` to `persistence_handle_fail`. `/PERSISTENCE` is a documented passthrough.
-- With the cap ACKed, reconnect auto-rejoin is suppressed (spec: regardless of STATUS); favourites are not.
+- Reconnect auto-rejoin is suppressed when the cap is ACKed *and* the unsolicited STATUS said effective ON
+  (the server holds a session and restores it); no STATUS (unauthenticated) or effective OFF rejoins as before.
+  Channels the restoration burst omitted are never rejoined. Favourites are never gated.
 - `PERSISTENCE ATTACH <profile> [<msgid>]` is pre-CAP-END only and needs an account:
   sent from the 903 handler right before `CAP END` (`persistence_send_attach`).
   Cursor = `scrollback_get_global_newest_msgid` (one global anchor; msgids are HLC-ordered).
