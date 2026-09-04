@@ -126,6 +126,8 @@ session *inbound_channel_context (server *serv, const message_tags_data *tags_da
 
 /* draft/account-registration: ACCOUNTREQUIRED / FAIL * ACCOUNT_REQUIRED guidance */
 void inbound_account_required_hint (server *serv, session *sess);
+void inbound_metadata (server *serv, char *target, char *key, char *visibility,
+                       char *value, const message_tags_data *tags_data);
 
 /* IRCv3 TAGMSG support */
 void inbound_tagmsg (server *serv, char *to, char *nick, char *ip,

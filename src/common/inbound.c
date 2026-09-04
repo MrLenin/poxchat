@@ -47,6 +47,7 @@
 #include "chanopt.h"
 #include "chathistory.h"
 #include "scrollback.h"
+#include "persistence.h"
 #include "network-icon.h"
 #ifdef USE_LIBWEBSOCKETS
 #include "oauth.h"
@@ -2531,7 +2532,7 @@ inbound_batch_add_message (server *serv, const char *prefix, const char *command
 	 * is already in is an attach echo and is consumed on the spot (msgid
 	 * remembered, the following NAMES allowed to refresh the userlist
 	 * silently); everything else falls through to the live handlers. */
-	if (batch->type && g_ascii_strcasecmp (batch->type, "draft/persistence") == 0)
+	if (persistence_is_batch_type (batch->type))
 	{
 		if (g_ascii_strcasecmp (command, "JOIN") == 0 && prefix && word[3])
 		{
@@ -2667,6 +2668,47 @@ inbound_channel_context (server *serv, const message_tags_data *tags_data)
 /* draft/account-registration: the server told us (ACCOUNTREQUIRED ISUPPORT
  * token, or FAIL * ACCOUNT_REQUIRED at the end of registration) that we can't
  * connect without logging into an account.  Tell the user what to do. */
+/* draft/metadata-2 notification:
+ *   :server METADATA <target> <key> <visibility>[ :<value>]
+ * Sent for keys we subscribed to and, always, for our own keys — a
+ * "metadata" batch right after the MOTD syncs them.  Server-managed
+ * persistence keys carry session state and are consumed as such; any
+ * other key is shown in the channel or query tab it concerns when one is
+ * open, else in the server tab. */
+void
+inbound_metadata (server *serv, char *target, char *key, char *visibility,
+                  char *value, const message_tags_data *tags_data)
+{
+	session *sess = NULL;
+	const char *sub;
+	char *msg;
+
+	if (!target || !target[0] || !key || !key[0])
+		return;
+
+	sub = persistence_match (key);
+	if (sub && persistence_handle_metadata (serv, target, sub, value,
+	                                        tags_data->timestamp))
+		return;
+
+	if (is_channel (serv, target))
+		sess = find_channel (serv, target);
+	else if (strcmp (target, "*") != 0)
+		sess = find_dialog (serv, target);
+	if (!sess)
+		sess = serv->server_session;
+
+	if (value)
+		msg = g_strdup_printf (_("Metadata [%s] %s (%s): %s"), target, key,
+		                       visibility && visibility[0] ? visibility : "*",
+		                       value);
+	else
+		msg = g_strdup_printf (_("Metadata [%s] %s: unset"), target, key);
+	EMIT_SIGNAL_TIMESTAMP (XP_TE_SERVTEXT, sess, msg, serv->servername, NULL,
+	                       NULL, 0, tags_data->timestamp);
+	g_free (msg);
+}
+
 void
 inbound_account_required_hint (server *serv, session *sess)
 {

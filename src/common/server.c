@@ -54,6 +54,7 @@
 #include "proto-irc.h"
 #include "servlist.h"
 #include "server.h"
+#include "persistence.h"
 #include "network-icon.h"
 
 #ifdef USE_OPENSSL
@@ -1523,6 +1524,7 @@ server_disconnect (session * sess, int sendquit, int err)
 	serv->servername[0] = 0;
 	serv->lag_sent = 0;
 	serv->bouncer_inferred = FALSE;	/* re-evaluate next reconnect */
+	persistence_reset (serv);
 
 	notify_cleanup ();
 }

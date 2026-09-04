@@ -54,6 +54,7 @@
     <ClInclude Include="oauth.h" />
     <ClInclude Include="secure-storage.h" />
     <ClInclude Include="chathistory.h" />
+    <ClInclude Include="persistence.h" />
     <ClInclude Include="scrollback.h" />
     <ClInclude Include="sqlite-zstd-vfs.h" />
     <ClInclude Include="zstd\zstd.h" />
@@ -94,6 +95,7 @@
     <ClCompile Include="oauth.c" />
     <ClCompile Include="secure-storage.c" />
     <ClCompile Include="chathistory.c" />
+    <ClCompile Include="persistence.c" />
     <ClCompile Include="scrollback.c" />
     <ClCompile Include="sqlite-zstd-vfs.c" />
     <ClCompile Include="zstd\zstd.c">

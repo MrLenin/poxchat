@@ -1838,6 +1838,26 @@ process_named_msg (session *sess, char *type, char *word[], char *word_eol[],
 				handle_markread_response (serv, word[3], word[4], tags_data);
 			return;
 
+		case WORDL('M','E','T','A'):
+			/* METADATA - draft/metadata-2 key change notification
+			 * Format: :server METADATA <target> <key> <visibility>[ :<value>]
+			 * No value parameter means the key was unset.
+			 */
+			if (len == 8 && g_ascii_strcasecmp (type, "METADATA") == 0)
+			{
+				char *value = NULL;
+
+				if (word[6][0])
+				{
+					value = word_eol[6];
+					if (*value == ':')
+						value++;
+				}
+				inbound_metadata (serv, word[3], word[4], word[5], value, tags_data);
+				return;
+			}
+			goto garbage;
+
 		case WORDL('R','E','D','A'):
 			/* REDACT - message redaction (Phase 4: visual redaction)
 			 * Format: :nick!user@host REDACT <target> <msgid> [:<reason>]
