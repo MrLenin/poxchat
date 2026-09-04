@@ -93,6 +93,15 @@ GSList *scrollback_db_load (scrollback_db *db, const char *channel, int limit);
 char *scrollback_get_newest_msgid (scrollback_db *db, const char *channel);
 
 /**
+ * Newest non-pending msgid across every channel; caller frees. The
+ * draft/persistence attach cursor.
+ *
+ * @param db Database handle
+ * @return Newest msgid across all channels (caller must g_free), or NULL if none
+ */
+char *scrollback_get_global_newest_msgid (scrollback_db *db);
+
+/**
  * Get the oldest msgid for a channel (for CHATHISTORY BEFORE requests).
  *
  * @param db Database handle

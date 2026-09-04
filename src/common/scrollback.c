@@ -45,6 +45,7 @@ struct scrollback_db {
 	sqlite3_stmt *stmt_insert;
 	sqlite3_stmt *stmt_load;
 	sqlite3_stmt *stmt_newest_msgid;
+	sqlite3_stmt *stmt_global_newest_msgid;
 	sqlite3_stmt *stmt_oldest_msgid;
 	sqlite3_stmt *stmt_newest_time;
 	sqlite3_stmt *stmt_has_msgid;
@@ -965,6 +966,20 @@ prepare_statements (scrollback_db *sdb)
 		-1, &sdb->stmt_newest_msgid, NULL);
 	if (rc != SQLITE_OK) goto fail;
 
+	/* Get newest msgid across every channel (draft/persistence attach
+	 * cursor).  No (timestamp, id) index exists — see the design note at
+	 * the call site — so this takes each channel's newest qualifying row
+	 * off idx_channel_id_time and picks the newest of those. */
+	rc = sqlite3_prepare_v2 (sdb->db,
+		"SELECT m.msgid FROM channels c "
+		"JOIN messages m ON m.id = ("
+		"    SELECT id FROM messages"
+		"     WHERE channel_id = c.id AND msgid IS NOT NULL AND msgid NOT LIKE 'pending:%'"
+		"     ORDER BY timestamp DESC, id DESC LIMIT 1)"
+		"ORDER BY m.timestamp DESC, m.id DESC LIMIT 1",
+		-1, &sdb->stmt_global_newest_msgid, NULL);
+	if (rc != SQLITE_OK) goto fail;
+
 	/* Get oldest msgid */
 	rc = sqlite3_prepare_v2 (sdb->db,
 		"SELECT msgid FROM messages WHERE channel_id = ? AND msgid IS NOT NULL "
@@ -1189,6 +1204,7 @@ finalize_statements (scrollback_db *sdb)
 	if (sdb->stmt_insert) sqlite3_finalize (sdb->stmt_insert);
 	if (sdb->stmt_load) sqlite3_finalize (sdb->stmt_load);
 	if (sdb->stmt_newest_msgid) sqlite3_finalize (sdb->stmt_newest_msgid);
+	if (sdb->stmt_global_newest_msgid) sqlite3_finalize (sdb->stmt_global_newest_msgid);
 	if (sdb->stmt_oldest_msgid) sqlite3_finalize (sdb->stmt_oldest_msgid);
 	if (sdb->stmt_newest_time) sqlite3_finalize (sdb->stmt_newest_time);
 	if (sdb->stmt_has_msgid) sqlite3_finalize (sdb->stmt_has_msgid);
@@ -1624,6 +1640,25 @@ scrollback_get_newest_msgid (scrollback_db *db, const char *channel)
 			msgid = g_strdup (text);
 	}
 
+	return msgid;
+}
+
+char *
+scrollback_get_global_newest_msgid (scrollback_db *db)
+{
+	char *msgid = NULL;
+
+	if (!db || !db->stmt_global_newest_msgid)
+		return NULL;
+
+	sqlite3_reset (db->stmt_global_newest_msgid);
+	if (sqlite3_step (db->stmt_global_newest_msgid) == SQLITE_ROW)
+	{
+		const char *text = (const char *) sqlite3_column_text (db->stmt_global_newest_msgid, 0);
+		if (text)
+			msgid = g_strdup (text);
+	}
+	sqlite3_reset (db->stmt_global_newest_msgid);
 	return msgid;
 }
 
