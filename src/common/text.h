@@ -81,6 +81,13 @@ gchar *text_fixup_invalid_utf8 (const gchar* text, gssize len, gsize *len_out);
 int get_stamp_str (char *fmt, time_t tim, char **ret);
 void format_event (session *sess, int index, char **args, char *o, gsize sizeofo, unsigned int stripcolor_args);
 void text_record_event (session *sess, char *text, time_t stamp, const char *msgid);
+
+/* msgid of the inbound line currently being dispatched (NULL outside
+ * dispatch).  Text events it produces that don't set their own
+ * current_msgid — JOIN/PART/QUIT/MODE/NICK/TOPIC lines — are stored with
+ * it, so event-playback replays of the same event dedupe against the
+ * live row and the newest-msgid catch-up anchor stays current. */
+extern const char *text_inbound_msgid;
 char *text_find_format_string (char *name);
 
 extern const gchar* unicode_fallback_string;

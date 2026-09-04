@@ -2242,12 +2242,15 @@ text_color_of (char *name)
 }
 
 
+const char *text_inbound_msgid = NULL;
+
 /* called by EMIT_SIGNAL macro */
 
 void
 text_emit (int index, session *sess, char *a, char *b, char *c, char *d,
 			  time_t timestamp)
 {
+	gboolean borrowed_msgid = FALSE;
 	char *word[PDIWORDS];
 	int i;
 	tab_state_flags current_state = sess->tab_state;
@@ -2342,7 +2345,18 @@ text_emit (int index, session *sess, char *a, char *b, char *c, char *d,
 
 	if (!prefs.hex_away_omit_alerts || !sess->server->is_away)
 		sound_play_event (index);
+	/* Events raised while an inbound tagged line is being dispatched
+	 * inherit its msgid for the scrollback row (message handlers set
+	 * current_msgid themselves and are left alone). */
+	if (!sess->current_msgid && text_inbound_msgid && text_inbound_msgid[0])
+	{
+		sess->current_msgid = g_strdup (text_inbound_msgid);
+		sess->current_msgid_is_user_msg = FALSE;
+		borrowed_msgid = TRUE;
+	}
 	display_event (sess, index, word, stripcolor_args, timestamp);
+	if (borrowed_msgid && is_session (sess))
+		g_clear_pointer (&sess->current_msgid, g_free);
 }
 
 char *
