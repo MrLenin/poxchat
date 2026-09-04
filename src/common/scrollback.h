@@ -84,6 +84,18 @@ gint64 scrollback_db_save (scrollback_db *db, const char *channel,
 GSList *scrollback_db_load (scrollback_db *db, const char *channel, int limit);
 
 /**
+ * Delete this channel's unconfirmed "pending:<label>" echo rows.
+ *
+ * They are placeholders for messages we sent and never saw echoed; one
+ * that outlived its session will never be confirmed.  Run this before
+ * reading the channel's newest msgid or counting its rows.
+ *
+ * @param db Database handle
+ * @param channel Channel/query name
+ */
+void scrollback_purge_pending (scrollback_db *db, const char *channel);
+
+/**
  * Get the newest msgid for a channel (for CHATHISTORY AFTER requests).
  *
  * @param db Database handle

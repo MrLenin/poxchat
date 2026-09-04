@@ -417,6 +417,14 @@ scrollback_fill_run (session *sess)
 	if (sess->scrollwritten && sess->scrollback_replay_marklast)
 		fe_scrollback_set_marker_rowid (sess, sess->scrollback_mark_rowid);
 
+	/* A MARKREAD answer that arrived while the fill was queued placed the
+	 * marker against an empty buffer, so it took the "everything is read"
+	 * branch and nothing would put it back.  Re-run the same placement the
+	 * response handler uses now that the rows exist.  Last, so the
+	 * server's read marker wins over the replay separator above. */
+	if (sess->markread_time > 0)
+		fe_set_marker_from_timestamp (sess, sess->markread_time);
+
 	poxchat_timing_log ("scrollback_fill %s: %d entries %.1f ms", sess->channel,
 	                    entries, (g_get_monotonic_time () - t0) / 1000.0);
 }
@@ -520,6 +528,11 @@ scrollback_load (session *sess)
 
 	/* Try migration from old text file format first */
 	scrollback_migrate (db, network, sess->channel);
+
+	/* Drop last session's unconfirmed echo rows before anything reads the
+	 * newest msgid or the row count — this used to happen as a side effect
+	 * of the replay's scrollback_db_load, which no longer runs. */
+	scrollback_purge_pending (db, sess->channel);
 
 	/* Get msgid tracking info from database */
 	sess->scrollback_newest_msgid = scrollback_get_newest_msgid (db, sess->channel);

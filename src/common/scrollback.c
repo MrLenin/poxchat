@@ -1537,6 +1537,51 @@ scrollback_db_save (scrollback_db *db, const char *channel,
 	}
 }
 
+/* Drop unconfirmed echo-message rows left behind by a previous session.
+ *
+ * A "pending:<label>" msgid is the placeholder written when we send a
+ * message and have not seen the server echo yet; one that survived a
+ * restart will never be confirmed, so it must go before anything reads
+ * the channel's newest msgid or counts its rows.  This used to be a side
+ * effect of scrollback_db_load, which the deferred replay fill no longer
+ * calls — scrollback_load () runs it directly now. */
+void
+scrollback_purge_pending (scrollback_db *db, const char *channel)
+{
+	gint64 channel_id;
+	char *errmsg = NULL;
+	char *sql;
+
+	if (!db || !channel)
+		return;
+
+	channel_id = scrollback_get_channel_id (db, channel);
+	if (channel_id < 0)
+		return;
+
+	if (db->fts)
+	{
+		sql = sqlite3_mprintf (
+			"DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages "
+			"WHERE channel_id = %lld AND msgid LIKE 'pending:%%')",
+			(long long)channel_id);
+		sqlite3_exec (db->db, sql, NULL, NULL, NULL);
+		sqlite3_free (sql);
+	}
+	sql = sqlite3_mprintf (
+		"DELETE FROM messages WHERE channel_id = %lld AND msgid LIKE 'pending:%%'",
+		(long long)channel_id);
+	sqlite3_exec (db->db, sql, NULL, NULL, &errmsg);
+	if (errmsg)
+	{
+		g_warning ("Failed to purge pending entries: %s", errmsg);
+		sqlite3_free (errmsg);
+	}
+	else if (sqlite3_changes (db->db) > 0)
+		chan_cache_invalidate (db, channel_id);
+	sqlite3_free (sql);
+}
+
 GSList *
 scrollback_db_load (scrollback_db *db, const char *channel, int limit)
 {
@@ -1553,32 +1598,7 @@ scrollback_db_load (scrollback_db *db, const char *channel, int limit)
 	if (limit <= 0)
 		limit = 500; /* Default */
 
-	/* Purge unconfirmed echo-message entries from a previous session. */
-	{
-		char *errmsg = NULL;
-		char *sql;
-		if (db->fts)
-		{
-			sql = sqlite3_mprintf (
-				"DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages "
-				"WHERE channel_id = %lld AND msgid LIKE 'pending:%%')",
-				(long long)channel_id);
-			sqlite3_exec (db->db, sql, NULL, NULL, NULL);
-			sqlite3_free (sql);
-		}
-		sql = sqlite3_mprintf (
-			"DELETE FROM messages WHERE channel_id = %lld AND msgid LIKE 'pending:%%'",
-			(long long)channel_id);
-		sqlite3_exec (db->db, sql, NULL, NULL, &errmsg);
-		if (errmsg)
-		{
-			g_warning ("Failed to purge pending entries: %s", errmsg);
-			sqlite3_free (errmsg);
-		}
-		else if (sqlite3_changes (db->db) > 0)
-			chan_cache_invalidate (db, channel_id);
-		sqlite3_free (sql);
-	}
+	scrollback_purge_pending (db, channel);
 
 	sqlite3_reset (db->stmt_load);
 	sqlite3_bind_int64 (db->stmt_load, 1, channel_id);

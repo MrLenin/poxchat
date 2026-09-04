@@ -12924,42 +12924,83 @@ recompute:
  * there is exactly one path that turns stored rows into entries.
  * Returns the number of entries the buffer gained.
  *
- * Radius: the eager replay materialized MIN (hex_text_max_lines, 150) of
- * the newest rows.  centre = total_entries - 1 with radius = that count
- * minus one asks ensure_range for exactly the same set (it clamps
- * want_end to the last ordinal, so the window is want_start..last =
- * radius + 1 entries).  VIRT_PAGE_SIZE is the eviction slack around a
- * window, not a page size — using it here would quietly redefine the
- * replay depth. */
+ * Depth: the eager replay materialized MIN (hex_text_max_lines, 150) of
+ * the newest rows, so the window here is [total - depth, total - 1].
+ * VIRT_PAGE_SIZE is the eviction slack around a window, not a page size —
+ * using it would quietly redefine the replay depth. */
 int
 gtk_xtext_buffer_fill_tail (xtext_buffer *buf)
 {
-	int radius, before, gained;
-	gboolean was_down;
+	int depth, want_start, want_end, db_mat;
+	gboolean was_down, blocked;
 
 	if (!buf || !HAS_VIRT_DB (buf) || !buf->xtext)
 		return 0;
 
 	/* Rows stored between set_virtual and now (the JOIN row this tab's
 	 * banner attaches to, a live line, a catch-up batch) moved the ordinal
-	 * space, and ensure_range's prepend/append split is only sound on
-	 * exact values.  calc_lines_virtual_ex re-derives total_entries and
-	 * mat_first_index from the DB in its DB-authoritative block — the same
-	 * self-heal the chathistory gap-fill batches rely on. */
+	 * space, and every window computation below needs exact values.
+	 * calc_lines_virtual_ex re-derives total_entries and mat_first_index
+	 * from the DB in its DB-authoritative block — the same self-heal the
+	 * chathistory gap-fill batches rely on. */
 	gtk_xtext_calc_lines_virtual_ex (buf, FALSE);
 
 	if (buf->total_entries <= 0)
 		return 0;
 
 	was_down = buf->scroll_anchor.anchor_to_bottom;
-	before = BUF_MAT_COUNT (buf);
 
-	radius = MIN (prefs.hex_text_max_lines, 150) - 1;
-	if (radius < 0)
-		radius = 0;
+	/* hex_text_max_lines == 0 means "no limit"; MIN() against it would
+	 * make the replay depth zero. */
+	depth = prefs.hex_text_max_lines;
+	if (depth <= 0 || depth > 150)
+		depth = 150;
 
-	gtk_xtext_virt_ensure_range (buf, buf->total_entries - 1, radius);
-	gained = BUF_MAT_COUNT (buf) - before;
+	want_end = buf->total_entries - 1;
+	want_start = want_end - (depth - 1);
+	if (want_start < 0)
+		want_start = 0;
+
+	/* Block value-changed across the whole fill.  Materialization calls
+	 * gtk_xtext_entry_set_reply, which writes the adjustment when a quote
+	 * row changes the line count, and the handler would re-enter
+	 * ensure_range in the middle of the list mutation.  (The final
+	 * bottom re-assert needs it blocked too: the pre-fill value is far
+	 * below the new upper - page_size and would clear anchor_to_bottom.) */
+	blocked = buf->xtext->adj && buf->xtext->vc_signal_tag != 0;
+	if (blocked)
+		g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
+
+	db_mat = BUF_MAT_COUNT (buf) - buf->ephemeral_count;
+	if (db_mat > 0)
+	{
+		/* Rebuild, don't page.  Whatever DB-backed entries the tab picked
+		 * up between set_virtual and now are NOT a contiguous ordinal
+		 * range: inbound_ujoin stores a restored membership's JOIN row
+		 * with its original (back-dated) timestamp, so the banner entry
+		 * sits at some ordinal D deep in history while the "Reconnected"
+		 * row it printed straight after sits at the tail.  ensure_range
+		 * assumes the window is contiguous (mat_end = mat_first + db_mat
+		 * - 1), so it would skip the ordinals between them and then link
+		 * the loaded rows after the tail entry while the B-tree sorts
+		 * them before it — list and tree order permanently diverged.
+		 * recenter is the operation for exactly this: evict the scattered
+		 * DB-backed entries and rebuild a contiguous window from the DB,
+		 * merging around the entries that have no DB row and therefore
+		 * cannot be reloaded.  The evicted rows all come back (they are
+		 * in the DB), and virt_materialize_msg re-draws the JOIN row as
+		 * the self-join banner when it falls inside the window; a deeply
+		 * back-dated one stays evicted until the user scrolls to it. */
+		gtk_xtext_virt_recenter (buf, want_start, want_end);
+	}
+	else
+	{
+		/* No DB-backed entries: the window is empty (mat_first_index is a
+		 * cursor one past the tail), which ensure_range's prepend/append
+		 * split handles exactly — and it keeps leading ephemerals in
+		 * place instead of re-merging them. */
+		gtk_xtext_virt_ensure_range (buf, want_end, depth - 1);
+	}
 
 	/* set_virtual ran against an empty buffer, so avg_lines_per_entry was
 	 * its no-samples fallback and lines_before_mat was seeded from that.
@@ -12976,40 +13017,32 @@ gtk_xtext_buffer_fill_tail (xtext_buffer *buf)
 	}
 
 	/* Leave the view where the eager path left it: pinned to the newest
-	 * line.  Mirrors the tail of gtk_xtext_buffer_set_virtual, including
-	 * the blocked value-changed handler (the pre-fill value is far below
-	 * the new upper - page_size and would clear anchor_to_bottom). */
+	 * line.  Mirrors the tail of gtk_xtext_buffer_set_virtual. */
+	gtk_xtext_calc_lines_virtual_ex (buf, FALSE);
+
+	if (was_down)
 	{
-		gboolean blocked = buf->xtext->adj && buf->xtext->vc_signal_tag != 0;
-
-		if (blocked)
-			g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
-
-		gtk_xtext_calc_lines_virtual_ex (buf, FALSE);
-
-		if (was_down)
+		buf->scroll_anchor.anchor_to_bottom = TRUE;
+		if (buf->xtext->buffer == buf && buf->xtext->adj)
 		{
-			buf->scroll_anchor.anchor_to_bottom = TRUE;
-			if (buf->xtext->buffer == buf && buf->xtext->adj)
-			{
-				gdouble upper = gtk_adjustment_get_upper (buf->xtext->adj);
-				gdouble page = gtk_adjustment_get_page_size (buf->xtext->adj);
-				gdouble bottom = upper - page;
+			gdouble upper = gtk_adjustment_get_upper (buf->xtext->adj);
+			gdouble page = gtk_adjustment_get_page_size (buf->xtext->adj);
+			gdouble bottom = upper - page;
 
-				if (bottom < 0)
-					bottom = 0;
-				gtk_adjustment_set_value (buf->xtext->adj, bottom);
-			}
+			if (bottom < 0)
+				bottom = 0;
+			gtk_adjustment_set_value (buf->xtext->adj, bottom);
 		}
-
-		if (blocked)
-			g_signal_handler_unblock (buf->xtext->adj, buf->xtext->vc_signal_tag);
 	}
+
+	if (blocked)
+		g_signal_handler_unblock (buf->xtext->adj, buf->xtext->vc_signal_tag);
 
 	if (buf->xtext->buffer == buf)
 		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
 
-	return gained;
+	/* The window size, not a delta: recenter evicts before it loads. */
+	return BUF_MAT_COUNT (buf) - buf->ephemeral_count;
 }
 
 /* Virtual scrollback: decide whether an entry should be materialized into
