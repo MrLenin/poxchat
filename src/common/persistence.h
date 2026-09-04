@@ -56,8 +56,10 @@ void persistence_parse_cap_value (server *serv, const char *value);
 /* Send "PERSISTENCE ATTACH <profile> [<msgid>]" for serv->persist_profile,
  * with the newest scrollback msgid as the cursor when the server
  * advertised attach-cursor.  Valid only between SASL completion and
- * CAP END; a no-op without the cap, the attach token or a profile, and
- * at most once per connection.  No reply is awaited. */
+ * CAP END; a no-op without the cap or without a profile, and at most
+ * once per connection.  The attach token is not required — the CAP
+ * value is a hint, not an inventory — so a server that lacks ATTACH
+ * answers FAIL, which restores legacy behaviour.  No reply is awaited. */
 void persistence_send_attach (server *serv);
 
 /* TRUE when we handed the server a cursor and it is therefore replaying

@@ -776,8 +776,9 @@ typedef struct server
 	unsigned int persistence_tok_attach_cursor:1;
 	unsigned int persistence_status_known:1;	/* saw PERSISTENCE STATUS this connection */
 	unsigned int persistence_effective:1;		/* ...and effective-setting was ON */
-	unsigned int persistence_attached:1;		/* sent PERSISTENCE ATTACH this connection (Task 5 sets it) */
-	unsigned int persistence_cursor_sent:1;		/* that ATTACH carried a msgid cursor (Task 5 sets it) */
+	unsigned int persistence_attached:1;		/* sent PERSISTENCE ATTACH this connection */
+	unsigned int persistence_cursor_sent:1;		/* that ATTACH carried a msgid cursor */
+	unsigned int persistence_attach_pending:1;	/* ...and it is still unanswered: only that FAIL may drop the flags above */
 #ifdef USE_OPENSSL
 	unsigned int use_ssl:1;				  /* is server SSL capable? */
 	unsigned int accept_invalid_cert:1;/* ignore result of server's cert. verify */

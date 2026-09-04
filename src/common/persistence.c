@@ -38,7 +38,6 @@
 #include "text.h"
 #include "server.h"
 #include "scrollback.h"
-#include "chathistory.h"
 #include "persistence.h"
 
 /* Strip IRCv3 name prefixes: "draft/" and vendor scopes, which are DNS
@@ -166,16 +165,26 @@ persistence_parse_cap_value (server *serv, const char *value)
 	g_strfreev (tokens);
 }
 
+/* A msgid longer than this is not one we can have stored, and a cursor
+ * that pushes the line past tcp_sendf's 1540-byte static buffer would be
+ * truncated there — losing our CRLF, so the CAP END that follows would
+ * be glued onto the ATTACH.  Drop the cursor rather than risk that. */
+#define PERSISTENCE_MAX_CURSOR_LEN 256
+
 /* PERSISTENCE ATTACH <profile> [<msgid>] — pick the profile this
  * connection is a view onto.  The server accepts it only between SASL
  * completion and CAP END, so this is called from that one window in the
  * registration flight and no reply is waited for: the flight must not
  * stall on a server that never answers.
  *
- * The optional msgid is our attach cursor.  Supplying it is consent to
- * an unsolicited chathistory-shaped replay of everything since, which
- * is why we only offer it when the server advertised attach-cursor —
- * and why persistence_cursor_sent then suppresses our own catch-up. */
+ * The attach token is deliberately not required.  The spec calls the CAP
+ * value a hint and not an inventory, and says a client MUST NOT read a
+ * missing token as a missing feature; a server that really lacks ATTACH
+ * answers FAIL, which persistence_handle_fail turns back into legacy
+ * behaviour.  attach-cursor does gate the cursor, because supplying one
+ * is consent to an unsolicited chathistory-shaped replay of everything
+ * since — and persistence_cursor_sent then suppresses our own catch-up,
+ * so guessing wrong there would lose history rather than a round trip. */
 void
 persistence_send_attach (server *serv)
 {
@@ -183,7 +192,7 @@ persistence_send_attach (server *serv)
 	scrollback_db *db;
 	char *cursor = NULL;
 
-	if (!serv || !serv->have_persistence || !serv->persistence_tok_attach)
+	if (!serv || !serv->have_persistence)
 		return;
 	if (!serv->persist_profile[0])
 		return;			/* not configured — legacy behaviour */
@@ -198,6 +207,11 @@ persistence_send_attach (server *serv)
 		db = network ? scrollback_open (network) : NULL;
 		if (db)
 			cursor = scrollback_get_global_newest_msgid (db);
+		if (cursor && strlen (cursor) > PERSISTENCE_MAX_CURSOR_LEN)
+		{
+			g_free (cursor);
+			cursor = NULL;
+		}
 	}
 
 	if (cursor)
@@ -207,6 +221,7 @@ persistence_send_attach (server *serv)
 
 	serv->persistence_attached = TRUE;
 	serv->persistence_cursor_sent = (cursor != NULL);
+	serv->persistence_attach_pending = TRUE;
 	g_free (cursor);
 }
 
@@ -336,8 +351,13 @@ persistence_handle_reply (server *serv, const char *args, time_t stamp)
 		persistence_print (serv, stamp, _("Persistence: profile %s: %s unset"),
 		                   w[1], w[2]);
 	else if (g_ascii_strcasecmp (w[0], "ATTACH") == 0 && n >= 2)
+	{
+		/* Our ATTACH was accepted: a later FAIL is about something else
+		 * and must not drop the replay gate. */
+		serv->persistence_attach_pending = FALSE;
 		persistence_print (serv, stamp,
 			_("Persistence: attached to profile %s"), w[1]);
+	}
 	else if (g_ascii_strcasecmp (w[0], "DETACH") == 0 && n >= 2 &&
 	         g_ascii_strcasecmp (w[1], "OK") == 0)
 		persistence_print (serv, stamp,
@@ -368,21 +388,34 @@ persistence_handle_fail (server *serv, const char *code, const char *context,
 	 * vendor-scoped code reads the same as the spec's bare one. */
 	bare = code ? persistence_strip_namespace (code) : "";
 
-	if (g_ascii_strcasecmp (bare, "CURSOR_UNKNOWN") == 0)
+	/* Only the FAIL that answers our own registration-time ATTACH may
+	 * touch the replay gate.  A later FAIL — /persistence attach from
+	 * the user, a PROFILE DELETE refused because the profile is an
+	 * ancestor — carries the same codes but says nothing about whether
+	 * the server is still replaying from our cursor. */
+	if (serv->persistence_attach_pending)
 	{
-		/* Server evicted our anchor: it falls back to last-activity
-		 * replay, which may be short.  Re-arm our own per-channel LATEST
-		 * fan-out + TARGETS so nothing is missed. */
-		serv->persistence_cursor_sent = FALSE;
-		chathistory_schedule_deferred (serv);
-		chathistory_request_targets_on_reconnect (serv);
-	}
-	else if (g_ascii_strcasecmp (bare, "ACCOUNT_REQUIRED") == 0 ||
-	         g_ascii_strcasecmp (bare, "INVALID_PARAMETERS") == 0)
-	{
-		/* ATTACH was rejected outright — a plain client this session. */
-		serv->persistence_attached = FALSE;
-		serv->persistence_cursor_sent = FALSE;
+		if (g_ascii_strcasecmp (bare, "CURSOR_UNKNOWN") == 0)
+			/* Server evicted our anchor: it falls back to last-activity
+			 * replay, which may be short.  Opening the gate is all that
+			 * is needed — this FAIL always arrives before 001, so the
+			 * regular call sites still run afterwards and now find the
+			 * gate open (366 -> chathistory_schedule_deferred, end of
+			 * login -> chathistory_request_targets_on_reconnect).
+			 * Calling them from here instead would send CHATHISTORY
+			 * TARGETS before registration and arm a LATEST timer before
+			 * a single channel had been rejoined. */
+			serv->persistence_cursor_sent = FALSE;
+		else if (g_ascii_strcasecmp (bare, "ACCOUNT_REQUIRED") == 0 ||
+		         g_ascii_strcasecmp (bare, "INVALID_PARAMETERS") == 0)
+		{
+			/* ATTACH was rejected outright — a plain client this session. */
+			serv->persistence_attached = FALSE;
+			serv->persistence_cursor_sent = FALSE;
+		}
+		/* ATTACH is the only command outstanding in the window between
+		 * SASL and CAP END, so any FAIL there is its answer. */
+		serv->persistence_attach_pending = FALSE;
 	}
 
 	if (context && context[0])
@@ -469,4 +502,5 @@ persistence_reset (server *serv)
 	serv->persistence_effective = FALSE;
 	serv->persistence_attached = FALSE;
 	serv->persistence_cursor_sent = FALSE;
+	serv->persistence_attach_pending = FALSE;
 }
