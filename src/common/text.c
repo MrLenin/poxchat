@@ -72,12 +72,17 @@ static ca_context *ca_con;
 
 static void mkdir_p (char *filename);
 static char *log_create_filename (char *channame);
+static void scrollback_fill_drop (session *sess);
 
 void
 scrollback_close (session *sess)
 {
-	/* SQLite databases are cached and shared, nothing to close per-session */
-	(void)sess;
+	/* SQLite databases are cached and shared, nothing to close per-session.
+	 * The deferred-fill queue does hold a bare pointer to this session
+	 * though, and session_free calls us on its way out — drop it here so
+	 * the idle can never reach a freed session. */
+	scrollback_fill_drop (sess);
+	sess->scrollback_fill_pending = 0;
 }
 
 /* Helper to get scrollback database for a session */
@@ -348,15 +353,146 @@ gap_bootstrap_idle_cb (gpointer data)
 	return G_SOURCE_REMOVE;
 }
 
+/* Deferred scrollback fill.
+ *
+ * scrollback_load () used to print the newest ~150 stored rows into xtext
+ * synchronously.  That is 30-70 ms of Pango work per tab, and a reconnect
+ * that restores ten channels ran ten of them back to back on the GUI
+ * thread: ~1 s with no repaint and no input.  So the load keeps only the
+ * state its callers read the moment it returns (see scrollback_load) and
+ * queues the rows themselves for a low-priority idle that fills ONE
+ * session per callback — the main loop repaints and handles input in
+ * between.  The fill goes through the same on-demand paging that serves
+ * scrolling (fe_scrollback_fill_tail -> gtk_xtext_buffer_fill_tail), so
+ * there is one materialization path, not two.
+ *
+ * A tab the user actually switches to is filled synchronously first
+ * (scrollback_fill_now from the fe's tab-populate): the visible buffer
+ * must never be half empty. */
+
+static GQueue *scrollback_fill_queue = NULL;	/* session *, borrowed pointers */
+static guint scrollback_fill_tag = 0;
+
+static void
+scrollback_fill_drop (session *sess)
+{
+	if (scrollback_fill_queue && sess)
+		g_queue_remove_all (scrollback_fill_queue, sess);
+}
+
+/* Fill order: any server's front session first — that is the tab the user
+ * is looking at, and it must not sit empty while background tabs fill.
+ * Everything else keeps queue (join) order. */
+static session *
+scrollback_fill_pick (void)
+{
+	GList *l;
+
+	for (l = scrollback_fill_queue->head; l; l = l->next)
+	{
+		session *sess = l->data;
+
+		if (is_session (sess) && sess->server && sess->server->front_session == sess)
+			return sess;
+	}
+
+	return scrollback_fill_queue->head ? scrollback_fill_queue->head->data : NULL;
+}
+
+static void
+scrollback_fill_run (session *sess)
+{
+	gint64 t0 = g_get_monotonic_time ();
+	int entries;
+
+	sess->scrollback_fill_pending = 0;
+
+	entries = fe_scrollback_fill_tail (sess);
+
+	/* Replay separator, under the same condition the eager path used at
+	 * both scrollback_load call sites.  It cannot be "mark the last entry"
+	 * any more: by now the buffer's last entry may be a line that arrived
+	 * while the fill was queued, and the separator belongs before it — so
+	 * place it on the newest row that existed when the tab was opened. */
+	if (sess->scrollwritten && sess->scrollback_replay_marklast)
+		fe_scrollback_set_marker_rowid (sess, sess->scrollback_mark_rowid);
+
+	poxchat_timing_log ("scrollback_fill %s: %d entries %.1f ms", sess->channel,
+	                    entries, (g_get_monotonic_time () - t0) / 1000.0);
+}
+
+static gboolean
+scrollback_fill_idle_cb (gpointer data)
+{
+	session *sess;
+
+	(void) data;
+
+	if (!scrollback_fill_queue || g_queue_is_empty (scrollback_fill_queue))
+	{
+		scrollback_fill_tag = 0;
+		return G_SOURCE_REMOVE;
+	}
+
+	sess = scrollback_fill_pick ();
+	scrollback_fill_drop (sess);
+
+	/* Freed sessions are dropped from the queue by scrollback_close, but
+	 * these are bare pointers held across main-loop turns — validate. */
+	if (is_session (sess) && sess->scrollback_fill_pending)
+		scrollback_fill_run (sess);
+
+	/* One session per callback, and no source left behind once the queue
+	 * drains: an empty fill queue must cost the process nothing. */
+	if (g_queue_is_empty (scrollback_fill_queue))
+	{
+		scrollback_fill_tag = 0;
+		return G_SOURCE_REMOVE;
+	}
+
+	return G_SOURCE_CONTINUE;
+}
+
+static void
+scrollback_fill_enqueue (session *sess)
+{
+	if (!scrollback_fill_queue)
+		scrollback_fill_queue = g_queue_new ();
+
+	if (!g_queue_find (scrollback_fill_queue, sess))
+		g_queue_push_tail (scrollback_fill_queue, sess);
+
+	if (!scrollback_fill_tag)
+		scrollback_fill_tag = g_idle_add_full (G_PRIORITY_DEFAULT_IDLE,
+		                                       scrollback_fill_idle_cb, NULL, NULL);
+}
+
+void
+scrollback_fill_now (session *sess)
+{
+	if (!sess || !sess->scrollback_fill_pending)
+		return;
+
+	scrollback_fill_drop (sess);
+	scrollback_fill_run (sess);
+}
+
+/* Hook a session up to its stored scrollback.
+ *
+ * Everything here is state some caller reads the moment this returns —
+ * the JOIN handler's "is this a restored membership" test and the
+ * chathistory catch-up both key off scrollback_newest_*, and any line
+ * printed before the fill runs needs the buffer already in virtual mode
+ * so it lands at the right ordinal.  The rows themselves are not
+ * materialized here; see the deferred-fill block above. */
 void
 scrollback_load (session *sess)
 {
 	scrollback_db *db;
-	GSList *messages, *iter;
 	const char *network;
-	gint lines = 0;
-	time_t newest_time = 0;
-	gint64 t_total, t_step;
+	int total;
+	gint64 max_id;
+	gint64 t_total;
 
 	if (sess->text_scrollback == SET_DEFAULT)
 	{
@@ -377,7 +513,6 @@ scrollback_load (session *sess)
 		return;
 
 	t_total = g_get_monotonic_time ();
-	poxchat_timing_log ("scrollback_load %s: begin", sess->channel);
 
 	db = scrollback_open (network);
 	if (!db)
@@ -386,100 +521,10 @@ scrollback_load (session *sess)
 	/* Try migration from old text file format first */
 	scrollback_migrate (db, network, sess->channel);
 
-	/* Load the newest messages from SQLite.  Virtual mode pages in older
-	 * entries on demand via ensure_range, so the initial replay only needs
-	 * to fill the viewport plus a scroll margin — it is NOT the history
-	 * depth.  Replaying deep here is pure connect-time cost: each line is
-	 * a synchronous Pango shape on the UI thread (~0.4 ms), and with the
-	 * old 500-entry cap an 11-channel autojoin froze the UI for ~2.2 s
-	 * right after "Connection Complete".  Chathistory dedup no longer
-	 * depends on this depth either: known_msgids seeding falls back to an
-	 * indexed DB lookup (scrollback_session_has_msgid) for anything the
-	 * replay didn't cover. */
-	t_step = g_get_monotonic_time ();
-	{
-		int initial_load = prefs.hex_text_max_lines;
-		if (initial_load > 150)
-			initial_load = 150;
-		messages = scrollback_db_load (db, sess->channel, initial_load);
-	}
-	poxchat_timing_log ("scrollback_load %s: query %.1f ms", sess->channel,
-	                    (g_get_monotonic_time () - t_step) / 1000.0);
-
-	t_step = g_get_monotonic_time ();
-	for (iter = messages; iter; iter = iter->next)
-	{
-		scrollback_msg *msg = iter->data;
-
-		if (msg->text && msg->text[0])
-		{
-			/* Set current_msgid so fe_print_text attaches it to the xtext entry.
-			 * Must clear between messages so system messages (Disconnected etc.)
-			 * don't inherit the previous message's msgid. */
-			g_free (sess->current_msgid);
-			if (msg->msgid && msg->msgid[0] &&
-			    strncmp (msg->msgid, "pending:", 8) != 0)
-				sess->current_msgid = g_strdup (msg->msgid);
-			else
-				sess->current_msgid = NULL;
-			/* is_user_msg comes from the DB column, populated at save time. */
-			sess->current_msgid_is_user_msg = msg->is_user_msg;
-
-			/* Multiline messages (from draft/multiline batches) have embedded
-			 * \n in the saved text.  Wrap with multiline group so fe_print_text
-			 * keeps them as a single entry instead of splitting. */
-			{
-				const char *display_text = msg->text;
-				char *stripped = NULL;
-				gboolean has_nl;
-
-				if (prefs.hex_text_stripcolor_replay)
-				{
-					stripped = strip_color (msg->text, -1, STRIP_COLOR);
-					display_text = stripped;
-				}
-
-				/* Interior newline only: every stored row ends with the
-				 * format_event '\n' terminator, which is not multiline. */
-				has_nl = text_has_interior_newline (display_text);
-				if (has_nl)
-					fe_begin_multiline_group (sess);
-				/* Phase 4: set DB rowid so entry_id matches for virtual scrollback */
-				fe_set_pending_db_rowid (sess, msg->id);
-				fe_print_text (sess, (char *)display_text, msg->timestamp, TRUE);
-				if (has_nl)
-					fe_end_multiline_group (sess);
-				g_free (stripped);
-			}
-
-			/* Apply visual redaction if this message was redacted */
-			if (msg->redacted_by && msg->msgid)
-				fe_redact_message (sess, msg->msgid, msg->redacted_by,
-				                   msg->redact_reason, msg->redact_time);
-		}
-
-		/* Track msgid+timestamp for deduplication with CHATHISTORY */
-		if (msg->msgid && msg->msgid[0] &&
-		    strncmp (msg->msgid, "pending:", 8) != 0)
-			chathistory_track_msgid_ts (sess, msg->msgid, msg->timestamp, TRUE);
-
-		/* Track newest time for the "Loaded log from" message */
-		if (msg->timestamp > newest_time)
-			newest_time = msg->timestamp;
-
-		lines++;
-	}
-
-	poxchat_timing_log ("scrollback_load %s: print %d lines %.1f ms", sess->channel,
-	                    lines, (g_get_monotonic_time () - t_step) / 1000.0);
-
 	/* Get msgid tracking info from database */
-	t_step = g_get_monotonic_time ();
 	sess->scrollback_newest_msgid = scrollback_get_newest_msgid (db, sess->channel);
 	sess->scrollback_oldest_msgid = scrollback_get_oldest_msgid (db, sess->channel);
 	sess->scrollback_newest_time = scrollback_get_newest_time (db, sess->channel);
-	poxchat_timing_log ("scrollback_load %s: msgid queries %.1f ms", sess->channel,
-	                    (g_get_monotonic_time () - t_step) / 1000.0);
 
 	if (prefs.hex_irc_gapfill && prefs.hex_irc_gapfill_bootstrap_hours > 0)
 	{
@@ -497,62 +542,40 @@ scrollback_load (session *sess)
 		sess->oldest_msgid = g_strdup (sess->scrollback_oldest_msgid);
 	}
 
-	scrollback_msg_list_free (messages);
-
-	/* Re-attach persisted reactions and reply contexts to loaded entries */
-	t_step = g_get_monotonic_time ();
-	if (lines > 0)
-	{
-		GSList *reactions = scrollback_load_reactions (db, sess->channel);
-		GSList *replies = scrollback_load_replies (db, sess->channel);
-		GSList *iter;
-
-		for (iter = reactions; iter; iter = iter->next)
-		{
-			scrollback_reaction *r = iter->data;
-			fe_reaction_received (sess, r->target_msgid, r->reaction_text,
-			                      r->nick, r->is_self);
-		}
-
-		for (iter = replies; iter; iter = iter->next)
-		{
-			scrollback_reply *rp = iter->data;
-			/* fe_reply_context_set works on the last entry, but we need
-			 * to target a specific entry by its msgid. Use direct fe call. */
-			fe_scrollback_reply_attach (sess, rp->msgid, rp->target_msgid,
-			                            rp->target_nick, rp->target_preview);
-		}
-
-		scrollback_reaction_list_free (reactions);
-		scrollback_reply_list_free (replies);
-
-		/* Recalculate total line count after adding extra lines */
-		fe_scrollback_extras_done (sess);
-	}
-	poxchat_timing_log ("scrollback_load %s: extras %.1f ms", sess->channel,
-	                    (g_get_monotonic_time () - t_step) / 1000.0);
-
 	/* Always enable virtual scrollback when a DB exists — this allows
 	 * scrolling back through unlimited history stored in SQLite.
 	 * The materialization window (~500 entries) keeps memory bounded
 	 * while the DB provides the full history on demand.
 	 * Enable even for empty DBs (fresh channels) so entries saved
-	 * later get proper virtual tracking from the start. */
-	t_step = g_get_monotonic_time ();
+	 * later get proper virtual tracking from the start.
+	 * This has to stay synchronous even though nothing is materialized
+	 * yet: a line printed between here and the fill is positioned by the
+	 * virtual bookkeeping, and without it the buffer would be an ordinary
+	 * one that the fill could not page into. */
+	total = scrollback_count (db, sess->channel);
+	max_id = scrollback_get_max_rowid (db, sess->channel);
+	fe_scrollback_set_virtual (sess, db, sess->channel, total, max_id);
+	sess->scrollback_virtual_set = TRUE;
+	scrollback_fts_schedule (db, sess->channel);
+
+	/* Hand the rows to the idle filler.  scrollback_mark_rowid freezes the
+	 * tail as it is right now, so the replay separator can be placed after
+	 * it even if live lines arrive first.  Dedup does not need the rows:
+	 * chathistory_is_duplicate_msgid falls back to an indexed DB lookup
+	 * (scrollback_session_has_msgid) whenever the tracker misses. */
+	if (total > 0)
 	{
-		int total = scrollback_count (db, sess->channel);
-		gint64 max_id = scrollback_get_max_rowid (db, sess->channel);
-		fe_scrollback_set_virtual (sess, db, sess->channel, total, max_id);
-		sess->scrollback_virtual_set = TRUE;
-		scrollback_fts_schedule (db, sess->channel);
+		sess->scrollback_mark_rowid = max_id;
+		sess->scrollback_fill_pending = 1;
+		scrollback_fill_enqueue (sess);
 	}
-	poxchat_timing_log ("scrollback_load %s: set_virtual %.1f ms; total %.1f ms",
-	                    sess->channel,
-	                    (g_get_monotonic_time () - t_step) / 1000.0,
+
+	poxchat_timing_log ("scrollback_load %s: state %.1f ms", sess->channel,
 	                    (g_get_monotonic_time () - t_total) / 1000.0);
 
-	if (lines)
+	if (total > 0 && sess->scrollback_newest_time > 0)
 	{
+		time_t newest_time = sess->scrollback_newest_time;
 		char *text = ctime (&newest_time);
 		/* ctime() returns trailing \n, strip it */
 		char *buf = g_strdup_printf ("%s %s", _("Loaded log from"), text);

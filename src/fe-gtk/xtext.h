@@ -525,6 +525,7 @@ void gtk_xtext_refresh_gap_markers (xtext_buffer *buf, gint64 answered_gap_id);
 void gtk_xtext_set_marker_from_timestamp (xtext_buffer *buf, time_t timestamp);
 void gtk_xtext_check_marker_visibility(GtkXText *xtext);
 void gtk_xtext_set_marker_last (session *sess);
+void gtk_xtext_set_marker_at_rowid (xtext_buffer *buf, gint64 rowid);
 
 gboolean gtk_xtext_is_empty (xtext_buffer *buf);
 typedef void (*GtkXTextForeach) (GtkXText *xtext, unsigned char *text, void *data);
@@ -561,6 +562,9 @@ GType gtk_xtext_get_type (void);
 /* Virtual scrollback (Phase 2) */
 void gtk_xtext_buffer_set_virtual (xtext_buffer *buf, void *db, const char *channel,
                                     int total_entries, gint64 max_rowid);
+/* Materialize the newest window of stored rows (the deferred replay fill).
+ * Returns the number of entries gained. */
+int gtk_xtext_buffer_fill_tail (xtext_buffer *buf);
 
 /* IRCv3 modernization: entry identification (Phase 1) */
 textentry *gtk_xtext_find_by_msgid (xtext_buffer *buf, const char *msgid);

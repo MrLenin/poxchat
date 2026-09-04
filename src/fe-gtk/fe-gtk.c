@@ -2679,6 +2679,26 @@ fe_scrollback_set_virtual (session *sess, void *db, const char *channel,
 	gtk_xtext_buffer_set_virtual (sess->res->buffer, db, channel, total_entries, max_rowid);
 }
 
+int
+fe_scrollback_fill_tail (session *sess)
+{
+	if (!sess || !sess->res || !sess->res->buffer)
+		return 0;
+
+	/* Same reasoning as set_virtual: the session's own buffer, which is
+	 * not necessarily the displayed one. */
+	return gtk_xtext_buffer_fill_tail (sess->res->buffer);
+}
+
+void
+fe_scrollback_set_marker_rowid (session *sess, gint64 rowid)
+{
+	if (!sess || !sess->res || !sess->res->buffer)
+		return;
+
+	gtk_xtext_set_marker_at_rowid (sess->res->buffer, rowid);
+}
+
 void
 fe_set_pending_db_rowid (session *sess, gint64 rowid)
 {

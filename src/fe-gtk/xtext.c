@@ -11583,6 +11583,36 @@ gtk_xtext_set_marker_last (session *sess)
 	buf->marker_state = MARKER_IS_SET;
 }
 
+/* Place the replay separator on the newest stored row at or below rowid.
+ *
+ * set_marker_last cannot serve the deferred scrollback fill: by the time
+ * the rows are materialized the buffer's last entry may be a live line
+ * that arrived while the fill was queued, and the separator belongs
+ * before it.  rowid is the tail as it was when the tab was opened
+ * (session->scrollback_mark_rowid); DB-backed entries carry their rowid
+ * as entry_id, so the walk needs no DB access. */
+void
+gtk_xtext_set_marker_at_rowid (xtext_buffer *buf, gint64 rowid)
+{
+	textentry *ent;
+
+	if (!buf || rowid <= 0)
+		return;
+
+	for (ent = buf->text_last; ent; ent = ent->prev)
+	{
+		/* Chrome and other ephemerals have no DB ordinal to compare. */
+		if (!ent->has_db_row || XTEXT_ENT_IS_CHROME (ent))
+			continue;
+		if ((gint64) ent->entry_id <= rowid)
+		{
+			buf->marker_pos_id = ent->entry_id;
+			buf->marker_state = MARKER_IS_SET;
+			return;
+		}
+	}
+}
+
 void
 gtk_xtext_reset_marker_pos (GtkXText *xtext)
 {
@@ -12054,6 +12084,7 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	const char *tab;
 	int left_width;
 	const char *mtext;
+	char *stripped_text = NULL;
 
 	if (!msg->text || !msg->text[0] || !buf->xtext)
 		return NULL;
@@ -12072,6 +12103,18 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	if (buf->join_msgid && buf->join_banner_text && msg->msgid &&
 	    strcmp (msg->msgid, buf->join_msgid) == 0)
 		mtext = buf->join_banner_text;
+
+	/* "Strip colors when displaying scrollback": the eager replay in
+	 * scrollback_load applied this to the rows it printed, so with the
+	 * replay now materialized here it has to happen here too — otherwise
+	 * the pref silently stopped working.  It also makes rows paged in by
+	 * scrolling obey it, which they never did. */
+	if (prefs.hex_text_stripcolor_replay)
+	{
+		stripped_text = strip_color (mtext, -1, STRIP_COLOR);
+		if (stripped_text)
+			mtext = stripped_text;
+	}
 
 	text_len = (int)strlen (mtext);
 
@@ -12161,6 +12204,9 @@ gtk_xtext_virt_materialize_msg (xtext_buffer *buf, scrollback_msg *msg)
 	 * message auto-collapse-eligible. */
 	if (text_has_interior_newline (mtext))
 		ent->group_id = ent->entry_id;
+
+	/* Last use of mtext — the entry owns its own copy from here on. */
+	g_clear_pointer (&stripped_text, g_free);
 
 	/* Compute sublines */
 	ent->sublines = NULL;
@@ -12832,18 +12878,25 @@ recompute:
 	if (BUF_MAT_COUNT (buf) != old_mat_count || buf->mat_first_index != old_mat_first)
 	{
 		xtext_scroll_anchor er_anchor;
-
 		/* After a re-center the old coordinate space is gone (window and
 		 * lines_before_mat re-seeded); the anchor sampled pre-jump can't
 		 * be restored meaningfully.  The jump initiator (click re-place,
-		 * scroll_to_entry, search navigate) sets the value itself. */
-		if (!recentered)
+		 * scroll_to_entry, search navigate) sets the value itself.
+		 * The adjustment is shared with whatever buffer is on screen, and
+		 * restore_scroll_anchor_top writes it unconditionally — so an
+		 * inactive buffer (the deferred replay fill runs on background
+		 * tabs) must not save/restore at all, or it would scroll the tab
+		 * the user is actually looking at. */
+		gboolean anchor_ok = !recentered && buf->xtext && buf->xtext->adj &&
+		                     buf->xtext->buffer == buf;
+
+		if (anchor_ok)
 			gtk_xtext_save_scroll_anchor_top (buf, &er_anchor);
 
 		/* adjustment_set (via calc) blocks value-changed itself */
 		gtk_xtext_calc_lines_virtual_ex (buf, FALSE);
 
-		if (!recentered && buf->xtext && buf->xtext->adj)
+		if (anchor_ok)
 		{
 			if (buf->xtext->vc_signal_tag)
 				g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
@@ -12859,6 +12912,104 @@ recompute:
 	         BUF_MAT_COUNT (buf), buf->mat_first_index,
 	         (et_work - et0) / 1000.0,
 	         (g_get_monotonic_time () - et_work) / 1000.0);
+}
+
+/* Virtual scrollback: materialize the newest window on demand.
+ *
+ * scrollback_load () no longer prints the replay itself — it hooks the
+ * buffer up to the DB with nothing materialized and hands the rows to a
+ * deferred fill (see the deferred-fill block in text.c), so a ten-channel
+ * join burst does not serialize ten Pango passes on the GUI thread.  This
+ * is that fill: it asks the ordinary paging machinery for the tail, so
+ * there is exactly one path that turns stored rows into entries.
+ * Returns the number of entries the buffer gained.
+ *
+ * Radius: the eager replay materialized MIN (hex_text_max_lines, 150) of
+ * the newest rows.  centre = total_entries - 1 with radius = that count
+ * minus one asks ensure_range for exactly the same set (it clamps
+ * want_end to the last ordinal, so the window is want_start..last =
+ * radius + 1 entries).  VIRT_PAGE_SIZE is the eviction slack around a
+ * window, not a page size — using it here would quietly redefine the
+ * replay depth. */
+int
+gtk_xtext_buffer_fill_tail (xtext_buffer *buf)
+{
+	int radius, before, gained;
+	gboolean was_down;
+
+	if (!buf || !HAS_VIRT_DB (buf) || !buf->xtext)
+		return 0;
+
+	/* Rows stored between set_virtual and now (the JOIN row this tab's
+	 * banner attaches to, a live line, a catch-up batch) moved the ordinal
+	 * space, and ensure_range's prepend/append split is only sound on
+	 * exact values.  calc_lines_virtual_ex re-derives total_entries and
+	 * mat_first_index from the DB in its DB-authoritative block — the same
+	 * self-heal the chathistory gap-fill batches rely on. */
+	gtk_xtext_calc_lines_virtual_ex (buf, FALSE);
+
+	if (buf->total_entries <= 0)
+		return 0;
+
+	was_down = buf->scroll_anchor.anchor_to_bottom;
+	before = BUF_MAT_COUNT (buf);
+
+	radius = MIN (prefs.hex_text_max_lines, 150) - 1;
+	if (radius < 0)
+		radius = 0;
+
+	gtk_xtext_virt_ensure_range (buf, buf->total_entries - 1, radius);
+	gained = BUF_MAT_COUNT (buf) - before;
+
+	/* set_virtual ran against an empty buffer, so avg_lines_per_entry was
+	 * its no-samples fallback and lines_before_mat was seeded from that.
+	 * Re-derive both from the rows now in hand, exactly as virt_recenter
+	 * does after a discontinuous jump. */
+	{
+		int count = BUF_MAT_COUNT (buf);
+
+		if (count > 0)
+			buf->avg_lines_per_entry = (double) BUF_LINES_MAT (buf) / count;
+		buf->lines_before_mat = (int) (buf->mat_first_index * buf->avg_lines_per_entry);
+		if (buf->lines_before_mat < 0)
+			buf->lines_before_mat = 0;
+	}
+
+	/* Leave the view where the eager path left it: pinned to the newest
+	 * line.  Mirrors the tail of gtk_xtext_buffer_set_virtual, including
+	 * the blocked value-changed handler (the pre-fill value is far below
+	 * the new upper - page_size and would clear anchor_to_bottom). */
+	{
+		gboolean blocked = buf->xtext->adj && buf->xtext->vc_signal_tag != 0;
+
+		if (blocked)
+			g_signal_handler_block (buf->xtext->adj, buf->xtext->vc_signal_tag);
+
+		gtk_xtext_calc_lines_virtual_ex (buf, FALSE);
+
+		if (was_down)
+		{
+			buf->scroll_anchor.anchor_to_bottom = TRUE;
+			if (buf->xtext->buffer == buf && buf->xtext->adj)
+			{
+				gdouble upper = gtk_adjustment_get_upper (buf->xtext->adj);
+				gdouble page = gtk_adjustment_get_page_size (buf->xtext->adj);
+				gdouble bottom = upper - page;
+
+				if (bottom < 0)
+					bottom = 0;
+				gtk_adjustment_set_value (buf->xtext->adj, bottom);
+			}
+		}
+
+		if (blocked)
+			g_signal_handler_unblock (buf->xtext->adj, buf->xtext->vc_signal_tag);
+	}
+
+	if (buf->xtext->buffer == buf)
+		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
+
+	return gained;
 }
 
 /* Virtual scrollback: decide whether an entry should be materialized into

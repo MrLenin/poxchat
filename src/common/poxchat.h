@@ -492,6 +492,8 @@ typedef struct session
 	time_t markread_time;		/* parsed MARKREAD timestamp as time_t (for local comparison) */
 	time_t scrollback_newest_time;	/* newest timestamp from loaded scrollback */
 	unsigned int scrollback_virtual_set:1;	/* virtual mode already enabled for this session */
+	unsigned int scrollback_fill_pending:1;	/* newest rows not materialized yet — queued for the deferred fill */
+	gint64 scrollback_mark_rowid;	/* newest stored rowid when this tab was opened; anchors the replay separator */
 	char *scrollback_oldest_msgid;	/* oldest msgid from loaded scrollback (for BEFORE) */
 	char *scrollback_newest_msgid;	/* newest msgid from loaded scrollback (for AFTER) */
 	char *current_msgid;	/* temporary: msgid of message being processed (owned copy) */

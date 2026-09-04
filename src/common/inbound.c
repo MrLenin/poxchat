@@ -758,9 +758,10 @@ inbound_ujoin (server *serv, char *chan, char *nick, char *ip,
 		 * contents, and foreign pre-join entries would misalign it (and
 		 * linger in the entry hashes). */
 		fe_text_clear (sess, 0);
+		/* State only; the rows (and the replay separator) come from the
+		 * deferred fill.  The clear above leaves the buffer empty, which
+		 * is exactly what the fill expects to page into. */
 		scrollback_load (sess);
-		if (sess->scrollwritten && sess->scrollback_replay_marklast)
-			sess->scrollback_replay_marklast (sess);
 	}
 
 	fe_set_channel (sess);

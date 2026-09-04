@@ -549,9 +549,10 @@ new_ircwindow (server *serv, char *name, int type, int focus)
 
 	irc_init (sess);
 	chanopt_load (sess);
+	/* State only — the stored rows are materialized by the deferred fill,
+	 * which also places the replay separator (it has to: the marker's row
+	 * is not in the buffer yet when this returns). */
 	scrollback_load (sess);
-	if (sess->scrollwritten && sess->scrollback_replay_marklast)
-		sess->scrollback_replay_marklast (sess);
 	if (type == SESS_DIALOG)
 	{
 		struct User *user;

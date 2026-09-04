@@ -239,6 +239,13 @@ void fe_scrollback_reply_attach (struct session *sess, const char *entry_msgid,
 void fe_scrollback_extras_done (struct session *sess);
 void fe_scrollback_set_virtual (struct session *sess, void *db, const char *channel,
                                 int total_entries, gint64 max_rowid);
+/* Materialize the newest window of stored rows into the session's buffer,
+ * through the same on-demand paging that serves scrolling.  Returns the
+ * number of entries the buffer gained. */
+int fe_scrollback_fill_tail (struct session *sess);
+/* Put the replay separator on the newest stored row at or below rowid —
+ * the tail as it was when the tab opened, not as it is after the fill. */
+void fe_scrollback_set_marker_rowid (struct session *sess, gint64 rowid);
 void fe_set_pending_db_rowid (struct session *sess, gint64 rowid);
 /* The session's current join: the stored row with this msgid is drawn as
  * banner_text (the self-join event) instead of its stored JOIN text, so the

@@ -1090,6 +1090,11 @@ mg_populate (session *sess)
 	if (vis != gui->ul_hidden && gtk_widget_get_width (gui->user_box) > 1)
 		render = FALSE;
 
+	/* The tab about to be shown must not appear half empty: if its
+	 * scrollback tail is still sitting in the deferred-fill queue,
+	 * materialize it now, before the buffer is mounted. */
+	scrollback_fill_now (sess);
+
 	gtk_xtext_buffer_show (GTK_XTEXT (gui->xtext), res->buffer, render);
 
 	/* Update typing indicator strip and reply state for this tab */

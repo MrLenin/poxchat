@@ -39,6 +39,9 @@ struct text_event
 
 void scrollback_close (session *sess);
 void scrollback_load (session *sess);
+/* Materialize a session's deferred scrollback tail right now (no-op unless
+ * scrollback_load left it queued).  Call before a tab becomes visible. */
+void scrollback_fill_now (session *sess);
 
 /* IRCv3 reactions/replies scrollback persistence */
 void scrollback_save_reaction_for_session (session *sess, const char *target_msgid,
