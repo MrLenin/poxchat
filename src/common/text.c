@@ -429,6 +429,10 @@ scrollback_fill_run (session *sess)
 	                    entries, (g_get_monotonic_time () - t0) / 1000.0);
 }
 
+/* Gap between two tab fills: one frame, so the tab strip and the current
+ * tab repaint between them. */
+#define SCROLLBACK_FILL_INTERVAL_MS 16
+
 static gboolean
 scrollback_fill_idle_cb (gpointer data)
 {
@@ -470,9 +474,16 @@ scrollback_fill_enqueue (session *sess)
 	if (!g_queue_find (scrollback_fill_queue, sess))
 		g_queue_push_tail (scrollback_fill_queue, sess);
 
+	/* Not an idle source: GTK paints at GDK_PRIORITY_REDRAW, which outranks
+	 * G_PRIORITY_DEFAULT_IDLE, so any frame-clock animation (the tab
+	 * strip's activity pulse after a join burst, for one) starves idles
+	 * for as long as it runs — the fills sat for 4.6 s behind it.  A
+	 * default-priority timer runs ahead of paint; the interval leaves one
+	 * frame between fills so the display keeps up. */
 	if (!scrollback_fill_tag)
-		scrollback_fill_tag = g_idle_add_full (G_PRIORITY_DEFAULT_IDLE,
-		                                       scrollback_fill_idle_cb, NULL, NULL);
+		scrollback_fill_tag = g_timeout_add_full (G_PRIORITY_DEFAULT,
+		                                          SCROLLBACK_FILL_INTERVAL_MS,
+		                                          scrollback_fill_idle_cb, NULL, NULL);
 }
 
 void

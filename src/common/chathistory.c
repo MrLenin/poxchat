@@ -2010,8 +2010,14 @@ process_chunk_messages (chathistory_chunk_state *chunk)
 	chunk->remaining = iter;
 }
 
-/* Idle callback for chunked batch processing.  Fires at G_PRIORITY_DEFAULT_IDLE
- * (lower than socket I/O), so NAMES/WHO responses interleave between chunks. */
+/* Chunk-at-a-time batch processing.  Scheduled as a short default-priority
+ * timer rather than an idle: GTK paints at GDK_PRIORITY_REDRAW, above
+ * G_PRIORITY_DEFAULT_IDLE, so a frame-clock animation (the tab strip's
+ * activity pulse right after a join burst) starved the idle version for
+ * seconds.  One frame between chunks keeps the display and the socket
+ * (same priority) interleaving between them. */
+#define CHATHISTORY_CHUNK_INTERVAL_MS 16
+
 static gboolean
 chunk_idle_cb (gpointer data)
 {
@@ -2388,10 +2394,13 @@ chathistory_process_batch (server *serv, batch_info *batch)
 
 		sess->chunk_state = chunk;
 
-		/* Defer ALL processing to idle — this lets the socket read handler
-		 * return quickly so WHO replies and GTK renders can interleave
-		 * between chunks instead of being blocked by inline processing. */
-		chunk->idle_tag = g_idle_add (chunk_idle_cb, chunk);
+		/* Defer ALL processing off the socket read handler so WHO replies
+		 * and GTK renders interleave between chunks instead of being
+		 * blocked by inline processing (see chunk_idle_cb for why this is
+		 * a timer and not an idle). */
+		chunk->idle_tag = g_timeout_add_full (G_PRIORITY_DEFAULT,
+		                                      CHATHISTORY_CHUNK_INTERVAL_MS,
+		                                      chunk_idle_cb, chunk, NULL);
 	}
 }
 
